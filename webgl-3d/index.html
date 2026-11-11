@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#05080f" />
+    <title>Mountain Tycoon</title>
+    <script>
+      // Nach einem Update kann eine zwischengespeicherte Startseite auf Skripte zeigen, die es nicht
+      // mehr gibt. Dann einmal frisch laden, statt eine leere Seite zu zeigen.
+      window.addEventListener('error', function (e) {
+        var t = e && e.target;
+        if (!t || (t.tagName !== 'SCRIPT' && t.tagName !== 'LINK')) return;
+        if (t.tagName === 'LINK' && !/stylesheet|modulepreload/.test(t.rel || '')) return;
+        try {
+          if (sessionStorage.getItem('mt.assetReload')) return;
+          sessionStorage.setItem('mt.assetReload', '1');
+        } catch (err) { return; }
+        fetch(location.pathname || '/', { cache: 'reload' }).catch(function () {}).then(function () { location.reload(); });
+      }, true);
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

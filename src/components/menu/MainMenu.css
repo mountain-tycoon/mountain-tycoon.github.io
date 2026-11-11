@@ -1,0 +1,530 @@
+/* ===== Hauptmenü ===== */
+.mm-root {
+    position: fixed;
+    inset: 0;
+    overflow-y: auto;
+    background: linear-gradient(180deg, #0c1a30 0%, #16324f 45%, #2a5578 100%);
+    color: #f1f5f9;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.mm-bg {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.mm-mountains {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 42vh;
+}
+
+.mm-mountains-far {
+    background:
+        linear-gradient(115deg, transparent 44%, rgba(148, 180, 212, 0.35) 44.5%, rgba(148, 180, 212, 0.35) 55%, transparent 55.5%),
+        linear-gradient(245deg, transparent 34%, rgba(120, 156, 194, 0.3) 34.5%, rgba(120, 156, 194, 0.3) 52%, transparent 52.5%);
+    opacity: 0.8;
+}
+
+.mm-mountains-near {
+    background:
+        linear-gradient(125deg, transparent 40%, rgba(214, 230, 244, 0.5) 40.5%, rgba(214, 230, 244, 0.5) 50%, transparent 50.5%),
+        linear-gradient(235deg, transparent 30%, rgba(190, 212, 232, 0.45) 30.5%, rgba(190, 212, 232, 0.45) 46%, transparent 46.5%);
+    height: 30vh;
+}
+
+@keyframes mm-snow {
+    0% { background-position: 0 0, 0 0, 0 0; }
+    100% { background-position: 40px 600px, -60px 480px, 80px 720px; }
+}
+
+.mm-snowfall {
+    position: absolute;
+    inset: 0;
+    background-image:
+        radial-gradient(2px 2px at 20px 30px, rgba(255,255,255,0.8), transparent),
+        radial-gradient(1.6px 1.6px at 120px 90px, rgba(255,255,255,0.6), transparent),
+        radial-gradient(1.2px 1.2px at 60px 150px, rgba(255,255,255,0.5), transparent);
+    background-size: 180px 180px, 240px 240px, 200px 200px;
+    animation: mm-snow 22s linear infinite;
+    opacity: 0.7;
+}
+
+.mm-content {
+    position: relative;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 24px 60px;
+}
+
+.mm-header { text-align: center; margin-bottom: 28px; }
+
+.mm-title {
+    font-size: 64px;
+    letter-spacing: 14px;
+    margin: 0;
+    font-weight: 800;
+    background: linear-gradient(180deg, #ffffff 30%, #a8c8e8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: 0 8px 40px rgba(120, 180, 255, 0.25);
+}
+
+.mm-subtitle {
+    margin: 6px 0 0;
+    color: #9db8d4;
+    font-size: 17px;
+    letter-spacing: 2px;
+}
+
+.mm-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 26px;
+}
+
+.mm-tab {
+    padding: 12px 30px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    color: #cbd5e1;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.mm-tab:hover { background: rgba(255, 255, 255, 0.12); }
+
+.mm-tab.active {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    border-color: #60a5fa;
+    color: #fff;
+    box-shadow: 0 4px 24px rgba(59, 130, 246, 0.4);
+}
+
+/* ===== Kampagne ===== */
+.mm-campaign {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 22px;
+    align-items: start;
+}
+
+.mm-level-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 14px;
+}
+
+.mm-level-card {
+    position: relative;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(15, 30, 52, 0.75);
+    padding: 0;
+    overflow: hidden;
+    text-align: center;
+    color: #e2e8f0;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+
+.mm-level-card:hover:not(.locked) {
+    transform: translateY(-3px);
+    border-color: #60a5fa;
+    box-shadow: 0 10px 30px rgba(37, 99, 235, 0.3);
+}
+
+.mm-level-card.selected {
+    border-color: #3b82f6;
+    background: rgba(30, 58, 96, 0.9);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.mm-level-card.locked {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.7);
+}
+
+.mm-level-card.completed { border-color: rgba(34, 197, 94, 0.6); }
+
+.mm-level-flag { font-size: 34px; margin-bottom: 6px; }
+.mm-level-number { font-size: 11px; text-transform: uppercase; letter-spacing: 1.5px; color: #7f9cbd; }
+.mm-level-name { font-weight: 700; font-size: 16px; margin-top: 2px; }
+.mm-level-country { font-size: 12px; color: #94a3b8; }
+
+.mm-level-check {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #4ade80;
+    font-weight: 600;
+}
+
+.mm-level-detail {
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(10, 22, 40, 0.85);
+    padding: 24px;
+    backdrop-filter: blur(8px);
+}
+
+.mm-detail-empty {
+    color: #94a3b8;
+    text-align: center;
+    padding: 60px 24px;
+}
+
+.mm-hint { font-size: 13px; color: #64748b; }
+
+.mm-detail-header {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.mm-detail-flag { font-size: 44px; }
+.mm-detail-header h2 { margin: 0; font-size: 24px; }
+.mm-detail-country { color: #7f9cbd; font-weight: 400; font-size: 16px; }
+.mm-detail-tagline { margin: 2px 0 0; color: #93c5fd; font-size: 14px; }
+.mm-detail-desc { color: #cbd5e1; line-height: 1.55; font-size: 14px; }
+
+.mm-detail-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 14px 0;
+    font-size: 13px;
+    color: #a5b8ce;
+}
+
+.mm-detail-facts span {
+    background: rgba(255, 255, 255, 0.07);
+    padding: 6px 12px;
+    border-radius: 999px;
+}
+
+.mm-detail-objectives h3 {
+    margin: 10px 0 8px;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #7f9cbd;
+}
+
+.mm-detail-objectives ul {
+    margin: 0;
+    padding-left: 20px;
+    color: #e2e8f0;
+    font-size: 14px;
+    line-height: 1.8;
+}
+
+.mm-start-btn {
+    margin-top: 20px;
+    width: 100%;
+    padding: 15px;
+    font-size: 17px;
+    font-weight: 700;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    color: #fff;
+    background: linear-gradient(135deg, #16a34a, #22c55e);
+    box-shadow: 0 6px 24px rgba(34, 197, 94, 0.35);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.mm-start-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 32px rgba(34, 197, 94, 0.5);
+}
+
+/* ===== Sandbox ===== */
+.mm-sandbox {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+}
+
+.mm-sandbox-col {
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(10, 22, 40, 0.85);
+    padding: 20px;
+}
+
+.mm-sandbox-col h3 {
+    margin: 0 0 16px;
+    font-size: 15px;
+    letter-spacing: 1px;
+    color: #93c5fd;
+}
+
+.mm-slider-row { margin-bottom: 14px; }
+
+.mm-slider-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: #cbd5e1;
+    margin-bottom: 5px;
+}
+
+.mm-slider-value { color: #7dd3fc; font-weight: 600; }
+
+.mm-slider-row input[type='range'] {
+    width: 100%;
+    accent-color: #3b82f6;
+}
+
+.mm-forest-buttons { display: flex; gap: 8px; }
+
+.mm-mini-btn {
+    flex: 1;
+    padding: 8px 6px;
+    font-size: 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.06);
+    color: #cbd5e1;
+    cursor: pointer;
+}
+
+.mm-mini-btn.active {
+    background: #2563eb;
+    border-color: #60a5fa;
+    color: #fff;
+}
+
+.mm-sandbox-info {
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.5;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 12px;
+    margin-top: 8px;
+}
+
+.mm-footer {
+    margin-top: 40px;
+    text-align: center;
+    color: #4c6684;
+    font-size: 12px;
+    letter-spacing: 1px;
+}
+
+@media (max-width: 900px) {
+    .mm-campaign { grid-template-columns: 1fr; }
+    .mm-title { font-size: 42px; letter-spacing: 8px; }
+}
+
+
+/* ===== Mottobilder & Karten-Header ===== */
+.mm-level-art {
+    position: relative;
+    line-height: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.mm-level-flag-badge {
+    position: absolute;
+    top: 6px;
+    left: 7px;
+    font-size: 19px;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
+}
+
+.mm-level-alt-badge {
+    position: absolute;
+    bottom: 5px;
+    right: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #e8f2ff;
+    background: rgba(2, 6, 23, 0.6);
+    padding: 2px 7px;
+    border-radius: 999px;
+    letter-spacing: 0.3px;
+}
+
+.mm-level-body {
+    padding: 9px 10px 12px;
+}
+
+/* Hover-Schnellinfo */
+.mm-level-tip {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    z-index: 5;
+    background: rgba(2, 6, 23, 0.95);
+    border: 1px solid rgba(125, 211, 252, 0.3);
+    border-radius: 9px;
+    padding: 8px 9px;
+    text-align: left;
+    font-size: 11px;
+    color: #cbd5e1;
+    pointer-events: none;
+    animation: mm-tip-in 0.14s ease-out;
+}
+
+@keyframes mm-tip-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.mm-level-tip strong {
+    display: block;
+    color: #93c5fd;
+    font-size: 11px;
+    margin-bottom: 5px;
+    line-height: 1.3;
+}
+
+.mm-tip-rows {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px 6px;
+    font-size: 10px;
+    color: #a5b8ce;
+}
+
+/* Detail-Panel mit Mottobild */
+.mm-detail-art {
+    position: relative;
+    margin: -24px -24px 14px;
+    line-height: 0;
+    border-radius: 16px 16px 0 0;
+    overflow: hidden;
+}
+
+.mm-detail-art-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    padding: 26px 18px 12px;
+    background: linear-gradient(180deg, transparent, rgba(2, 6, 23, 0.88));
+    text-align: left;
+    line-height: 1.25;
+}
+
+.mm-detail-art-overlay h2 {
+    margin: 0;
+    font-size: 22px;
+    color: #fff;
+}
+
+.mm-detail-art-overlay .mm-detail-country {
+    margin: 2px 0 0;
+    font-size: 12px;
+    color: #9db8d4;
+}
+
+/* Sehenswürdigkeiten */
+.mm-sights {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+}
+
+.mm-sight {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 11px;
+}
+
+.mm-sight-icon {
+    font-size: 14px;
+    color: #fbbf24;
+}
+
+.mm-sight strong {
+    display: block;
+    color: #e2e8f0;
+    font-size: 11.5px;
+}
+
+.mm-sight em {
+    font-style: normal;
+    color: #8ba3bd;
+    font-size: 10px;
+}
+
+/* ===== Cartoon-Szene (Gondeln, Pistenraupe, Skifahrer) ===== */
+.mm-scene {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 46vh;
+    min-height: 240px;
+    opacity: 0.92;
+}
+
+@keyframes mm-ride {
+    from { transform: translate(60px, 118px); }
+    to   { transform: translate(1140px, 50px); }
+}
+
+.mm-gondola {
+    animation: mm-ride 26s linear infinite;
+}
+
+.mm-gondola-2 {
+    animation: mm-ride 26s linear infinite;
+    animation-delay: -13s;
+}
+
+@keyframes mm-groom {
+    0%   { transform: translate(1190px, 208px) scaleX(1); }
+    48%  { transform: translate(120px, 232px) scaleX(1); }
+    52%  { transform: translate(120px, 232px) scaleX(-1); }
+    100% { transform: translate(1190px, 208px) scaleX(-1); }
+}
+
+.mm-groomer {
+    animation: mm-groom 34s ease-in-out infinite;
+}
+
+@keyframes mm-ski {
+    0%   { transform: translate(1150px, 168px) rotate(6deg); }
+    25%  { transform: translate(820px, 196px) rotate(-7deg); }
+    50%  { transform: translate(540px, 206px) rotate(7deg); }
+    75%  { transform: translate(250px, 220px) rotate(-6deg); }
+    100% { transform: translate(-40px, 236px) rotate(5deg); }
+}
+
+.mm-skier {
+    animation: mm-ski 13s ease-in-out infinite;
+}
+
+.mm-skier-2 {
+    animation: mm-ski 13s ease-in-out infinite;
+    animation-delay: -6.5s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mm-gondola, .mm-gondola-2, .mm-groomer, .mm-skier, .mm-skier-2, .mm-snowfall {
+        animation: none;
+    }
+}

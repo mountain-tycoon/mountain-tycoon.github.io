@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mountain-tycoon",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "webgl-3d", "run", "dev"],
+      "port": 5180
+    },
+    {
+      "name": "mountain-tycoon-auth",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "cd webgl-3d/worker && exec npx --yes wrangler dev --port 8787"],
+      "port": 8787
+    },
+    {
+      "name": "classic-2d",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 7777
+    }
+  ]
+}

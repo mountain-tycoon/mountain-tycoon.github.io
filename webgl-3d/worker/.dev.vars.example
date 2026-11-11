@@ -1,0 +1,4 @@
+# Vorlage für lokale Tests des Anmeldeservers (npx wrangler dev).
+# Nach ".dev.vars" kopieren und eigene Werte eintragen – ".dev.vars" wird nicht eingecheckt.
+ADMIN_EMAILS=admin@example.test
+ADMIN_PASSWORD=hier-ein-eigenes-testpasswort

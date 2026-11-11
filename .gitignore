@@ -1,0 +1,44 @@
+# Abhängigkeiten und Build-Ergebnisse
+node_modules
+dist
+dist-ssr
+*.local
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor- und Systemdateien
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Anmeldeserver: lokale Testwerte und Wrangler-Zustand – nie einchecken
+.dev.vars
+.wrangler/
+
+# Alte Sicherungskopien von Hand (die Versionsgeschichte übernimmt jetzt git)
+*.bak*
+*.broken
+*.fixed
+*.v1_clean
+*.backup_*
+.opt-backup/
+
+# Einmal-Skript von früher mit rechnerabhängigen Pfaden
+fix_garage.py
+
+# Liegt nur zufällig im selben Ordner und gehört nicht zum Spiel
+/flair-mri-analyzer/
+/Manuscript_Figures/

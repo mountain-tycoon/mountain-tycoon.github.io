@@ -1,0 +1,51 @@
+========================================
+  SKI-TYCOON 3D  –  Dev-Server starten
+========================================
+
+WICHTIG: Nach Code-Änderungen den Server KOMPLETT neu starten
+(nur Browser-Reload reicht oft nicht, weil Vite Änderungen im
+gemounteten Ordner manchmal nicht bemerkt).
+
+
+--- SO GEHT'S ---
+
+1. Terminal öffnen.
+
+2. In den Spielordner wechseln – das ist der Ordner "webgl-3d", in dem diese
+   Datei liegt. Am einfachsten: "cd " tippen (mit Leerzeichen), dann den Ordner
+   aus dem Finder ins Terminal ziehen und Enter drücken. Oder vom Projektordner aus:
+
+   cd webgl-3d
+
+3. Falls schon ein Server läuft: mit  Strg + C  (Mac: Ctrl + C) beenden.
+
+4. Server starten:
+
+   npm run dev
+
+5. Im Terminal erscheint eine Adresse, z. B.:
+
+   ➜  Local:   http://localhost:5180/
+
+   Diese Adresse im Browser öffnen (oder anklicken).
+
+
+--- BEIM ALLERERSTEN MAL / nach Fehlern ---
+
+Falls "vite: command not found" o. Ä. kommt, einmal die Pakete installieren:
+
+   npm install
+
+...danach wieder  npm run dev.
+
+
+--- KOMPLETT NEU STARTEN (wenn Änderungen nicht ankommen) ---
+
+Im laufenden Terminal:
+
+   Strg + C          (Server stoppen)
+   npm run dev       (neu starten)
+
+Danach im Browser einmal hart neu laden:
+   Mac:  Cmd + Shift + R
+   Win:  Strg + Shift + R

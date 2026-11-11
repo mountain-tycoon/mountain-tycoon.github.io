@@ -1,0 +1,65 @@
+# Baut das Spiel (webgl-3d) und veröffentlicht es auf GitHub Pages.
+# - Push auf main  → bauen und veröffentlichen (nach ein bis zwei Minuten live)
+# - Pull Request   → nur bauen (zeigt, ob die Änderung fehlerfrei durchläuft)
+# Einmalig nötig: Settings → Pages → Build and deployment → Source: „GitHub Actions".
+name: Bauen und veröffentlichen
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Spiel bauen
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: webgl-3d
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: webgl-3d/package-lock.json
+
+      - name: Abhängigkeiten installieren
+        run: npm ci --no-audit --no-fund
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Bauen
+        run: npm run build
+
+      - name: Build-Stempel anzeigen
+        run: echo "Build $(cat dist/version.txt)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Seite für GitHub Pages bereitstellen
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: webgl-3d/dist
+
+  deploy:
+    name: Veröffentlichen
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,19 @@
+name = "mountain-tycoon-auth"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# KV-Namensraum für Konten, Anmeldungen und Fortschritt.
+# Einmalig anlegen mit:  npx wrangler kv namespace create KV   – die ausgegebene id hier eintragen.
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000000000000000000000000000"
+
+[vars]
+# Seiten, die den Anmeldeserver benutzen dürfen (durch Komma getrennt).
+ALLOWED_ORIGINS = "https://mountain-tycoon.github.io,http://localhost:5180,http://localhost:4173"
+# "0" = der Admin schaltet neue Konten frei (wie bei Interventional Lab), "1" = sofort freigeschaltet.
+AUTO_APPROVE = "0"
+
+# ADMIN_EMAILS (durch Komma getrennt) und ADMIN_PASSWORD sind Secrets und stehen nie im Repo:
+#   npx wrangler secret put ADMIN_EMAILS
+#   npx wrangler secret put ADMIN_PASSWORD
