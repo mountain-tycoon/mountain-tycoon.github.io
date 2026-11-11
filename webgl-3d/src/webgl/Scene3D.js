@@ -4,7 +4,7 @@
 // mit gelände-folgender Gondelbahn, animierte Details.
 // ============================================================
 import * as THREE from 'three';
-import { buildTerrainMesh, buildForest, buildRocks, buildLakeMesh, buildGlacier, buildTerrainApron, buildApronForest, buildValleyHaze, buildApronLights, buildEdgeShade, FOREST_MIX_TABLE, snowLayer } from './TerrainMesh.js';
+import { buildTerrainMesh, buildForest, buildRocks, buildLakeMesh, buildGlacier, buildTerrainApron, buildApronForest, buildValleyHaze, buildApronLights, buildEdgeShade, FOREST_MIX_TABLE, snowLayer, apronHeight } from './TerrainMesh.js';
 import { MATS, makeChalet, makeHotel, makeRestaurant, makeTicketOffice, makeLift, makeChairlift, makeChairlift2, makeChairlift6, makePlatterLift, makeMagicCarpet, makeSurfaceLift, makeAerialTram, makeAerialTramXL, makeGondola8, makeGondola4, makeMegaGondola, makeVillage, makeParking, makeParkingGarage, makeSnowCannon, makeFunpark, makeSummitCross, makeBench, makeSignpost, makeTextSprite, makeFloodlight, findTopPeaks, makeSkiSchool, makeSkiRental, makeShop, makeImbiss, makeBusStop, makeSnowcatGarage, makeToilet, makeRunDressing, makeHalfpipeShell,
     makeHotelClass, HOTEL_BEDS, makeChaletClass, makeGastro, makeMedicalStation, makeHospital, makeWorkshop,
     makeReservoir, makeBigReservoir, makeKicker, makeHalfpipe, makeRaceCourse, makeApresSkiBar, makePartyTent, makeDisco, makeSauna, makeThermalBath, makeIceRink,
@@ -52,16 +52,73 @@ const ROCK_STYLES = {
     japan:        { base: [0.40,0.35,0.34], v: 0.13, shape: 'octa',   size: 0.85, sizeV: 0.55, rough: 1.0 }
 };
 
-function attachOrbit(camera, dom, target, span = 300) {
+/**
+ * Freie Orbit-Kamera. Der Drehpunkt liegt immer auf der Oberfläche und folgt
+ * ihr weich; die Kamera selbst bleibt immer ÜBER der Schneedecke. Man kann
+ * also weder in den Berg noch unter die Landschaft zoomen, schwenken oder fahren.
+ *
+ * opts.groundAt(wx, wz)  Höhe der Oberfläche an einem Weltpunkt (Karte + Umland)
+ * opts.solidAt(wx, wz)   wie groundAt, zusätzlich mit allem Festen darüber (Felsblöcke)
+ * opts.bound             der Drehpunkt bleibt innerhalb ±bound (Kartenrand)
+ * opts.maxRadius         so weit darf die Kamera seitlich vom Kartenmittelpunkt weg –
+ *                        sie bleibt damit VOR der Bergkulisse und fliegt nicht hindurch
+ */
+function attachOrbit(camera, dom, target, span = 300, opts = {}) {
+    const groundAt = opts.groundAt || null;
+    const solidAt = opts.solidAt || groundAt;
+    const bound = opts.bound ?? Infinity;
+    const maxRadius = opts.maxRadius ?? Infinity;
     let az = Math.PI * 0.25, pol = Math.PI * 0.34, dist = span * 0.8;
-    const maxDist = span * 1.7, minDist = 12;
+    // 1.25 Kartenbreiten reichen für den Überblick über das ganze Gebiet; weiter
+    // draußen sähe man nur noch die Karte als Raute und die Kulisse als Ringe.
+    const maxDist = span * 1.25, minDist = 12;
+    let eff = dist;         // tatsächlich wirksamer Abstand (an der Kulisse gekappt)
     let dragging = false, panning = false, lx = 0, ly = 0;
     const minPol = 0.1, maxPol = Math.PI * 0.485;
+    const CLEAR = 1.6;      // so hoch bleibt die Kamera mindestens über der Oberfläche
+    const FEEL = 2.4;       // Umkreis, in dem die Oberfläche unter der Kamera abgetastet wird
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    // Der Drehpunkt schwebt knapp über dem Boden: nah dran fast auf der Schneedecke,
+    // im Überblick etwas höher (ruhigeres Bild).
+    const pivotY = () => groundAt(target.x, target.z) + clamp(Math.min(dist, eff) * 0.04, 1.2, span * 0.03);
+    // Höchste Stelle der Oberfläche rund um einen Punkt – die Hangseite zählt mit,
+    // sonst schneidet die Nahebene am Steilhang in den Schnee.
+    const floorAt = (x, z) => {
+        let h = solidAt(x, z);
+        for (let i = 0; i < 8; i++) {
+            const a = i * Math.PI / 4;
+            const g = solidAt(x + Math.cos(a) * FEEL, z + Math.sin(a) * FEEL);
+            if (g > h) h = g;
+        }
+        return h;
+    };
     const apply = () => {
+        if (groundAt) {
+            target.x = clamp(target.x, -bound, bound);
+            target.z = clamp(target.z, -bound, bound);
+        }
         const sp = Math.sin(pol), cp = Math.cos(pol);
-        camera.position.set(target.x + dist*sp*Math.sin(az), target.y + dist*cp, target.z + dist*sp*Math.cos(az));
+        const ux = sp * Math.sin(az), uz = sp * Math.cos(az);      // seitliche Richtung je Abstandseinheit
+        eff = dist;
+        if (maxRadius < Infinity) {
+            // größter Abstand e, bei dem die Kamera noch im Kreis bleibt: |Ziel + e·u| = maxRadius
+            const a = ux * ux + uz * uz;
+            if (a > 1e-9) {
+                const b = target.x * ux + target.z * uz;
+                const c = target.x * target.x + target.z * target.z - maxRadius * maxRadius;
+                const e = (-b + Math.sqrt(Math.max(0, b * b - a * c))) / a;
+                if (e < eff) eff = Math.max(minDist, e);
+            }
+        }
+        camera.position.set(target.x + eff * ux, target.y + eff * cp, target.z + eff * uz);
+        if (groundAt) {
+            // Bei der Schneedecke ist Schluss: die Kamera gleitet über die Oberfläche.
+            const floor = floorAt(camera.position.x, camera.position.z) + CLEAR;
+            if (camera.position.y < floor) camera.position.y = floor;
+        }
         camera.lookAt(target);
     };
+    if (groundAt) target.y = pivotY();
     dom.addEventListener('mousedown', (e) => { if (e.button===2||e.shiftKey) panning=true; else dragging=true; lx=e.clientX; ly=e.clientY; });
     window.addEventListener('mouseup', () => { dragging=false; panning=false; });
     window.addEventListener('mousemove', (e) => {
@@ -74,7 +131,8 @@ function attachOrbit(camera, dom, target, span = 300) {
             target.addScaledVector(fwd,dy*dist*0.0016); apply();
         }
     });
-    dom.addEventListener('wheel', (e) => { e.preventDefault(); dist=Math.max(minDist,Math.min(maxDist,dist*(1+e.deltaY*0.0011))); apply(); }, { passive:false });
+    // Zoomen geht immer vom wirksamen Abstand aus – sonst müsste man an der Kulisse erst „leer" zurückdrehen.
+    dom.addEventListener('wheel', (e) => { e.preventDefault(); dist=Math.max(minDist,Math.min(maxDist,Math.min(dist,eff)*(1+e.deltaY*0.0011))); apply(); }, { passive:false });
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     // Tastatur: Q/E drehen, WASD / Pfeile verschieben (gehalten = gleitend),
     // +/− zoomen. In Eingabefeldern bleibt die Tastatur unangetastet.
@@ -84,8 +142,8 @@ function attachOrbit(camera, dom, target, span = 300) {
         if (inInput(e)) return;
         const k = e.key.toLowerCase();
         if (k==='q'){az-=Math.PI/8;apply();} else if(k==='e'){az+=Math.PI/8;apply();}
-        else if (k==='+'||k==='='){ dist=Math.max(minDist,dist*0.85); apply(); }
-        else if (k==='-'||k==='_'){ dist=Math.min(maxDist,dist*1.18); apply(); }
+        else if (k==='+'||k==='='){ dist=Math.max(minDist,Math.min(dist,eff)*0.85); apply(); }
+        else if (k==='-'||k==='_'){ dist=Math.min(maxDist,Math.min(dist,eff)*1.18); apply(); }
         else if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) { keys.add(k); e.preventDefault(); }
     });
     window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
@@ -107,16 +165,41 @@ function attachOrbit(camera, dom, target, span = 300) {
     let glide = null;
     const step = () => {
         keyStep();
-        if (!glide) return;
-        glide.t = Math.min(1, glide.t + 0.045);
-        const e = glide.t * glide.t * (3 - 2 * glide.t);
-        target.lerpVectors(glide.from, glide.to, e);
-        dist = glide.d0 + (glide.d1 - glide.d0) * e;
-        apply();
-        if (glide.t >= 1) glide = null;
+        if (glide) {
+            glide.t = Math.min(1, glide.t + 0.045);
+            const e = glide.t * glide.t * (3 - 2 * glide.t);
+            if (groundAt) {
+                // nur seitlich fliegen – die Höhe kommt von der Oberfläche (siehe unten)
+                target.x = glide.from.x + (glide.to.x - glide.from.x) * e;
+                target.z = glide.from.z + (glide.to.z - glide.from.z) * e;
+            } else {
+                target.lerpVectors(glide.from, glide.to, e);
+            }
+            dist = glide.d0 + (glide.d1 - glide.d0) * e;
+            apply();
+            if (glide.t >= 1) glide = null;
+        }
+        // Drehpunkt weich auf der Oberfläche nachführen (kein Hüpfen beim Schwenken)
+        if (groundAt) {
+            const d = pivotY() - target.y;
+            if (Math.abs(d) > 0.002) { target.y += d * 0.16; apply(); }
+        }
     };
     return {
-        setDist: (d)=>{dist=d;apply();},
+        setDist: (d)=>{ dist=d; if (groundAt) target.y = pivotY(); apply(); },
+        /** Abstand Kamera–Drehpunkt, wie er gerade wirklich gilt (für den Dunst). */
+        viewDist: () => Math.min(dist, eff),
+        // Zustand lesen/setzen – für Prüfungen und spätere Kamerafahrten
+        getState: () => ({ az, pol, dist, eff, x: target.x, y: target.y, z: target.z }),
+        setState: (s = {}) => {
+            if (Number.isFinite(s.az)) az = s.az;
+            if (Number.isFinite(s.pol)) pol = clamp(s.pol, minPol, maxPol);
+            if (Number.isFinite(s.dist)) dist = clamp(s.dist, minDist, maxDist);
+            if (Number.isFinite(s.x)) target.x = s.x;
+            if (Number.isFinite(s.z)) target.z = s.z;
+            if (groundAt) target.y = pivotY();
+            apply();
+        },
         step,
         flyTo: (pt, wantDist) => {
             glide = { from: target.clone(), to: pt.clone(), t: 0,
@@ -1813,6 +1896,51 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const rockPeaks = findTopPeaks(heightmap, gridSize, 7, gridSize * 0.09);
     const rocks = buildRocks(world, gridSize, { hScale, tile, rock: rockStyle, peaks: rockPeaks });
     if (rocks) scene.add(rocks);
+    // ===== FELSEN ALS HINDERNIS FÜR DIE KAMERA =====
+    // Oberkante der Felsblöcke je Rasterzelle. Die Kamera bleibt auch darüber,
+    // sonst steckt sie beim Heranzoomen am Gipfel mitten im Blockfeld. Das Raster
+    // entsteht aus den tatsächlich vorhandenen Blöcken und wird neu aufgebaut,
+    // sobald für eine Trasse Felsen entfernt wurden.
+    const ROCK_CELL = 2;
+    const rockGridN = Math.ceil(worldSpan / ROCK_CELL) + 1;
+    let rockTops = null;
+    const buildRockTops = () => {
+        const tops = new Float32Array(rockGridN * rockGridN).fill(-1e9);
+        if (!rocks) return tops;
+        const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+        const cell = (w) => Math.max(0, Math.min(rockGridN - 1, Math.floor((w + half) / ROCK_CELL)));
+        rocks.traverse((o) => {
+            if (!o.isInstancedMesh) return;
+            if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+            const r0 = o.geometry.boundingSphere.radius;
+            for (let i = 0; i < o.count; i++) {
+                o.getMatrixAt(i, m); m.decompose(p, q, s);
+                const reach = r0 * Math.max(s.x, s.y, s.z);
+                if (reach < 0.9) continue;                    // Kiesel und entfernte Steine zählen nicht
+                const top = p.y + reach;
+                const x0 = cell(p.x - reach), x1 = cell(p.x + reach), z0 = cell(p.z - reach), z1 = cell(p.z + reach);
+                for (let cz = z0; cz <= z1; cz++) for (let cx = x0; cx <= x1; cx++) {
+                    const k = cz * rockGridN + cx;
+                    if (top > tops[k]) tops[k] = top;
+                }
+            }
+        });
+        return tops;
+    };
+    const rockTopAt = (wx, wz) => {
+        if (!rockTops) rockTops = buildRockTops();
+        const cx = Math.floor((wx + half) / ROCK_CELL), cz = Math.floor((wz + half) / ROCK_CELL);
+        if (cx < 0 || cz < 0 || cx >= rockGridN || cz >= rockGridN) return -1e9;
+        return rockTops[cz * rockGridN + cx];
+    };
+    if (rocks?.userData?.clearAlong) {
+        const clearRocks = rocks.userData.clearAlong;
+        rocks.userData.clearAlong = (...args) => {
+            const touched = clearRocks(...args);
+            if (touched) rockTops = null;                     // beim nächsten Blick neu aufbauen
+            return touched;
+        };
+    }
     // Gletscher (eisige Flächen) in den passenden Höhenlagen
     const glacierTiles = [];
     for (let i = 0; i < world.landcover.length; i++) if (world.landcover[i] === 8) glacierTiles.push(i);
@@ -1869,12 +1997,20 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     scene.add(rim);
 
     // Sichtbare Sonne + weiches Strahlen-Halo (Billboard, additiv)
-    (function addSun() {
+    // Sie steht weit HINTER der Bergkulisse. Vorher saß sie 1.4 Kartenbreiten vom
+    // Mittelpunkt: beim Herauszoomen kam ihr die Kamera so nah, dass sie zum
+    // riesigen weißen Fleck wurde. Größe und Halo sind mitskaliert – vom Gebiet aus
+    // wirkt sie gleich groß. Der Dunst erfasst sie nicht mehr (er hatte sie abends
+    // nur zufällig verschluckt); stattdessen folgt sie dem Sonnenstand und blendet
+    // aus, sobald die Abendsonne (sunDisc/sunHalo weiter unten) übernimmt.
+    const SUN_ORB_DIST = Math.min(worldSpan * 3.4, Math.min(4200, worldSpan * 4.2) * 0.82);
+    const sunOrb = (function addSun() {
         const sunDir = sun.position.clone().normalize();
-        const sunPos = sunDir.multiplyScalar(worldSpan * 1.4);
+        const sunPos = sunDir.multiplyScalar(SUN_ORB_DIST);
+        const k = SUN_ORB_DIST / (worldSpan * 1.4);
         // Kern
-        const core = new THREE.Mesh(new THREE.SphereGeometry(worldSpan * 0.03, 16, 16),
-            new THREE.MeshBasicMaterial({ color: 0xfff6e0 }));
+        const core = new THREE.Mesh(new THREE.SphereGeometry(worldSpan * 0.03 * k, 16, 16),
+            new THREE.MeshBasicMaterial({ color: 0xfff6e0, fog: false, transparent: true }));
         core.position.copy(sunPos); scene.add(core);
         // radialer Glow via CanvasTexture
         const cv = document.createElement('canvas'); cv.width = cv.height = 128;
@@ -1885,9 +2021,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         grd.addColorStop(1, 'rgba(255,236,180,0)');
         ctx.fillStyle = grd; ctx.fillRect(0, 0, 128, 128);
         const tex = new THREE.CanvasTexture(cv);
-        const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
-        halo.scale.setScalar(worldSpan * 0.42);
+        const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+        halo.scale.setScalar(worldSpan * 0.42 * k);
         halo.position.copy(sunPos); scene.add(halo);
+        return { core, halo };
     })();
 
     // Wolken am Himmel
@@ -3343,8 +3480,40 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     // Startblick UNTEN am Basisplatz (Talpunkt), leicht Richtung Berg versetzt
     const camG = worldPos(BASE_GX + (RSX - BASE_GX) * 0.22, BASE_GY + (RSY - BASE_GY) * 0.22);
     const target = new THREE.Vector3(camG.x, camG.y + worldSpan * 0.03, camG.z);
-    const orbit = attachOrbit(camera, canvas, target, worldSpan);
+    // Oberfläche an einem beliebigen Weltpunkt: auf der Karte die Schneedecke,
+    // außerhalb das Umland (dieselbe Formel wie die Geländeschürze). Daran
+    // richtet sich die Kamera aus – sie kann nirgends in den Boden eintauchen.
+    const APRON_REACH = worldSpan * 1.70;          // Vorgabe von buildTerrainApron
+    const surfaceAt = (wx, wz) => {
+        const ax = Math.abs(wx), az = Math.abs(wz);
+        if (ax <= half && az <= half) return yAtSmooth((wx + half) / tile, (wz + half) / tile);
+        // außerhalb: Randpunkt auf dem Strahl vom Kartenmittelpunkt, von dort nach außen
+        const k = half / Math.max(ax, az);
+        const ex = wx * k, ez = wz * k;
+        const edgeY = yAtSmooth((ex + half) / tile, (ez + half) / tile);
+        const v = Math.min(1, (Math.hypot(wx, wz) - Math.hypot(ex, ez)) / APRON_REACH);
+        // Die Schürze ist grob vernetzt und weicht von der Formel ab – etwas Luft lassen.
+        return apronHeight(edgeY, Math.atan2(ez, ex), v).y + 2.5;
+    };
+    // Für die Kamera selbst zählt zusätzlich alles Feste, das aus dem Schnee ragt (Felsblöcke).
+    const solidAt = (wx, wz) => Math.max(surfaceAt(wx, wz), rockTopAt(wx, wz));
+    // Die erste Kulissenkette steht bei 1.30 Kartenbreiten – die Kamera bleibt davor.
+    const orbit = attachOrbit(camera, canvas, target, worldSpan, { groundAt: surfaceAt, solidAt, bound: half, maxRadius: worldSpan * 1.15 });
     orbit.setDist(worldSpan * 0.62);
+    // ===== DUNST WANDERT MIT =====
+    // Die festen Werte (95 … 560) waren auf die kleinste Karte (291 breit) abgestimmt.
+    // Auf großen Karten lag dadurch schon der Startblick halb im Nebel, und im
+    // Überblick verschwand das ganze Gebiet. Der Dunst skaliert jetzt mit der
+    // Kartengröße und weicht beim Herauszoomen zurück: der Bereich um den
+    // Drehpunkt bleibt so klar wie beim Startblick, nur die Ferne verblasst.
+    const FOG_NEAR = worldSpan * (95 / 291), FOG_DEPTH = worldSpan * (465 / 291), FOG_LEAD = worldSpan * 0.29;
+    const updateFog = () => {
+        if (!scene.fog) return;
+        const near = Math.max(FOG_NEAR, orbit.viewDist() - FOG_LEAD);
+        scene.fog.near = near; scene.fog.far = near + FOG_DEPTH;
+    };
+    updateFog();
+    if (import.meta.env.DEV) window.__mtCam = { orbit, camera, surfaceAt, solidAt, terrain, apron, rocks, THREE, half };   // nur beim Entwickeln: Kamera prüfen
 
     // Schnee-Partikel
     const snow = (() => {
@@ -5678,6 +5847,15 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         sun.color.copy(eveSun).lerp(daySun, day);
         if (glow > 0) sun.color.lerp(glowSun, glow * 0.75);
         sun.position.set(-worldSpan * 0.35, worldSpan * (0.25 + 0.6 * day), worldSpan * (0.5 - 0.4 * day));
+        // Tagessonne: steht dort, wo das Licht herkommt. Unterhalb von day≈0.55 zeigt
+        // der Abschnitt „Sonnenscheibe + Strahlenkranz" die Abendsonne – bis dahin
+        // ist die Tagessonne ausgeblendet, sonst stünden zwei Sonnen am Himmel.
+        const orbFade = Math.max(0, Math.min(1, (day - 0.5) / 0.2));
+        sunOrb.core.position.copy(sun.position).normalize().multiplyScalar(SUN_ORB_DIST);
+        sunOrb.halo.position.copy(sunOrb.core.position);
+        sunOrb.core.material.opacity = orbFade;
+        sunOrb.halo.material.opacity = orbFade;
+        sunOrb.core.visible = sunOrb.halo.visible = orbFade > 0.01;
         scene.background.copy(eveBg).lerp(dayBg, day);
         if (glow > 0) scene.background.lerp(sunsetBg, glow * 0.65);
         if (scene.fog) scene.fog.color.copy(scene.background);
@@ -5791,17 +5969,26 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     };
 
     let raf=0; const clock=new THREE.Clock(); let lastT=0;
+    if (import.meta.env.DEV && window.__mtCam) window.__mtCam.clock = clock;   // nur beim Entwickeln: Tageszeit stellen
     const animate=()=>{
         const t=clock.getElapsedTime();
         const dt=Math.min(0.1, t-lastT); lastT=t;
         applyDaylight(t);
         if (clouds.userData.update) clouds.userData.update(dt);
+        // Wolken sind Himmelsschmuck: steigt die Kamera in ihre Höhe oder darüber,
+        // blenden sie aus – sonst liegen sie im Überblick als weiße Flecken über dem Gebiet.
+        for (const spr of clouds.children) {
+            const k = Math.max(0, Math.min(1, (spr.position.y - camera.position.y) / (worldSpan * 0.05)));
+            spr.material.opacity = 0.55 * k;
+            spr.visible = k > 0.01;
+        }
         // Ökonomie: alle ~1s ein Tick, danach HUD aktualisieren
         sim.timeAcc += dt;
         if (sim.timeAcc >= 1) { simTick(sim.timeAcc); sim.timeAcc = 0; emitStats(); if (selectedSel && onSelect) onSelect(infoFor(selectedSel)); }
         updateGuests(t, dt);
         updateRescues(t, dt);
         orbit.step();          // laufender Kameraflug
+        updateFog();           // Dunst an Kartengröße und Zoom anpassen
         updateConstructions(dt);
         updateQueue(t);
         for (const u of updaters) u(t);
