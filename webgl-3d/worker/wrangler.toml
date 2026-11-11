@@ -6,7 +6,7 @@ compatibility_date = "2026-01-01"
 # Einmalig anlegen mit:  npx wrangler kv namespace create KV   – die ausgegebene id hier eintragen.
 [[kv_namespaces]]
 binding = "KV"
-id = "00000000000000000000000000000000"
+id = "a53c2b247a114b50b2dceeecb8e95b00"
 
 [vars]
 # Seiten, die den Anmeldeserver benutzen dürfen (durch Komma getrennt).
