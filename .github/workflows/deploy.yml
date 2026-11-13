@@ -15,8 +15,10 @@ permissions:
   pages: write
   id-token: write
 
+# Immer nur ein Lauf je Zweig; ein neuerer ersetzt den älteren.
+# (Gruppenname geändert: Lauf #2 blieb bei GitHub unabbrechbar in der alten Gruppe hängen.)
 concurrency:
-  group: pages-${{ github.ref }}
+  group: seite-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
