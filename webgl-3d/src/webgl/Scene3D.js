@@ -119,35 +119,166 @@ function attachOrbit(camera, dom, target, span = 300, opts = {}) {
         camera.lookAt(target);
     };
     if (groundAt) target.y = pivotY();
-    dom.addEventListener('mousedown', (e) => { if (e.button===2||e.shiftKey) panning=true; else dragging=true; lx=e.clientX; ly=e.clientY; });
-    window.addEventListener('mouseup', () => { dragging=false; panning=false; });
-    window.addEventListener('mousemove', (e) => {
-        const dx=e.clientX-lx, dy=e.clientY-ly; lx=e.clientX; ly=e.clientY;
-        if (dragging) { az-=dx*0.006; pol=Math.max(minPol,Math.min(maxPol,pol-dy*0.006)); apply(); }
-        else if (panning) {
-            const fwd=new THREE.Vector3(Math.sin(az),0,Math.cos(az));
-            const right=new THREE.Vector3(fwd.z,0,-fwd.x);
-            target.addScaledVector(right,-dx*dist*0.0016);
-            target.addScaledVector(fwd,dy*dist*0.0016); apply();
+    // ===== EINGABE =====
+    //   Maus   – links ziehen: drehen/kippen · rechts oder Shift: verschieben · Rad: zoomen
+    //   Finger – ein Finger: Karte verschieben (sie hängt am Finger)
+    //            zwei Finger: spreizen = zoomen, verdrehen = drehen,
+    //                         gemeinsam hoch/runter = kippen (wie in einer Karten-App)
+    // Alle Lauscher hängen an einem Signal und verschwinden mit dispose() wieder.
+    const ac = new AbortController();
+    const on = (el, type, fn, o = {}) => el.addEventListener(type, fn, { ...o, signal: ac.signal });
+    dom.style.touchAction = 'none';                  // der Browser soll hier nicht selbst zoomen oder scrollen
+    // Zoomen geht immer vom wirksamen Abstand aus – sonst müsste man an der Kulisse erst „leer" zurückdrehen.
+    const zoomBy = (f) => { dist = clamp(Math.min(dist, eff) * f, minDist, maxDist); };
+    // seitlich (rechts +) und in die Tiefe (zur Kamera hin +) verschieben
+    const panBy = (side, back) => {
+        const fx = Math.sin(az), fz = Math.cos(az);
+        target.x += fz * side + fx * back;
+        target.z += -fx * side + fz * back;
+    };
+    const fingers = new Map();                       // pointerId -> {x, y}
+    let pinch = null;                                // Zustand der Zwei-Finger-Geste
+    const twoFingers = () => {
+        const [p, q] = [...fingers.values()];
+        return { d: Math.hypot(q.x - p.x, q.y - p.y), a: Math.atan2(q.y - p.y, q.x - p.x), mx: (p.x + q.x) / 2, my: (p.y + q.y) / 2 };
+    };
+    const startPinch = () => { pinch = fingers.size === 2 ? { ...twoFingers(), mode: null, accD: 0, accA: 0, accX: 0, accY: 0 } : null; };
+    // ----- Die Karte hängt am Finger -----
+    // Der beim Aufsetzen berührte Bodenpunkt bleibt unter dem Finger: dazu wird der
+    // Sehstrahl vor und nach der Bewegung mit der waagerechten Ebene in Höhe dieses
+    // Punkts geschnitten und der Drehpunkt um die Differenz verschoben. Das stimmt
+    // auch bei flachem Blick, wo ein Bildpunkt vorn wenig und hinten viel Strecke ist.
+    const _ray = new THREE.Vector3();
+    /** Sehstrahl durch einen Bildpunkt: Ursprung o und Richtung d (Länge 1). */
+    const rayThrough = (cx, cy) => {
+        const r = dom.getBoundingClientRect();
+        camera.updateMatrixWorld();
+        _ray.set(((cx - r.left) / Math.max(1, r.width)) * 2 - 1, -((cy - r.top) / Math.max(1, r.height)) * 2 + 1, 0.5).unproject(camera);
+        const ox = camera.position.x, oy = camera.position.y, oz = camera.position.z;
+        let dx = _ray.x - ox, dy = _ray.y - oy, dz = _ray.z - oz;
+        const l = Math.hypot(dx, dy, dz) || 1;
+        dx /= l; dy /= l; dz /= l;
+        return { ox, oy, oz, dx, dy, dz };
+    };
+    const groundUnder = (cx, cy, planeY) => {
+        const q = rayThrough(cx, cy);
+        if (q.dy > -0.06 * Math.hypot(q.dx, q.dz)) return null;    // Strahl läuft (fast) waagerecht oder in den Himmel
+        const t = (planeY - q.oy) / q.dy;
+        return t > 0 ? { x: q.ox + q.dx * t, z: q.oz + q.dz * t } : null;
+    };
+    /** Höhe des Bodens unter einem Bildpunkt: der Strahl wandert über das Gelände bis zum Auftreffen. */
+    const grabHeight = (cx, cy) => {
+        if (!groundAt) return target.y;
+        const q = rayThrough(cx, cy);
+        const over = (t) => (q.oy + q.dy * t) - groundAt(q.ox + q.dx * t, q.oz + q.dz * t);
+        const far = span * 3.2;
+        let ta = 0, tb = -1;
+        for (let t = 0.8, s = 0.8; t < far; s = 0.8 + t * 0.012, t += s) {      // in der Ferne größere Schritte
+            if (over(t) <= 0) { tb = t; break; }
+            ta = t;
+        }
+        if (tb < 0) return target.y;                 // Himmel oder jenseits des Umlands: Höhe des Drehpunkts
+        for (let i = 0; i < 10; i++) { const tm = (ta + tb) * 0.5; if (over(tm) > 0) ta = tm; else tb = tm; }
+        return q.oy + q.dy * (ta + tb) * 0.5;
+    };
+    let grabY = 0;                                   // Höhe der Ebene, an der gerade gezogen wird
+    // Ersatz, wenn der Strahl den Boden nicht trifft: Weltstrecke je Bildpunkt am Drehpunkt
+    const pxWorld = () => 2 * Math.tan(camera.fov * Math.PI / 360) * Math.min(dist, eff) / Math.max(1, dom.clientHeight);
+    const dragMap = (x0, y0, x1, y1) => {
+        const a = groundUnder(x0, y0, grabY), b = groundUnder(x1, y1, grabY);
+        if (a && b) {
+            let mx = a.x - b.x, mz = a.z - b.z;
+            const m = Math.hypot(mx, mz), cap = Math.min(dist, eff) * 0.4;     // kein Sprung, falls der Finger den Horizont streift
+            if (m > cap) { mx *= cap / m; mz *= cap / m; }
+            target.x += mx; target.z += mz;
+        } else {
+            const k = pxWorld();
+            panBy(-(x1 - x0) * k, -(y1 - y0) * k / Math.max(0.3, Math.cos(pol)));
+        }
+    };
+    on(dom, 'pointerdown', (e) => {
+        if (e.pointerType === 'mouse') {
+            if (e.button === 2 || e.shiftKey) panning = true; else dragging = true;
+            lx = e.clientX; ly = e.clientY;
+            return;
+        }
+        fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        try { dom.setPointerCapture(e.pointerId); } catch { /* ältere Browser */ }
+        startPinch();
+        // Bodenhöhe unter dem Finger bzw. unter der Mitte beider Finger merken
+        if (fingers.size === 1) grabY = grabHeight(e.clientX, e.clientY);
+        else if (pinch) grabY = grabHeight(pinch.mx, pinch.my);
+    });
+    on(window, 'pointermove', (e) => {
+        if (e.pointerType === 'mouse') {
+            const dx = e.clientX - lx, dy = e.clientY - ly; lx = e.clientX; ly = e.clientY;
+            if (dragging) { az -= dx * 0.006; pol = clamp(pol - dy * 0.006, minPol, maxPol); apply(); }
+            else if (panning) { panBy(-dx * dist * 0.0016, dy * dist * 0.0016); apply(); }
+            return;
+        }
+        const f = fingers.get(e.pointerId);
+        if (!f) return;
+        const px = f.x, py = f.y;
+        f.x = e.clientX; f.y = e.clientY;
+        if (fingers.size === 1) {
+            dragMap(px, py, f.x, f.y);
+            apply();
+        } else if (fingers.size === 2 && pinch) {
+            const g = twoFingers();
+            let dA = g.a - pinch.a;
+            if (dA > Math.PI) dA -= 2 * Math.PI; else if (dA < -Math.PI) dA += 2 * Math.PI;
+            const dD = g.d - pinch.d, dX = g.mx - pinch.mx, dY = g.my - pinch.my;
+            if (!pinch.mode) {
+                // Erst nach ein paar Bildpunkten entscheiden, was gemeint ist – sonst kippt
+                // die Kamera bei jedem Zoomen ein Stück mit.
+                pinch.accD += dD; pinch.accA += dA; pinch.accX += dX; pinch.accY += dY;
+                const zoomish = Math.abs(pinch.accD), turnish = Math.abs(pinch.accA) * g.d * 0.5;
+                const slideish = Math.abs(pinch.accX), tiltish = Math.abs(pinch.accY);
+                if (Math.max(zoomish, turnish, slideish, tiltish) > 10) {
+                    // Beide Finger gemeinsam hoch/runter = kippen; alles andere zoomt, dreht und schiebt.
+                    pinch.mode = (tiltish > zoomish * 1.4 && tiltish > turnish * 1.4 && tiltish > slideish * 1.4) ? 'tilt' : 'zoom';
+                }
+            } else if (pinch.mode === 'zoom') {
+                if (g.d > 1 && pinch.d > 1) zoomBy(pinch.d / g.d);
+                az += dA;
+                apply();
+                dragMap(pinch.mx, pinch.my, g.mx, g.my);   // die Karte wandert mit der Fingermitte
+                apply();
+            } else {
+                pol = clamp(pol - dY * 0.006, minPol, maxPol);
+                apply();
+            }
+            pinch.d = g.d; pinch.a = g.a; pinch.mx = g.mx; pinch.my = g.my;
         }
     });
-    // Zoomen geht immer vom wirksamen Abstand aus – sonst müsste man an der Kulisse erst „leer" zurückdrehen.
-    dom.addEventListener('wheel', (e) => { e.preventDefault(); dist=Math.max(minDist,Math.min(maxDist,Math.min(dist,eff)*(1+e.deltaY*0.0011))); apply(); }, { passive:false });
-    dom.addEventListener('contextmenu', (e) => e.preventDefault());
+    const release = (e) => {
+        if (e.pointerType === 'mouse') { dragging = false; panning = false; return; }
+        fingers.delete(e.pointerId);
+        startPinch();
+        // Ein Finger bleibt liegen: er zieht ab jetzt an dem Punkt weiter, den er gerade berührt
+        if (fingers.size === 1) { const [f] = [...fingers.values()]; grabY = grabHeight(f.x, f.y); }
+    };
+    on(window, 'pointerup', release);
+    on(window, 'pointercancel', release);
+    on(dom, 'wheel', (e) => { e.preventDefault(); zoomBy(1 + e.deltaY * 0.0011); apply(); }, { passive: false });
+    on(dom, 'contextmenu', (e) => e.preventDefault());
+    // iOS-Safari kennt zusätzlich eigene Gesten-Ereignisse, die sonst die ganze Seite zoomen
+    on(dom, 'gesturestart', (e) => e.preventDefault());
+    on(dom, 'gesturechange', (e) => e.preventDefault());
     // Tastatur: Q/E drehen, WASD / Pfeile verschieben (gehalten = gleitend),
     // +/− zoomen. In Eingabefeldern bleibt die Tastatur unangetastet.
     const keys = new Set();
     const inInput = (e) => /input|textarea|select/i.test(e.target?.tagName || '') || e.target?.isContentEditable;
-    window.addEventListener('keydown', (e) => {
+    on(window, 'keydown', (e) => {
         if (inInput(e)) return;
         const k = e.key.toLowerCase();
         if (k==='q'){az-=Math.PI/8;apply();} else if(k==='e'){az+=Math.PI/8;apply();}
-        else if (k==='+'||k==='='){ dist=Math.max(minDist,Math.min(dist,eff)*0.85); apply(); }
-        else if (k==='-'||k==='_'){ dist=Math.min(maxDist,Math.min(dist,eff)*1.18); apply(); }
+        else if (k==='+'||k==='='){ zoomBy(0.85); apply(); }
+        else if (k==='-'||k==='_'){ zoomBy(1.18); apply(); }
         else if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) { keys.add(k); e.preventDefault(); }
     });
-    window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
-    window.addEventListener('blur', () => keys.clear());
+    on(window, 'keyup', (e) => keys.delete(e.key.toLowerCase()));
+    on(window, 'blur', () => { keys.clear(); fingers.clear(); pinch = null; dragging = false; panning = false; });
     const keyStep = () => {
         if (!keys.size) return;
         const fwd=new THREE.Vector3(Math.sin(az),0,Math.cos(az));
@@ -163,8 +294,16 @@ function attachOrbit(camera, dom, target, span = 300, opts = {}) {
     // Weicher Kameraflug zu einem Punkt: Ziel und Abstand werden über
     // mehrere Frames herangezogen, statt hart umzuspringen.
     let glide = null;
+    // Bedienknöpfe im HUD: Drehung und Zoom werden über ein paar Bilder ausgespielt statt zu springen.
+    let pendTurn = 0, pendZoom = 0;                  // Rest-Drehung (Bogenmaß), Rest-Zoom (logarithmisch)
     const step = () => {
         keyStep();
+        if (Math.abs(pendTurn) > 1e-4 || Math.abs(pendZoom) > 1e-4) {
+            const a = pendTurn * 0.24, z = pendZoom * 0.24;
+            pendTurn -= a; pendZoom -= z;
+            az += a; zoomBy(Math.exp(z));
+            apply();
+        }
         if (glide) {
             glide.t = Math.min(1, glide.t + 0.045);
             const e = glide.t * glide.t * (3 - 2 * glide.t);
@@ -187,6 +326,12 @@ function attachOrbit(camera, dom, target, span = 300, opts = {}) {
     };
     return {
         setDist: (d)=>{ dist=d; if (groundAt) target.y = pivotY(); apply(); },
+        /** Alle Lauscher entfernen (beim Verlassen des Levels). */
+        dispose: () => ac.abort(),
+        /** Für Bedienknöpfe: f < 1 zoomt heran, f > 1 heraus. */
+        zoom: (f) => { if (f > 0) pendZoom += Math.log(f); },
+        /** Für Bedienknöpfe: um den Drehpunkt drehen (Bogenmaß). */
+        turn: (rad) => { pendTurn += rad; },
         /** Abstand Kamera–Drehpunkt, wie er gerade wirklich gilt (für den Dunst). */
         viewDist: () => Math.min(dist, eff),
         // Zustand lesen/setzen – für Prüfungen und spätere Kamerafahrten
@@ -228,7 +373,12 @@ function findLakes(landcover, heightmap, gridSize) {
 }
 
 export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // Handy oder kleines Tablet? Dort startet die Bildqualität eine Stufe tiefer (siehe „BILDQUALITÄT").
+    const smallTouch = (!!window.matchMedia?.('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0)
+        && Math.min(window.screen?.width || 9999, window.screen?.height || 9999) < 900;
+    // Die Kantenglättung des Bildpuffers bringt auf dem Handy nichts (geglättet wird in der
+    // Bildaufbereitung), kostet dort aber spürbar Speicher und Zeit.
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: !smallTouch });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
@@ -1989,8 +2139,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     scene.add(sun);
     // Himmelslicht (kühl von oben, warm reflektiert vom Schnee) — sorgt für
     // Plastizität in den Schatten statt flachem Grau.
-    scene.add(new THREE.HemisphereLight(topC.getHex(), 0xa8bcd2, 0.85));
-    scene.add(new THREE.AmbientLight(0xffffff, 0.26));
+    const hemiLight = new THREE.HemisphereLight(topC.getHex(), 0xa8bcd2, 0.85);
+    scene.add(hemiLight);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.26);
+    scene.add(ambientLight);
     // Schwaches Gegenlicht: hebt Silhouetten von Bergen und Bäumen ab.
     const rim = new THREE.DirectionalLight(0xcfe2f5, 0.34);
     rim.position.set(worldSpan * 0.5, worldSpan * 0.35, -worldSpan * 0.45);
@@ -2061,7 +2213,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     // Umland-Wald und Talnebel: die Schürze allein wirkt wie eine Rampe.
     const apronForest = buildApronForest(world, gridSize, {
         hScale, tileSize: tile, count: 16000,
-        hue: (FOREST_MIX_TABLE[level?.id] || FOREST_MIX_TABLE.alpen || {}).hue || undefined
+        hue: (FOREST_MIX_TABLE[level?.id] || FOREST_MIX_TABLE.alpen || {}).hue || undefined,
+        surfacePoint: apron.userData.pointAt        // Bäume stehen genau auf der vernetzten Schürze
     });
     scene.add(apronForest);
     const valleyHaze = buildValleyHaze(world, gridSize, { hScale, tileSize: tile });
@@ -3476,6 +3629,68 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         composer = null;                 // Fallback: direkter Renderpfad
     }
 
+    // ===================== BILDQUALITÄT PASST SICH AN =====================
+    // Stufe 3 ist die volle Qualität (wie bisher am Rechner). Hält ein Gerät die
+    // Bildrate nicht, geht es stufenweise herunter: erst Auflösung und Schattenkarte,
+    // dann das Glühen, zuletzt die Kantenglättung. Läuft es wieder flüssig, geht es
+    // vorsichtig wieder hinauf. Handys beginnen auf Stufe 2 und bleiben höchstens dort.
+    const QUALITY = [
+        { px: 1.0,  cpx: 1.0,  shadow: 1024, bloom: false, smaa: false },
+        { px: 1.25, cpx: 1.0,  shadow: 2048, bloom: false, smaa: true },
+        { px: 1.5,  cpx: 1.25, shadow: 2048, bloom: true,  smaa: true },
+        { px: 1.75, cpx: 1.5,  shadow: 4096, bloom: true,  smaa: true }
+    ];
+    const Q_MAX = smallTouch ? 2 : 3;
+    let qTier = Q_MAX;
+    try {
+        const stored = parseInt(localStorage.getItem('mt.quality'), 10);
+        if (stored >= 0 && stored <= Q_MAX) qTier = stored;      // letzter Stand dieses Geräts
+    } catch { /* privater Modus */ }
+    /** Bildgröße, Auflösung und Blickwinkel an Fenster und Qualitätsstufe anpassen. */
+    const applySize = () => {
+        const w = window.innerWidth, h = window.innerHeight, q = QUALITY[qTier];
+        const dpr = window.devicePixelRatio || 1;
+        camera.aspect = w / Math.max(1, h);
+        // Hochkant (Handy) ist das Bild schmal: ein weiterer Blickwinkel zeigt wieder genug vom Gebiet.
+        camera.fov = camera.aspect >= 1 ? 50 : Math.min(66, 50 + (1 - camera.aspect) * 32);
+        camera.updateProjectionMatrix();
+        renderer.setPixelRatio(Math.min(dpr, q.px));
+        renderer.setSize(w, h);
+        if (composer) {
+            composer.setPixelRatio(Math.min(dpr, q.cpx));
+            composer.setSize(w, h);          // gibt die Größe an alle Stufen der Bildaufbereitung weiter
+        }
+    };
+    const applyQuality = () => {
+        const q = QUALITY[qTier];
+        if (bloomPass) bloomPass.enabled = q.bloom;
+        if (smaaPass) smaaPass.enabled = q.smaa;
+        if (sun.shadow.mapSize.x !== q.shadow) {
+            sun.shadow.mapSize.set(q.shadow, q.shadow);
+            if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }   // wird in neuer Größe neu angelegt
+        }
+        applySize();
+        try { localStorage.setItem('mt.quality', String(qTier)); } catch { /* privater Modus */ }
+    };
+    applyQuality();
+    // Messung: mittlere Bildrate je Zwei-Sekunden-Fenster. Pausen (Tab im Hintergrund)
+    // und die Ladephase zählen nicht.
+    let qFrames = 0, qTime = 0, qGood = 0, qNeed = 2, qWarm = 0, qLastUp = -1e9, qClock = 0;
+    const qualityFrame = (rawDt) => {
+        qClock += Math.min(rawDt, 1);
+        if (document.visibilityState !== 'visible' || rawDt > 0.4) { qFrames = 0; qTime = 0; return; }
+        if (qWarm < 4) { qWarm += rawDt; return; }
+        qFrames++; qTime += rawDt;
+        if (qTime < 2) return;
+        const fps = qFrames / qTime; qFrames = 0; qTime = 0;
+        if (fps < 26 && qTier > 0) {
+            if (qClock - qLastUp < 14) qNeed = Math.min(64, qNeed * 2);   // der letzte Schritt hinauf war zu viel: länger warten
+            qTier--; qGood = 0; qWarm = 3; applyQuality();
+        } else if (fps > 50 && qTier < Q_MAX) {
+            if (++qGood >= qNeed) { qTier++; qGood = 0; qWarm = 3; qLastUp = qClock; applyQuality(); }
+        } else qGood = 0;
+    };
+
     // Startblick auf das Resort: Ziel zwischen Talstation und Gipfel, Distanz nach Kartengröße
     // Startblick UNTEN am Basisplatz (Talpunkt), leicht Richtung Berg versetzt
     const camG = worldPos(BASE_GX + (RSX - BASE_GX) * 0.22, BASE_GY + (RSY - BASE_GY) * 0.22);
@@ -3513,7 +3728,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         scene.fog.near = near; scene.fog.far = near + FOG_DEPTH;
     };
     updateFog();
-    if (import.meta.env.DEV) window.__mtCam = { orbit, camera, surfaceAt, solidAt, terrain, apron, rocks, THREE, half };   // nur beim Entwickeln: Kamera prüfen
+    if (import.meta.env.DEV) window.__mtCam = { orbit, camera, surfaceAt, solidAt, terrain, apron, rocks, forest, scene, sun, renderer, THREE, half };   // nur beim Entwickeln: Kamera und Szene prüfen
 
     // Schnee-Partikel
     const snow = (() => {
@@ -5805,9 +6020,12 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
 
     // ===== TAG-/ABEND-ZYKLUS =====
     const dayBg = scene.background.clone();
-    const eveBg = new THREE.Color(0x2a3a5c);       // dämmriges Blau
+    const eveBg = new THREE.Color(0x35496f);       // dämmriges Blau (heller als früher: die Nacht soll spielbar bleiben)
     const daySun = new THREE.Color(0xfff2dc), eveSun = new THREE.Color(0xffb36b); // warmes Abendlicht
-    const CYCLE = 110; // Sekunden pro voller Zyklus (Tag->Abend->Tag)
+    const moonSun = new THREE.Color(0xbfd3f2);     // kühles Mondlicht für die Nacht
+    // Sekunden pro voller Zyklus (Tag->Abend->Nacht->Tag). Früher 110 s: da dämmerte es
+    // gefühlt ununterbrochen. Jetzt dauert ein Spieltag fünf Minuten, gut die Hälfte davon ist heller Tag.
+    const CYCLE = 300;
     // Nicht jeder Abend wird ein Postkarten-Sonnenuntergang: pro Zyklus wird
     // gewürfelt, ob es einen gibt und wie kräftig er ausfällt.
     const glowSun = new THREE.Color(0xff8b4a);     // tief glühendes Orange
@@ -5831,7 +6049,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         // Der Rohwert wird deshalb gespreizt: oberhalb von 0.62 gilt voller
         // Tag, unterhalb von 0.10 Nacht, dazwischen liegt der Übergang.
         const rawDay = 0.5 + 0.5 * Math.cos((t / CYCLE) * Math.PI * 2);
-        const dayT = Math.max(0, Math.min(1, (rawDay - 0.10) / 0.52));
+        // Plateau ab 0.52 (vorher 0.62): gut die Hälfte des Zyklus ist voller Tag.
+        const dayT = Math.max(0, Math.min(1, (rawDay - 0.10) / 0.42));
         const day = dayT * dayT * (3 - 2 * dayT);      // weiches Ein-/Ausblenden
         // Neuer Zyklus -> neu auswürfeln (ca. jeder dritte Abend wird spektakulär)
         const cyc = Math.floor(t / CYCLE);
@@ -5843,9 +6062,17 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const dusk = Math.max(0, 1 - Math.abs(rawDay - 0.30) / 0.26);
         const glow = sunsetStrength * dusk;
         const dl = 0.3 + 0.7 * day;                // 0.3..1.0
-        sun.intensity = 0.7 + 1.6 * day + glow * 0.5;
+        // ===== HELLERE NACHT =====
+        // Früher blieb nachts nur ein schwaches, orangefarbenes Restlicht – Pisten und
+        // Gebäude versanken im Dunkel. Jetzt übernimmt ein kühles Mondlicht, und das
+        // Himmelslicht hellt die Schatten zusätzlich auf: man kann nachts weiterbauen.
+        const deepNight = Math.max(0, Math.min(1, (0.30 - day) / 0.30));    // 1 = tiefe Nacht
+        sun.intensity = 1.05 + 1.25 * day + glow * 0.5;
         sun.color.copy(eveSun).lerp(daySun, day);
+        if (deepNight > 0) sun.color.lerp(moonSun, deepNight * 0.85);
         if (glow > 0) sun.color.lerp(glowSun, glow * 0.75);
+        hemiLight.intensity = 0.85 + 0.30 * (1 - day);
+        ambientLight.intensity = 0.26 + 0.16 * (1 - day);
         sun.position.set(-worldSpan * 0.35, worldSpan * (0.25 + 0.6 * day), worldSpan * (0.5 - 0.4 * day));
         // Tagessonne: steht dort, wo das Licht herkommt. Unterhalb von day≈0.55 zeigt
         // der Abschnitt „Sonnenscheibe + Strahlenkranz" die Abendsonne – bis dahin
@@ -5910,7 +6137,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         }
         // Sonnenscheibe + Strahlenkranz am Horizont
         if (sunDisc) {
-            const show = glow > 0.05 || day < 0.55;
+            // Es steht immer nur EINE Sonne am Himmel: die Abendsonne blendet in dem Maß ein,
+            // wie die Tagessonne (sunOrb) geht – beide stehen in derselben Richtung, aber
+            // verschieden weit weg, und lagen sonst je nach Kamerastand nebeneinander.
+            // Und sie geht unter: in tiefer Nacht blieb sie bisher als orange Scheibe am
+            // Horizont stehen, während gegenüber schon der Mond schien.
+            const eveFade = (1 - orbFade) * (1 - deepNight);
+            const show = (glow > 0.05 || day < 0.55) && eveFade > 0.02;
             sunDisc.visible = show;
             if (show) {
                 sunDisc.position.copy(sun.position).multiplyScalar(0.82);
@@ -5921,7 +6154,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 // Refraktion drückt die tief stehende Sonne sichtbar flach.
                 const sd6 = 0.75 + low * 0.5 + glow * 0.35;
                 sunDisc.scale.set(sd6 * (1 + low * 0.10), sd6 * (1 - low * 0.14), 1);
-                sunDisc.material.opacity = 0.55 + glow * 0.4;
+                sunDisc.material.opacity = (0.55 + glow * 0.4) * eveFade;
                 sunDisc.material.color.set(0xffffff).lerp(glowSun, warm * 0.55 + low * 0.25);
                 sunHalo.visible = show;
                 sunHalo.position.copy(sunDisc.position);
@@ -5930,7 +6163,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 // dichten Luftschicht wirkt fast nur waagerecht.
                 const sc6 = 0.7 + low * 0.6 + glow * 0.5;
                 sunHalo.scale.set(sc6 * (1 + low * 0.55), sc6 * (1 - low * 0.20), 1);
-                sunHalo.material.opacity = 0.14 + glow * 0.34;
+                sunHalo.material.opacity = (0.14 + glow * 0.34) * eveFade;
                 sunHalo.material.color.set(0xffe0b0).lerp(glowSun, warm * 0.7);
                 // Strahlen drehen sich ganz langsam
                 sunRays.visible = glow > 0.05;
@@ -5947,7 +6180,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                     const breathe = 1 + Math.sin(t * 0.23) * 0.05;
                     sunRays.scale.set((1.0 + lowR * 0.75) * breathe,
                                       (0.72 - lowR * 0.22) * breathe, 1);
-                    sunRays.material.opacity = Math.min(0.34, glow * glow * 0.42 + glow * 0.08);
+                    sunRays.material.opacity = Math.min(0.34, glow * glow * 0.42 + glow * 0.08) * eveFade;
                     sunRays.material.color.copy(sunDisc.material.color);
                 }
             } else { sunHalo.visible = false; sunRays.visible = false; }
@@ -5969,11 +6202,17 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     };
 
     let raf=0; const clock=new THREE.Clock(); let lastT=0;
-    if (import.meta.env.DEV && window.__mtCam) window.__mtCam.clock = clock;   // nur beim Entwickeln: Tageszeit stellen
+    if (import.meta.env.DEV && window.__mtCam) {   // nur beim Entwickeln: Tageszeit und Qualitätsstufe stellen
+        Object.assign(window.__mtCam, { clock, CYCLE, raycastTerrain: (x, y) => raycastTerrain(x, y),
+            quality: { get: () => qTier, set: (n) => { qTier = Math.max(0, Math.min(3, n | 0)); applyQuality(); } } });
+    }
     const animate=()=>{
         const t=clock.getElapsedTime();
-        const dt=Math.min(0.1, t-lastT); lastT=t;
-        applyDaylight(t);
+        const rawDt=t-lastT;
+        // Nie rückwärts: eine negative Zeitspanne ließe Gäste „vor" den Anfang ihrer Strecke laufen.
+        const dt=Math.max(0, Math.min(0.1, rawDt)); lastT=t;
+        qualityFrame(rawDt);   // Bildrate messen, Qualität bei Bedarf anpassen
+        const dayNow = applyDaylight(t);
         if (clouds.userData.update) clouds.userData.update(dt);
         // Wolken sind Himmelsschmuck: steigt die Kamera in ihre Höhe oder darüber,
         // blenden sie aus – sonst liegen sie im Überblick als weiße Flecken über dem Gebiet.
@@ -5981,6 +6220,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             const k = Math.max(0, Math.min(1, (spr.position.y - camera.position.y) / (worldSpan * 0.05)));
             spr.material.opacity = 0.55 * k;
             spr.visible = k > 0.01;
+            // nachts nicht grellweiß vor dunklem Himmel, sondern gedämpft im Mondlicht
+            spr.material.color.setScalar(0.30 + 0.70 * dayNow);
         }
         // Ökonomie: alle ~1s ein Tick, danach HUD aktualisieren
         sim.timeAcc += dt;
@@ -6019,6 +6260,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         updateGustVeil(t);
         if (composer) {
             if (gradePass) gradePass.uniforms.uTime.value = t;
+            if (bloomPass && bloomPass.enabled) {
+                // Nah am Gelände strahlten Schneekappen und Dächer als weiße Höfe aus. Das
+                // Glühen nimmt deshalb mit der Nähe ab und ist erst im Überblick voll da.
+                const far = Math.max(0, Math.min(1, (orbit.viewDist() - 26) / Math.max(1, worldSpan * 0.42 - 26)));
+                bloomPass.strength = 0.09 + 0.25 * far;        // im Überblick 0.34 wie bisher
+                bloomPass.radius = 0.46 + 0.26 * far;
+                bloomPass.threshold = 0.96 - 0.10 * far;
+            }
             composer.render();
         } else {
             renderer.render(scene, camera);
@@ -6027,14 +6276,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     };
     animate();
 
-    const onResize=()=>{
-        camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth,window.innerHeight);
-        if (composer) composer.setSize(window.innerWidth, window.innerHeight);
-        if (bloomPass) bloomPass.setSize(window.innerWidth, window.innerHeight);
-        if (smaaPass) smaaPass.setSize(window.innerWidth, window.innerHeight);
-    };
+    // Fenstergröße geändert, Handy gedreht oder Adressleiste ein-/ausgeblendet
+    const onResize = () => applySize();
     window.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('resize', onResize);
 
     // ============================================================
     // INTERAKTIVES BAUEN: Raycast aufs Terrain, Ghost-Vorschau, Klick platziert
@@ -6099,23 +6344,60 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     let currentBuild = null;
     let ghost = null;
     let ghostRot = 0; // Planungs-Rotation (Q/E oder R drehen das Gebäude)
+    /** Bauvorschau drehen (Tasten Q/E/R, am Handy der Dreh-Knopf in der Bestätigen-Leiste). */
+    const rotateGhost = (step) => {
+        if (!ghost || !step) return;
+        ghostRot += step;
+        ghost.rotation.y = ghostRot;
+        // Beschneiungs-Sektor und Richtungspfeil drehen mit dem Modell mit
+        if (snowRing) snowRing.rotation.y = ghostRot;
+        if (dirArrow) dirArrow.rotation.y = ghostRot;
+    };
     window.addEventListener('keydown', (e) => {
         if (!ghost) return;
         const k = e.key.toLowerCase();
         // Q/E drehen in beide Richtungen (so steht es auch im HUD), R zusätzlich
         // 90°-Schritte statt 22.5°: alles andere passt nicht auf eine
         // quadratische Parzelle und ragt über deren Kanten hinaus.
-        const step = k === 'q' ? -Math.PI / 2 : (k === 'e' || k === 'r') ? Math.PI / 2 : 0;
-        if (!step) return;
-        ghostRot += step;
-        ghost.rotation.y = ghostRot;
-        // Beschneiungs-Sektor und Richtungspfeil drehen mit dem Modell mit
-        if (snowRing) snowRing.rotation.y = ghostRot;
-        if (dirArrow) dirArrow.rotation.y = ghostRot;
+        rotateGhost(k === 'q' ? -Math.PI / 2 : (k === 'e' || k === 'r') ? Math.PI / 2 : 0);
     });
     const raycaster = new THREE.Raycaster();
     const ptr = new THREE.Vector2();
     let downX = 0, downY = 0;
+    // ===== FINGER: Antippen von Kamerabewegung und Zwei-Finger-Gesten unterscheiden =====
+    const touchIds = new Set();        // gerade aufliegende Finger
+    let gestureSeen = false;           // in dieser Berührung lag zeitweise mehr als ein Finger auf
+    let lastPointerType = 'mouse';
+    const isTouchEvent = (e) => !!e && !!e.pointerType && e.pointerType !== 'mouse';
+    /** Klick bzw. Antippen – also kein Ziehen der Kamera und keine Zwei-Finger-Geste. */
+    const isTap = (e) => {
+        if (e.__confirmed) return true;
+        if (isTouchEvent(e) && gestureSeen) return false;
+        return Math.hypot(e.clientX - downX, e.clientY - downY) <= (isTouchEvent(e) ? 10 : 5);
+    };
+    // ===== TIPPEN UND BESTÄTIGEN (Finger) =====
+    // Mit der Maus sieht man die Vorschau schon beim Bewegen. Mit dem Finger gibt es
+    // kein „Darüberfahren": das Antippen setzt deshalb nur die Vorschau samt Preis,
+    // gebaut (oder abgerissen) wird erst nach der Bestätigung im HUD.
+    let pending = null;                // {kind, pt, cost, ok, why, count, building}
+    let onPending = null;
+    let demolishMark = null;           // rote Scheibe über dem zum Abriss angetippten Gebäude
+    const setPending = (p) => {
+        pending = p;
+        // Abriss vormerken: zeigen, WELCHES Gebäude gemeint ist
+        if (demolishMark) { scene.remove(demolishMark); demolishMark.geometry.dispose(); demolishMark.material.dispose(); demolishMark = null; }
+        if (p && p.kind === 'demolish' && p.building) {
+            const r = (p.building.rec?.r || 2) + 0.9;
+            demolishMark = new THREE.Mesh(
+                new THREE.CircleGeometry(r, 40),
+                new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.42, depthTest: false, depthWrite: false, fog: false }));
+            demolishMark.rotation.x = -Math.PI / 2;
+            demolishMark.position.set(p.building.rec.x, p.building.mesh.position.y + 0.4, p.building.rec.z);
+            demolishMark.renderOrder = 999;
+            scene.add(demolishMark);
+        }
+        if (onPending) onPending(p ? { kind: p.kind, cost: p.cost || 0, ok: !!p.ok, why: p.why || '', count: p.count || 0 } : null);
+    };
 
     // Straßen-Werkzeug (zwei Klicks: Start, Ende) — Gamer baut Straßen wie im 2D
     let roadMode = false;
@@ -6694,6 +6976,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const loadTarget = smooth01((weather.snowfall - 0.05) / 0.75);
         weather.treeLoad += (loadTarget - weather.treeLoad) * Math.min(1, dt * (loadTarget > weather.treeLoad ? 0.22 : 0.05));
         if (forest?.userData?.setSnowLoad) forest.userData.setSnowLoad(weather.treeLoad);
+        // Der Wald im Umland zieht mit, sonst stünde hinter der Kante ein dunkler Wald neben einem verschneiten.
+        if (apronForest?.userData?.setSnow) apronForest.userData.setSnow(weather.treeLoad);
         // Felsen bekommen nur einen Hauch Schnee — halb so viel wie die Bäume.
         if (rocks?.userData?.setSnow) rocks.userData.setSnow(weather.treeLoad * 0.5);
         _snowLine = snowLineY();
@@ -6793,7 +7077,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         // Übergangsband um die Schneegrenze: kein harter Schnitt, sondern ein
         // Streifen, in dem der Boden von grün nach weiß überblendet.
         const band = Math.max(1, limit * 0.30);
-        if (apron?.userData?.setSnowLine) apron.userData.setSnowLine(limit * hScale);
         if (apronForest?.userData?.setSnowLine) apronForest.userData.setSnowLine(limit * hScale, band * hScale);
         for (let vi = 0; vi < gridSize * gridSize; vi++) {
             const lc = world.landcover[vi];
@@ -6865,6 +7148,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             arr[i3 + 2] = b < 0 ? 0 : b > 1 ? 1 : b;
         }
         col.needsUpdate = true;
+        // Umland mitziehen – NACH dem Spielfeld, denn die Schürze übernimmt an der Kante
+        // dessen frisch gemalte Farben (nahtloser Übergang statt sichtbarem Kartenrand).
+        if (apron?.userData?.setSnowLine) apron.userData.setSnowLine(limit * hScale, arr);
         repaintPisteBeds();
         repaintBuildingPads();
     }
@@ -7312,9 +7598,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     pendingFlatten.length = 0;
 
     // Schürze einmal initial einfärben und danach bei jedem Wetterwechsel
-    if (apron?.userData?.setSnowLine) apron.userData.setSnowLine(snowLineY() * hScale);
     if (apronForest?.userData?.setSnowLine) apronForest.userData.setSnowLine(snowLineY() * hScale, Math.max(1, snowLineY() * 0.30) * hScale);
-    repaintSnowCover();   // Ausgangszustand: Tieflagen sind aper
+    repaintSnowCover();   // Ausgangszustand: Tieflagen sind aper (färbt am Ende auch die Schürze)
     /**
      * Schneedecke an einer Gitterzelle als Wert 0..1. Das ist die EINE Quelle
      * der Wahrheit — sie bestimmt sowohl die Einfärbung des Bodens als auch,
@@ -7739,20 +8024,51 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         ghost = g; ghost.visible = false; scene.add(ghost);
     };
 
+    // Punkt auf dem Gelände unter einem Bildschirmpunkt.
+    // Früher wurde dafür das ganze Geländenetz Dreieck für Dreieck geprüft (bis zu
+    // 770 000 – bei jeder Mausbewegung, auf dem Handy bei jedem Antippen spürbar).
+    // Jetzt wandert der Strahl über die Höhenkarte: erst in kleinen Schritten bis
+    // unter die Oberfläche, dann per Halbierung genau an den Schnittpunkt.
     const raycastTerrain = (clientX, clientY) => {
         const rect = canvas.getBoundingClientRect();
         ptr.x = ((clientX - rect.left) / rect.width) * 2 - 1;
         ptr.y = -((clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(ptr, camera);
-        const hit = raycaster.intersectObject(terrain, false)[0];
-        return hit ? hit.point : null;
+        const o = raycaster.ray.origin, d = raycaster.ray.direction;
+        // Abschnitt des Strahls, der über der Karte (Quadrat ±half) liegt
+        let t0 = 0, t1 = camera.far;
+        for (const [oc, dc] of [[o.x, d.x], [o.z, d.z]]) {
+            if (Math.abs(dc) < 1e-9) { if (oc < -half || oc > half) return null; continue; }
+            let a = (-half - oc) / dc, b = (half - oc) / dc;
+            if (a > b) { const s = a; a = b; b = s; }
+            if (a > t0) t0 = a;
+            if (b < t1) t1 = b;
+            if (t0 > t1) return null;
+        }
+        const above = (t) => (o.y + d.y * t) - yAtSmooth((o.x + d.x * t + half) / tile, (o.z + d.z * t + half) / tile);
+        if (above(t0) <= 0) return null;               // Strahl tritt schon unterhalb der Oberfläche in die Karte ein
+        const STEP = 0.6 * tile;
+        let ta = t0, tb = -1;
+        for (let t = t0 + STEP; ; t += STEP) {
+            const tt = Math.min(t, t1);
+            if (above(tt) <= 0) { tb = tt; break; }
+            ta = tt;
+            if (tt >= t1) break;
+        }
+        if (tb < 0) return null;                        // über die Karte hinweg, ohne den Boden zu treffen
+        for (let i = 0; i < 12; i++) { const tm = (ta + tb) * 0.5; if (above(tm) > 0) ta = tm; else tb = tm; }
+        const t = (ta + tb) * 0.5;
+        const x = o.x + d.x * t, z = o.z + d.z * t;
+        return new THREE.Vector3(x, yAtSmooth((x + half) / tile, (z + half) / tile), z);
     };
+    /** Geländepunkt zu einem Ereignis: vom Bildschirm – oder ein mitgegebener Weltpunkt (Bestätigen am Handy). */
+    const pickPoint = (e) => (e && e.__pt) ? e.__pt.clone() : raycastTerrain(e.clientX, e.clientY);
 
     const MAX_SLOPE = 1.6; // max. Gefälle der Grundfläche (Welt-Einheiten)
     const onMove = (e) => {
         if (roadMode) {
             if (!roadStart) return;
-            const pt = raycastTerrain(e.clientX, e.clientY);
+            const pt = pickPoint(e);
             if (!pt) return;
             const gr = worldToGrid(pt.x, pt.z);
             // Vorschau muss GENAU dieselbe Einrastung benutzen wie der Bau,
@@ -7803,7 +8119,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         }
         if (liftMode) {
             if (!liftStart) return;
-            const pt = raycastTerrain(e.clientX, e.clientY);
+            const pt = pickPoint(e);
             if (!pt) return;
             const pts = [liftStart.pt.clone().add(new THREE.Vector3(0,2.4,0)), pt.clone().add(new THREE.Vector3(0,2.4,0))];
             // Echte, transparente Vorschau der kompletten Anlage
@@ -7814,12 +8130,12 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         }
         if (pisteMode) {
             if (pistePts.length === 0) return;
-            const pt = raycastTerrain(e.clientX, e.clientY);
+            const pt = pickPoint(e);
             if (pt) refreshPistePreview(pt);
             return;
         }
         if (!currentBuild || !ghost) return;
-        const pt = raycastTerrain(e.clientX, e.clientY);
+        const pt = pickPoint(e);
         if (!pt) { ghost.visible = false; return; }
         const def = ghost.userData.def;
         // ===== AUF DIE PARZELLE EINRASTEN =====
@@ -7886,12 +8202,45 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             showDirArrow(ghost.userData.type, wx, wz, st.minY, ghostRot);
         }
     };
-    const onDown = (e) => { downX = e.clientX; downY = e.clientY; };
+    /** Finger: Bauvorschau an die angetippte Stelle setzen und zum Bestätigen vormerken. */
+    const buildPending = (pt) => {
+        if (!ghost) return;
+        onMove({ __pt: pt.clone() });
+        const gdef = BUILD_DEFS[ghost.userData.type];
+        const cost = gdef ? gdef.cost : 0;
+        setPending({ kind: 'build', pt: pt.clone(), cost, ok: !!ghost.userData.buildable,
+            why: money < cost ? 'zu wenig Geld'
+                : (DIRECTED[ghost.userData.type] && runFailReason) ? runFailReason
+                : 'belegt, zu steil oder hier nicht erlaubt' });
+    };
+    /** Finger: Stand der gezeichneten Piste in der Bestätigen-Leiste zeigen. */
+    const pistePending = (why) => {
+        if (pistePts.length === 0) { setPending(why ? { kind: 'piste', ok: false, count: 0, why } : null); return; }
+        const pc = pisteCostForPts(pistePts);
+        const ok = pistePts.length >= 2 && money >= pc;
+        setPending({ kind: 'piste', cost: pc, ok, count: pistePts.length,
+            why: why || (pistePts.length < 2 ? 'noch ein Punkt nötig' : money < pc ? 'zu wenig Geld' : '') });
+    };
+    const onDown = (e) => {
+        lastPointerType = e.pointerType || 'mouse';
+        if (isTouchEvent(e)) {
+            touchIds.add(e.pointerId);
+            if (touchIds.size > 1) { gestureSeen = true; return; }   // zweiter Finger: Geste, kein Antippen
+        }
+        downX = e.clientX; downY = e.clientY;
+    };
+    /** Nach dem Loslassen aufräumen – als LETZTER pointerup-Lauscher, damit alle anderen den Stand noch sehen. */
+    const onTouchEnd = (e) => {
+        if (!isTouchEvent(e)) return;
+        touchIds.delete(e.pointerId);
+        if (touchIds.size === 0) gestureSeen = false;
+    };
     const onUp = (e) => {
-        if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) return; // war Kamera-Drag
+        if (!isTap(e)) return; // war Kamera-Drag oder Zwei-Finger-Geste
+        const needConfirm = isTouchEvent(e) && !e.__confirmed;
         // --- STRASSEN-BAU (zwei Klicks: Start, dann Ende; danach weiter ab Endpunkt) ---
         if (roadMode) {
-            const pt = raycastTerrain(e.clientX, e.clientY);
+            const pt = pickPoint(e);
             if (!pt) return;
             const gr = worldToGrid(pt.x, pt.z);
             // ===== AUF GANZE KACHELN, ACHSENPARALLEL ODER 45° =====
@@ -7917,6 +8266,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 const mp = worldPosSmooth(sgx, sgy);
                 roadMarker = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 12), new THREE.MeshStandardMaterial({ color: 0xfbbf24, emissive: 0xb45309, emissiveIntensity: 0.6 }));
                 roadMarker.position.set(mp.x, mp.y + 0.4, mp.z); scene.add(roadMarker);
+                if (isTouchEvent(e)) setPending({ kind: 'roadStart', ok: false });   // Finger: Zwischenstand zeigen, ✕ setzt zurück
                 return;
             }
             const len = Math.hypot(sgx - roadStart.gx, sgy - roadStart.gy);
@@ -7934,7 +8284,16 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 }
                 return false;
             })();
-            if (len >= 2 && !blocked && money >= cost && roadGradeOK(roadStart.gx, roadStart.gy, sgx, sgy)) {
+            const roadOK = len >= 2 && !blocked && money >= cost && roadGradeOK(roadStart.gx, roadStart.gy, sgx, sgy);
+            if (needConfirm) {
+                onMove({ __pt: pt.clone() });              // Vorschau der Trasse bis zum angetippten Punkt
+                setPending({ kind: 'road', pt: pt.clone(), cost, ok: roadOK,
+                    why: len < 2 ? 'zu kurz' : blocked ? 'Gebäude im Weg' : money < cost ? 'zu wenig Geld' : 'zu steil' });
+                return;
+            }
+            // Finger: nach dem Bestätigen geht es am Endpunkt weiter – das zeigt die Leiste wieder an
+            if (e.__confirmed) setPending({ kind: 'roadStart', ok: false });
+            if (roadOK) {
                 addRoad(roadStart.gx, roadStart.gy, sgx, sgy, 3.6);
                 money -= cost; if (onMoney) onMoney(money); emitStats();
                 recomputeCarPath();                                   // Autos nutzen das erweiterte Netz
@@ -7949,17 +8308,25 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         }
         // --- LIFT-BAU (zwei Klicks) ---
         if (liftMode) {
-            const pt = raycastTerrain(e.clientX, e.clientY);
+            const pt = pickPoint(e);
             if (!pt) return;
             if (!liftStart) {
                 const gr = worldToGrid(pt.x, pt.z);
                 liftStart = { pt: pt.clone(), gx: gr.gx, gy: gr.gy };
                 liftMarker = new THREE.Mesh(new THREE.SphereGeometry(0.6, 12, 12), new THREE.MeshStandardMaterial({ color: 0x22d3ee, emissive: 0x0891b2, emissiveIntensity: 0.6 }));
                 liftMarker.position.copy(pt); scene.add(liftMarker);
+                if (isTouchEvent(e)) setPending({ kind: 'liftStart', ok: false });   // Finger: Zwischenstand zeigen, ✕ setzt zurück
                 return;
             }
             // zweiter Klick: bauen
             const cost = liftCost(liftStart.pt, pt);
+            if (needConfirm) {
+                onMove({ __pt: pt.clone() });              // Vorschau der ganzen Anlage zum angetippten Punkt
+                const longEnough = liftStart.pt.distanceTo(pt) > 6;
+                setPending({ kind: 'lift', pt: pt.clone(), cost, ok: money >= cost && longEnough,
+                    why: !longEnough ? 'zu kurz' : 'zu wenig Geld' });
+                return;
+            }
             if (money >= cost && liftStart.pt.distanceTo(pt) > 6) {
                 const grE = worldToGrid(pt.x, pt.z);
                 const N = Math.max(8, Math.round(liftStart.pt.distanceTo(pt) / 4));
@@ -8035,23 +8402,30 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         }
         // --- PISTEN-BAU: Wegpunkt setzen (Einzelklick), Doppelklick beendet ---
         if (pisteMode) {
-            const pt = raycastTerrain(e.clientX, e.clientY);
+            const pt = pickPoint(e);
             if (!pt) return;
             const gr = worldToGrid(pt.x, pt.z);
             const np = { gx: gr.gx, gy: gr.gy };
             // Regeln: kein Wasser/Fels, nicht bergauf > 5°
-            if (pistePts.length === 0) { if (!isBuildableGround(np.gx, np.gy)) return; }
-            else if (!segmentValid(pistePts[pistePts.length - 1], np)) return; // ungültiges Segment -> ignorieren
+            const pointOK = pistePts.length === 0 ? isBuildableGround(np.gx, np.gy) : segmentValid(pistePts[pistePts.length - 1], np);
+            if (!pointOK) {
+                // Mit der Maus zeigt die rote Vorschaulinie, dass es hier nicht geht – am Handy sagt es die Leiste.
+                if (isTouchEvent(e)) pistePending('hier nicht möglich (bergauf, Wasser oder Fels)');
+                return; // ungültiges Segment -> ignorieren
+            }
             pistePts.push(np);
             const dot = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), new THREE.MeshStandardMaterial({ color: 0xfcd34d, emissive: 0xf59e0b, emissiveIntensity: 0.5 }));
             dot.position.copy(pt); scene.add(dot); pisteDots.push(dot);
             refreshPistePreview(null);
+            // Finger: statt Doppelklick beendet ein Knopf im HUD die Piste
+            if (isTouchEvent(e)) pistePending();
             return;
         }
         // --- GEBÄUDE-BAU ---
         if (!currentBuild || !ghost) return;
-        const pt = raycastTerrain(e.clientX, e.clientY);
+        const pt = pickPoint(e);
         if (!pt) return;
+        if (needConfirm) { buildPending(pt); return; }
         const gr0 = worldToGrid(pt.x, pt.z);
         placeBuildingAt(ghost.userData.type, gr0);
     };
@@ -8323,8 +8697,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     let onToast = null;          // kurze Meldung im HUD (Diagnose)
     const onDemolish = (e) => {
         if (!demolishMode) return;
-        if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) return;
-        const pt = raycastTerrain(e.clientX, e.clientY);
+        if (!isTap(e)) return;
+        const pt = pickPoint(e);
         if (!pt) return;
         // nächstes gebautes Gebäude in Reichweite finden
         let best = -1, bestD = 1e9;
@@ -8332,7 +8706,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             const d = Math.hypot(b.rec.x - pt.x, b.rec.z - pt.z);
             if (d < b.rec.r + 1 && d < bestD) { bestD = d; best = i; }
         });
-        if (best < 0) return;
+        if (best < 0) { if (isTouchEvent(e)) setPending(null); return; }
+        // Finger: ein Fehltipper soll kein Hotel kosten – erst nachfragen
+        if (isTouchEvent(e)) {
+            const b = placedBuildings[best];
+            setPending({ kind: 'demolish', building: b, cost: -Math.round((b.cost || 0) * 0.6), ok: true });
+            return;
+        }
         demolishIndex(best);
     };
     /** Gebäude mit Index in placedBuildings abreißen (auch ohne Maus, für Tests). */
@@ -8391,8 +8771,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     // ===== INFO-AUSWAHL: Gebäude/Parkplatz anklicken -> Infofeld =====
     const onPick = (e) => {
         if (currentBuild || demolishMode || liftMode || pisteMode || roadMode) return;
-        if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) return;  // war Kamera-Drag
-        const pt = raycastTerrain(e.clientX, e.clientY);
+        if (!isTap(e)) return;  // war Kamera-Drag oder Zwei-Finger-Geste
+        const pt = pickPoint(e);
         // Zuerst Menschen prüfen (Gäste sind anklickbar) — direkter Mesh-Raycast
         const ptr = new THREE.Vector2(
             ((e.clientX - canvas.getBoundingClientRect().left) / canvas.clientWidth) * 2 - 1,
@@ -8497,12 +8877,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         } else hideDirArrow();
         if (onSelect) onSelect(selectedSel ? infoFor(selectedSel) : null);
     };
-    const deselect = () => { selectedSel = null; if (onSelect) onSelect(null); };
+    // Wird auch bei jedem Werkzeugwechsel aufgerufen – eine vorgemerkte Aktion gilt dann nicht mehr.
+    const deselect = () => { selectedSel = null; if (onSelect) onSelect(null); if (pending) setPending(null); };
     const endLift = () => { liftMode = false; liftStart = null; if (liftMarker) { scene.remove(liftMarker); liftMarker = null; } if (liftPreview) { scene.remove(liftPreview); liftPreview = null; } liftPreviewKey = ''; };
     const endPiste = () => { pisteMode = false; clearPisteDraft(); };
-    const onDblClick = (e) => {
+    /** Gezeichnete Piste bauen und den Pistenmodus beenden (Doppelklick bzw. „Fertig" am Handy). */
+    const finishPiste = () => {
         if (!pisteMode) return;
-        e.preventDefault();
         const cost = pisteCostForPts(pistePts);
         if (pistePts.length >= 2 && money >= cost) {
             const ok = buildPistePath(pistePts);
@@ -8512,15 +8893,83 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         pisteMode = false;
         if (onBuildDone) onBuildDone();
     };
-    canvas.addEventListener('pointermove', onMove);
+    const onDblClick = (e) => {
+        if (!pisteMode) return;
+        e.preventDefault();
+        if (lastPointerType !== 'mouse') return;       // am Handy beendet der Knopf im HUD, nicht der Doppeltipp
+        finishPiste();
+    };
+    /** Bestätigung aus dem HUD (Finger): die vorgemerkte Aktion jetzt ausführen. */
+    const confirmPending = () => {
+        const p = pending;
+        if (!p || !p.ok) return;
+        setPending(null);
+        if (p.kind === 'piste') { finishPiste(); return; }
+        if (p.kind === 'demolish') { const i = placedBuildings.indexOf(p.building); if (i >= 0) demolishIndex(i); return; }
+        onUp({ __confirmed: true, __pt: p.pt, pointerType: 'touch', clientX: 0, clientY: 0 });
+    };
+    /** Vorgemerkte Aktion verwerfen; das Werkzeug bleibt aktiv, man kann neu antippen. */
+    const cancelPending = () => {
+        const p = pending;
+        if (!p) return;
+        setPending(null);
+        if (p.kind === 'piste') { clearPisteDraft(); }                // Entwurf weg, Werkzeug bleibt: neu ansetzen
+        else if (p.kind === 'lift' || p.kind === 'liftStart') {
+            // zurück auf Anfang: die Talstation wird neu gesetzt
+            if (liftMarker) { scene.remove(liftMarker); liftMarker = null; }
+            if (liftPreview) { scene.remove(liftPreview); liftPreview = null; }
+            liftPreviewKey = '';
+            liftStart = null;
+        } else if (p.kind === 'road') {
+            // nur das angetippte Stück verwerfen – der Startpunkt bleibt stehen
+            if (roadPreview) { scene.remove(roadPreview); roadPreview.userData.dispose?.(); roadPreview = null; }
+            setPending({ kind: 'roadStart', ok: false });
+        } else if (p.kind === 'roadStart') {
+            roadStart = null;
+            if (roadMarker) { scene.remove(roadMarker); roadMarker = null; }
+            if (roadPreview) { scene.remove(roadPreview); roadPreview.userData.dispose?.(); roadPreview = null; }
+        } else if (p.kind === 'build') {
+            if (ghost) ghost.visible = false;
+            hideSnowRange(); hideDirArrow(); showParcel(null, false);
+        }
+    };
+    /** Finger: letzten gesetzten Pistenpunkt zurücknehmen. */
+    const undoPistePoint = () => {
+        if (!pisteMode || pistePts.length === 0) return;
+        pistePts.pop();
+        const d = pisteDots.pop();
+        if (d) scene.remove(d);
+        refreshPistePreview(null);
+        pistePending();
+    };
+    /** Finger: vorgemerktes Gebäude um 90° drehen (ersetzt die Tasten Q/E). */
+    const rotateBuild = () => {
+        if (!ghost) return;
+        rotateGhost(Math.PI / 2);
+        if (pending && pending.kind === 'build') buildPending(pending.pt);
+    };
+    // Vorschau beim Darüberfahren gibt es nur mit der Maus; der Finger setzt sie durch Antippen.
+    const onHover = (e) => { if (!isTouchEvent(e)) onMove(e); };
+    canvas.addEventListener('pointermove', onHover);
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointerup', onDemolish);
     canvas.addEventListener('pointerup', onPick);
+    canvas.addEventListener('pointerup', onTouchEnd);
+    canvas.addEventListener('pointercancel', onTouchEnd);
     canvas.addEventListener('dblclick', onDblClick);
 
     return {
-        dispose(){ cancelAnimationFrame(raf); window.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onMove); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
+        dispose(){ cancelAnimationFrame(raf); orbit.dispose(); window.removeEventListener('resize',onResize); window.visualViewport?.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onHover); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('pointerup',onTouchEnd); canvas.removeEventListener('pointercancel',onTouchEnd); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
+        // ----- Bedienung per Finger: vorgemerkte Aktion bestätigen oder verwerfen -----
+        setOnPending(cb){ onPending = cb; },
+        confirmPending(){ confirmPending(); },
+        cancelPending(){ cancelPending(); },
+        undoPistePoint(){ undoPistePoint(); },
+        rotateBuild(){ rotateBuild(); },
+        // ----- Kamera-Knöpfe im HUD -----
+        cameraZoom(f){ orbit.zoom(f); },
+        cameraTurn(rad){ orbit.turn(rad); },
         setBuild(type){ deselect(); currentBuild = type; demolishMode = false; endLift(); endPiste(); endRoad(); showParcelGrid(!!type); if (!type) { hideSnowRange(); hideDirArrow(); } if (type) makeGhost(type); else if (ghost) { scene.remove(ghost); ghost = null; } },
         deselect(){ deselect(); },
         setDemolish(on){ deselect(); demolishMode = on; currentBuild = null; endLift(); endPiste(); endRoad(); if (ghost) { scene.remove(ghost); ghost = null; } },

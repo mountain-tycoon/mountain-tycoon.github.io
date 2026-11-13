@@ -3,6 +3,32 @@ import { generateWorldData, upsampleWorld } from '../engine/utils';
 import { createScene3D } from './Scene3D.js';
 import { evaluateObjective, objectiveLabel, formatObjectiveValue, markLevelCompleted, CAMPAIGN_LEVELS, MASSIFS } from '../constants/campaign';
 
+// ===== BILDSCHIRM UND EINGABEART =====
+// Steuert das kompakte Layout fürs Handy: Werkzeuge unten statt links, Bedienfelder
+// als Karten von unten, alles dauerhaft sichtbar (ohne Maus gibt es kein „Drüberfahren").
+const readViewport = () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    const coarse = !!window.matchMedia?.('(hover: none), (pointer: coarse)').matches
+        || ((navigator.maxTouchPoints || 0) > 0 && Math.min(w, h) < 520);
+    return { w, h, coarse, compact: w < 760 || h < 520, portrait: h >= w };
+};
+const useViewport = () => {
+    const [vp, setVp] = useState(readViewport);
+    useEffect(() => {
+        const update = () => setVp(readViewport());
+        window.addEventListener('resize', update);
+        window.addEventListener('orientationchange', update);
+        return () => { window.removeEventListener('resize', update); window.removeEventListener('orientationchange', update); };
+    }, []);
+    return vp;
+};
+/** Bedienfelder dauerhaft voll sichtbar? (Finger-Geräte und kleine Bildschirme) */
+const hudAlwaysOn = () => { const v = readViewport(); return v.coarse || v.compact; };
+// Abstand zu Notch und Home-Balken (wirkt mit viewport-fit=cover)
+const SAFE_T = 'env(safe-area-inset-top, 0px)', SAFE_B = 'env(safe-area-inset-bottom, 0px)';
+const SAFE_L = 'env(safe-area-inset-left, 0px)', SAFE_R = 'env(safe-area-inset-right, 0px)';
+const BAR_H = 62;      // Höhe der unteren Werkzeugleiste im kompakten Layout
+
 // ===== GLAS-OPTIK =====
 // Halbtransparente Milchglasfläche mit weichem Rand und Innenlicht — wird
 // von allen HUD-Elementen geteilt, damit die Oberfläche einheitlich wirkt.
@@ -70,7 +96,7 @@ const CATEGORIES = [
         ]
     },
     {
-        key: 'schlafen', label: 'Übernachten', icon: '🏨',
+        key: 'schlafen', label: 'Übernachten', short: 'Betten', icon: '🏨',
         items: [
             // Sechs Stufen, nach Bettenzahl sortiert (25 -> 250)
             { key: 'hotel_pension',tool: 'build', icon: '🏠', name: 'Hotel', group: 'Hotel', variant: 'Pension · 25 B', cost: 42000 },
@@ -85,7 +111,7 @@ const CATEGORIES = [
         ]
     },
     {
-        key: 'wellness', label: 'Wellness', icon: '🧖',
+        key: 'wellness', label: 'Wellness', short: 'Spa', icon: '🧖',
         items: [
             { key: 'sauna',   tool: 'build', icon: '🧖', name: 'Sauna-Anlage', cost: 195000 },
             { key: 'eisbahn', tool: 'build', icon: '⛸️', name: 'Eislaufbahn',  cost: 975000 },
@@ -93,7 +119,7 @@ const CATEGORIES = [
         ]
     },
     {
-        key: 'infra', label: 'Infrastruktur', icon: '🎫',
+        key: 'infra', label: 'Infrastruktur', short: 'Infra', icon: '🎫',
         items: [
             { key: 'road',       tool: 'road',  icon: '🛣️', name: 'Straße',      cost: 'ab €400' },
             { key: 'ticket',     tool: 'build', icon: '🎫', name: 'Kasse',       cost: 29200 },
@@ -188,6 +214,14 @@ const ICON_PATHS = {
     flag:  'M5 21V4M5 4h11l-2 3.5 2 3.5H5',
     mega:  'M3 10v4h3l7 4V6l-7 4zM17 9a4 4 0 0 1 0 6',
     back:  'M15 5l-7 7 7 7',
+    // Bedienknöpfe (Handy): als Strichsymbole, weil Pfeil-Schriftzeichen je nach Gerät fehlen oder bunt ausfallen
+    plus:  'M12 5v14M5 12h14',
+    minus: 'M5 12h14',
+    check: 'M5 12.5l4.5 4.5L19 7.5',
+    close: 'M6 6l12 12M18 6L6 18',
+    turnL: 'M2.5 4.5v6h6M4.6 15a8.5 8.5 0 1 0 2-8.8L2.5 10.5',
+    turnR: 'M21.5 4.5v6h-6M19.4 15a8.5 8.5 0 1 1-2-8.8l4.1 4.3',
+    undo:  'M9 14L4 9l5-5M20 20v-7a4 4 0 0 0-4-4H4',
     bed:   'M3 18V8M3 14h18v4M3 14V11h7v3M21 14v-2a2 2 0 0 0-2-2h-9'
 };
 const Ico = ({ name, size = 13, style }) => (
@@ -206,28 +240,40 @@ const WEATHER_ICON = { heavy: 'snow', snow: 'snow', light: 'cloud', clear: 'sun'
  */
 const useReveal = (force = false) => {
     const [hov, setHov] = useState(false);
+    // Ohne Maus gibt es kein Drüberfahren: dort bleiben die Felder voll sichtbar.
+    const on = hov || force || hudAlwaysOn();
     return {
-        on: hov || force,
+        on,
         props: { onMouseEnter: () => setHov(true), onMouseLeave: () => setHov(false) },
-        style: { opacity: (hov || force) ? 1 : 0.28, transition: 'opacity .22s ease' }
+        style: { opacity: on ? 1 : 0.28, transition: 'opacity .22s ease' }
     };
 };
 
 /** Ein Wert in der Kopfleiste: kleines Kürzel, Zahl, Tooltip mit Bedeutung. */
-const Stat = ({ icon, value, col, tip, dot, onClick }) => (
-    <div title={tip} onClick={onClick}
-         style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: onClick ? 'pointer' : 'default', color: col }}>
+const Stat = ({ icon, value, col, tip, dot, onClick, onTip }) => (
+    <div title={tip} onClick={onClick || (onTip && tip ? () => onTip(tip) : undefined)}
+         style={{ display: 'flex', alignItems: 'center', gap: 5, flex: 'none', cursor: (onClick || onTip) ? 'pointer' : 'default', color: col }}>
         <Ico name={icon} size={13} style={{ opacity: 0.75 }} />
         <span style={{ fontSize: 12.5, fontWeight: 600 }}>{value}</span>
         {dot && <span style={{ width: 5, height: 5, borderRadius: 3, background: dot }} />}
     </div>
 );
 
-const StatusBoard = ({ stats, onFocus, money, level, fmt }) => {
+const StatusBoard = ({ stats, onFocus, money, level, fmt, compact }) => {
     // Standardmäßig eingeklappt: die Kopfzeile allein reicht für den Überblick,
     // Details holt man sich bei Bedarf dazu.
     const [open, setOpen] = useState(false);
     const rv = useReveal(open);
+    // Handy: die Bedeutung eines Werts erscheint beim Antippen kurz unter der Leiste
+    // (am Rechner zeigt sie der Tooltip beim Drüberfahren).
+    const [tip, setTip] = useState('');
+    const tipTimer = useRef(0);
+    useEffect(() => () => clearTimeout(tipTimer.current), []);
+    const showTip = compact ? (t) => {
+        setTip(t);
+        clearTimeout(tipTimer.current);
+        tipTimer.current = setTimeout(() => setTip(''), 4000);
+    } : null;
     const sup = stats.waterSupply || 0;
     const need = stats.waterNeed || 0;
     const short = need > 0 && sup < need;
@@ -244,47 +290,57 @@ const StatusBoard = ({ stats, onFocus, money, level, fmt }) => {
     const moodIco = mood >= 55 ? 'smile' : mood >= 35 ? 'meh' : 'frown';
 
     return (
-        <div {...rv.props} style={{
+        <div {...rv.props} style={compact ? {
+            // Handy: schmaler Streifen zwischen Menü- und Aufgabenknopf, seitlich wischbar
+            position: 'fixed', top: `calc(8px + ${SAFE_T})`, left: `calc(54px + ${SAFE_L})`, right: `calc(58px + ${SAFE_R})`, zIndex: 10,
+            display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 6, ...rv.style
+        } : {
             position: 'fixed', top: 14, left: '50%', transform: 'translateX(-50%)', zIndex: 10,
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, ...rv.style
         }}>
             {/* Kopfleiste: immer sichtbar, sehr schmal — kleine Strichsymbole mit
                 Zahl; die Bedeutung erscheint beim Drüberfahren. */}
-            <div style={{ ...glass, display: 'flex', alignItems: 'center', gap: 15,
-                          padding: '7px 8px 7px 14px', borderRadius: 14, whiteSpace: 'nowrap' }}>
-                <Stat icon="flag" value={level?.name || ''} col="#e8eaed" tip="Aktuelles Level" />
-                <Stat icon="coin" value={fmt(money)} col="#4ade80" tip="Kontostand" />
-                <Stat icon="users" value={stats.currentGuests} col="#c3c8cf" tip="Gäste im Gebiet" />
-                <Stat icon="trend" value={fmt(stats.totalRevenue)} col="#fbbf24" tip="Gesamtumsatz" />
+            <div className="mt-noscrollbar" style={{ ...glass, display: 'flex', alignItems: 'center', gap: compact ? 13 : 15,
+                          padding: compact ? '9px 8px 9px 12px' : '7px 8px 7px 14px', borderRadius: 14, whiteSpace: 'nowrap',
+                          ...(compact ? { overflowX: 'auto', touchAction: 'pan-x', WebkitOverflowScrolling: 'touch' } : null) }}>
+                {!compact && <Stat onTip={showTip} icon="flag" value={level?.name || ''} col="#e8eaed" tip="Aktuelles Level" />}
+                <Stat onTip={showTip} icon="coin" value={fmt(money)} col="#4ade80" tip="Kontostand" />
+                <Stat onTip={showTip} icon="users" value={stats.currentGuests} col="#c3c8cf" tip="Gäste im Gebiet" />
+                <Stat onTip={showTip} icon="trend" value={fmt(stats.totalRevenue)} col="#fbbf24" tip="Gesamtumsatz" />
                 <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.12)' }} />
-                <Stat icon={WEATHER_ICON[stats.weatherKey] || 'cloud'} value={stats.weatherName || ''} col="#e8eaed"
+                <Stat onTip={showTip} icon={WEATHER_ICON[stats.weatherKey] || 'cloud'} value={stats.weatherName || ''} col="#e8eaed"
                       tip={'Aktuelles Wetter' + (stats.forecastName ? ' · danach ' + stats.forecastName + ' in ' + (stats.forecastIn ?? 0) + 's' : '')} />
-                <Stat icon={moodIco} value={mood + '%'} col={moodCol} tip="Durchschnittliche Laune aller Gäste" />
-                <Stat icon="star" value={attr} col={attrCol}
+                <Stat onTip={showTip} icon={moodIco} value={mood + '%'} col={moodCol} tip="Durchschnittliche Laune aller Gäste" />
+                <Stat onTip={showTip} icon="star" value={attr} col={attrCol}
                       tip={'Attraktivität des Skigebiets (0–100) — bestimmt, wie viele Gäste anreisen'
                            + ' · Ruf ' + (stats.reput ?? 0) + '% (wächst, wenn der Score lange über 60 bleibt)'
                            + (stats.adId ? ' · Werbung läuft: +' + stats.adBoostPct + '%' : '')}
                       dot={stats.adId ? '#7dd3fc' : null} />
-                {stats.hotelBeds > 0 && <Stat icon="bed" value={stats.bedsUsed + '/' + stats.hotelBeds}
+                {stats.hotelBeds > 0 && <Stat onTip={showTip} icon="bed" value={stats.bedsUsed + '/' + stats.hotelBeds}
                       col={bedsFull ? '#f87171' : '#c3c8cf'}
                       tip={'Belegte Betten / Betten gesamt' + (bedsFull ? ' — alle Häuser voll, Gäste reisen ab' : '')} />}
-                <Stat icon="drop" value={sup + '/' + need} col={waterCol}
+                <Stat onTip={showTip} icon="drop" value={sup + '/' + need} col={waterCol}
                       tip="Beschneiung: Wasservorrat / Bedarf der Schneekanonen" />
-                {alerts > 0 && <Stat icon="alert" value={alerts} col="#f87171"
+                {alerts > 0 && <Stat onTip={showTip} icon="alert" value={alerts} col="#f87171"
                                      tip="Offene Probleme — anklicken für Details" onClick={() => setOpen(true)} />}
                 <button onClick={() => setOpen(o => !o)} title={open ? 'Einklappen' : 'Ausklappen'}
-                        style={{ marginLeft: 2, width: 22, height: 22, borderRadius: 7, cursor: 'pointer',
+                        style={{ marginLeft: 2, flex: 'none', width: compact ? 30 : 22, height: compact ? 30 : 22, borderRadius: 7, cursor: 'pointer',
                                  border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.05)',
-                                 color: '#9aa0a8', fontSize: 9, lineHeight: 1, display: 'flex',
+                                 color: '#9aa0a8', fontSize: compact ? 12 : 9, lineHeight: 1, display: 'flex',
                                  alignItems: 'center', justifyContent: 'center' }}>
                     {open ? '▴' : '▾'}
                 </button>
             </div>
+            {tip && !open && (
+                <div style={{ ...glass, alignSelf: 'center', maxWidth: '100%', boxSizing: 'border-box', padding: '7px 11px',
+                              borderRadius: 11, fontSize: 11.5, lineHeight: 1.35, color: '#e8eaed' }}>{tip}</div>
+            )}
 
             {/* Ausgeklappter Teil: Details und Warnungen */}
             {open && (
                 <div style={{ ...glass, padding: '11px 15px', borderRadius: 16,
-                              display: 'flex', alignItems: 'center', gap: 14, whiteSpace: 'nowrap' }}>
+                              display: 'flex', alignItems: 'center', gap: compact ? 10 : 14,
+                              ...(compact ? { flexWrap: 'wrap', rowGap: 10 } : { whiteSpace: 'nowrap' }) }}>
                     {/* Beschneiung */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
@@ -362,7 +418,7 @@ const COLORABLE = ['gondola', 'gondola4', 'gondola8', 'mega', 'tram', 'tramxl'];
  * Spieler den Anlagennamen fest und — bei Gondel- und Kabinenbahnen — die
  * Lackierung der Kabinen. Sessel- und Schlepplifte haben keine Farbwahl.
  */
-const LiftSetup = ({ kind, suggestion, onConfirm, onCancel }) => {
+const LiftSetup = ({ kind, suggestion, onConfirm, onCancel, touch }) => {
     const [name, setName] = useState('');
     const [color, setColor] = useState(CABIN_COLORS[0].hex);
     const colorable = COLORABLE.includes(kind);
@@ -373,7 +429,8 @@ const LiftSetup = ({ kind, suggestion, onConfirm, onCancel }) => {
         <div style={{ position: 'fixed', inset: 0, zIndex: 40, display: 'flex',
                       alignItems: 'center', justifyContent: 'center',
                       background: 'rgba(4,6,10,0.5)', backdropFilter: 'blur(3px)' }}>
-            <div style={{ ...glass, width: 380, padding: '22px 24px', borderRadius: 20, color: '#e8eaed' }}>
+            <div style={{ ...glass, width: 'min(380px, calc(100vw - 24px))', maxHeight: 'calc(100% - 24px)', overflowY: 'auto',
+                          boxSizing: 'border-box', padding: '22px 24px', borderRadius: 20, color: '#e8eaed' }}>
                 <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.22em',
                               textTransform: 'uppercase', color: '#9aa0a8' }}>Neue Anlage</div>
                 <h3 style={{ margin: '6px 0 18px', fontSize: 20, fontWeight: 700 }}>{label}</h3>
@@ -381,12 +438,13 @@ const LiftSetup = ({ kind, suggestion, onConfirm, onCancel }) => {
                 <label style={{ fontSize: 10.5, letterSpacing: '0.14em', textTransform: 'uppercase',
                                 color: '#9aa0a8', display: 'block', marginBottom: 6 }}>Name</label>
                 <input value={name} onChange={(e) => setName(e.target.value)} placeholder={suggestion}
-                       autoFocus
+                       autoFocus={!touch}
                        onKeyDown={(e) => { if (e.key === 'Enter') onConfirm({ name: name.trim() || suggestion, color: colorable ? color : null }); }}
                        style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px',
                                 borderRadius: 10, background: 'rgba(255,255,255,0.07)',
-                                border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed',
-                                fontSize: 14, outline: 'none' }} />
+                                border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed', userSelect: 'text', WebkitUserSelect: 'text',
+                                // Handy: ab 16 px zoomt der Browser beim Antippen nicht in das Feld hinein
+                                fontSize: touch ? 16 : 14, outline: 'none' }} />
                 <div style={{ fontSize: 10.5, color: '#8b9098', marginTop: 6 }}>
                     Leer lassen für „{suggestion}"
                 </div>
@@ -509,9 +567,65 @@ const GuestPortrait = ({ p }) => {
     );
 };
 
+/**
+ * Bestätigen-Leiste (Finger). Mit der Maus sieht man die Vorschau schon beim
+ * Bewegen; mit dem Finger setzt das Antippen erst die Vorschau samt Preis –
+ * gebaut oder abgerissen wird erst mit dem Haken.
+ */
+const ConfirmBar = ({ p, fmt, onOk, onCancel, onRotate, onUndo }) => {
+    // Zwischenschritt (erster Punkt gesetzt): nur Hinweis und Zurück, noch nichts zu bestätigen
+    const step = p.kind === 'liftStart' || p.kind === 'roadStart';
+    const title = { build: 'Hier bauen?', road: 'Straßenstück bauen?', lift: 'Lift so bauen?', piste: 'Piste bauen?',
+                    demolish: 'Abreißen?', liftStart: 'Talstation gesetzt', roadStart: 'Startpunkt gesetzt' }[p.kind] || 'Ausführen?';
+    let sub;
+    if (p.kind === 'liftStart') sub = 'Jetzt die Bergstation antippen';
+    else if (p.kind === 'roadStart') sub = 'Jetzt das Ende antippen';
+    else if (p.kind === 'demolish') sub = 'Erstattung ' + fmt(Math.abs(p.cost || 0));
+    else if (p.kind === 'piste') sub = p.count + (p.count === 1 ? ' Punkt' : ' Punkte') + (p.count >= 2 ? ' · ' + fmt(p.cost || 0) : '');
+    else sub = fmt(p.cost || 0);
+    const bad = !step && !p.ok;
+    const round = { flex: 'none', width: 46, height: 46, borderRadius: 14, padding: 0, cursor: 'pointer',
+                    fontSize: 20, fontWeight: 700, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.18)', color: '#e8eaed' };
+    return (
+        <div style={{ ...glass, pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: 6,
+                      borderRadius: 20, maxWidth: '100%', boxSizing: 'border-box', color: '#e8eaed' }}>
+            <button onClick={onCancel} title="Verwerfen" style={round}><Ico name="close" size={19} /></button>
+            {p.kind === 'build' && <button onClick={onRotate} title="Um 90° drehen" style={round}><Ico name="turnR" size={19} /></button>}
+            {p.kind === 'piste' && <button onClick={onUndo} title="Letzten Punkt zurücknehmen" style={round}><Ico name="undo" size={19} /></button>}
+            <div style={{ flex: '1 1 auto', minWidth: 0, padding: '0 6px' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>{title}</div>
+                <div style={{ fontSize: 11.5, lineHeight: 1.3, color: bad ? '#fca5a5' : '#a8aeb6' }}>
+                    {sub}{bad && p.why ? ' · ' + p.why : ''}
+                </div>
+            </div>
+            {!step && (
+                <button onClick={onOk} disabled={!p.ok} title="Bestätigen"
+                        style={{ ...round, width: 60, cursor: p.ok ? 'pointer' : 'not-allowed',
+                                 background: p.ok ? 'linear-gradient(135deg,#16a34a,#22c55e)' : 'rgba(255,255,255,0.05)',
+                                 border: p.ok ? '1px solid rgba(134,239,172,0.7)' : '1px solid rgba(255,255,255,0.12)',
+                                 color: p.ok ? '#fff' : '#6b7280' }}><Ico name="check" size={24} style={{ strokeWidth: 2.4 }} /></button>
+            )}
+        </div>
+    );
+};
+
 const World3D = ({ level, onExit }) => {
     const canvasRef = useRef(null);
     const apiRef = useRef(null);
+    const vp = useViewport();
+    const compact = vp.compact;          // Handy-Layout: Werkzeuge unten, Felder als Karten von unten
+    const touch = vp.coarse;             // Bedienung mit dem Finger
+    const narrow = vp.w < 560;           // Hochkant-Handy: Karten über die ganze Breite
+    const [pendingAct, setPendingAct] = useState(null);   // angetippte, noch nicht bestätigte Aktion
+    // Einmaliger Hinweis auf die Finger-Gesten
+    const [gestureHelp, setGestureHelp] = useState(() => {
+        try { return !localStorage.getItem('mt.touchHelp'); } catch { return true; }
+    });
+    const dismissGestureHelp = () => {
+        setGestureHelp(false);
+        try { localStorage.setItem('mt.touchHelp', '1'); } catch { /* privater Modus */ }
+    };
     const [money, setMoney] = useState(level?.startingMoney || 2000000);
     const [active, setActive] = useState(null);      // aktives Item-key
     const [openCat, setOpenCat] = useState(null);    // geöffnete Kategorie
@@ -546,6 +660,7 @@ const World3D = ({ level, onExit }) => {
         api.setOnBuildHint?.((h) => setBuildHint(h || ''));
         api.setOnToast?.((m) => { setToast(m); clearTimeout(window.__toastT); window.__toastT = setTimeout(() => setToast(''), 25000); });
         api.setOnSelect?.((info) => setSelInfo(info));
+        api.setOnPending?.((p) => setPendingAct(p));
         api.setOnStats((st) => {
             setStats(st);
             if ((level?.objectives?.length > 0) && level.objectives.every(o => evaluateObjective(o, st).done)) {
@@ -574,44 +689,130 @@ const World3D = ({ level, onExit }) => {
     const [liftSetup, setLiftSetup] = useState(null);
     /** Kamera zum gemeldeten Problem führen (Klick auf die HUD-Warnung). */
     const focusProblem = (kind) => { apiRef.current?.focusProblem?.(kind); };
+    /** Aktives Werkzeug ganz beenden (× im Hinweis). */
+    const clearTool = () => {
+        const api = apiRef.current;
+        setActive(null); setBuildHint('');
+        if (!api) return;
+        api.setBuild(null); api.setDemolish(false); api.setLift(false); api.setPiste(false); api.setRoad?.(false);
+    };
     const selectItem = (item) => {
-        if (active === item.key) { setActive(null); apiRef.current?.setBuild(null); apiRef.current?.setLift(false); apiRef.current?.setPiste(false); apiRef.current?.setRoad?.(false); apiRef.current?.setDemolish(false); return; }
+        if (active === item.key) { clearTool(); return; }
         setActive(item.key);
         applyTool(item);
+        if (compact) setOpenCat(null);        // Handy: Karte wieder frei, gebaut wird im Gelände
     };
     const toggleDemolish = () => {
         const on = active !== 'demolish';
         setActive(on ? 'demolish' : null);
         apiRef.current?.setBuild(null); apiRef.current?.setLift(false); apiRef.current?.setPiste(false); apiRef.current?.setRoad?.(false);
         apiRef.current?.setDemolish(on);
+        if (compact) setOpenCat(null);
+    };
+    /** Kategorie öffnen/schließen; am Handy teilt sie sich den Platz mit dem Infofeld. */
+    const toggleCat = (key) => {
+        const willOpen = openCat !== key;
+        setOpenCat(willOpen ? key : null);
+        if (willOpen && compact && selInfo) { apiRef.current?.deselect?.(); setSelInfo(null); }
     };
 
     const fmt = (n) => typeof n === 'number' ? '€' + Math.round(n).toLocaleString('de-DE') : n;
+    // Welches Werkzeug ist aktiv – und aus welcher Kategorie stammt es?
+    const activeCat = active && active !== 'demolish' ? CATEGORIES.find(c => c.items.some(i => i.key === active)) : null;
+    const activeItem = activeCat ? activeCat.items.find(i => i.key === active) : null;
     const hint = () => {
-        if (active === 'demolish') return 'Klicke auf ein gebautes Gebäude zum Abreißen (60% Erstattung)';
-        if (active === 'lift') return 'Gondelbahn ziehen: 1. Klick Talstation, 2. Klick Bergstation';
-        if (active === 'piste') return 'Piste zeichnen: pro Klick ein Kurvenpunkt · Doppelklick beendet · Schwierigkeit ergibt sich aus dem Gefälle';
+        if (active === 'demolish') return touch
+            ? 'Gebäude antippen, dann mit ✓ abreißen (60 % Erstattung)'
+            : 'Klicke auf ein gebautes Gebäude zum Abreißen (60% Erstattung)';
+        if (!activeItem) return null;
+        if (activeItem.tool === 'lift') return touch
+            ? 'Lift: erst die Talstation antippen, dann die Bergstation – mit ✓ bauen'
+            : 'Lift ziehen: 1. Klick Talstation, 2. Klick Bergstation';
+        if (activeItem.tool === 'piste') return touch
+            ? 'Piste: Punkt für Punkt bergab antippen, dann mit ✓ bauen'
+            : 'Piste zeichnen: pro Klick ein Kurvenpunkt · Doppelklick beendet · Schwierigkeit ergibt sich aus dem Gefälle';
+        if (activeItem.tool === 'road') return touch
+            ? 'Straße: Start antippen, dann das Ende – mit ✓ bauen, danach geht es am Endpunkt weiter'
+            : 'Straße ziehen: 1. Klick Start, 2. Klick Ende · danach geht es am Endpunkt weiter';
         if (['funpark_s', 'funpark', 'funpark_l', 'kicker', 'halfpipe', 'racecourse'].includes(active))
             return (buildHint ? '⛔ ' + buildHint + ' · ' : '') + 'Nur auf EXTRABREITEN Pisten baubar · rastet mittig ein, Fahrtrichtung bergab';
-        if (active) return 'Klicke aufs Gelände zum Platzieren · grün = frei, rot = belegt/zu steil/zu teuer';
-        return null;
+        return touch
+            ? 'Bauplatz antippen · grün = frei, rot = geht hier nicht · mit ✓ bauen'
+            : 'Klicke aufs Gelände zum Platzieren · grün = frei, rot = belegt/zu steil/zu teuer';
     };
+    const hintText = hint();
+    // Unterkante für alles, was über der Werkzeugleiste des Handy-Layouts sitzt
+    const aboveBar = `calc(${BAR_H + 8}px + ${SAFE_B})`;
+    const sheetMaxH = Math.max(150, Math.round(narrow ? vp.h * 0.46 : vp.h - BAR_H - 96));
+    const camBtn = { ...glass, width: 42, height: 42, borderRadius: 13, padding: 0, cursor: 'pointer', color: '#e8eaed',
+                     fontSize: 19, fontWeight: 600, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' };
 
     return (
-        <div style={{ position: 'fixed', inset: 0, background: '#0b1a30' }}>
-            <canvas ref={canvasRef} style={{ display: 'block', width: '100vw', height: '100vh', cursor: active ? 'crosshair' : 'grab' }} />
+        <div style={{ position: 'fixed', inset: 0, background: '#0b1a30', overflow: 'hidden',
+                      // Die Seite selbst soll weder zoomen noch scrollen noch Text markieren – nur das Spiel reagiert.
+                      touchAction: 'none', overscrollBehavior: 'none', userSelect: 'none', WebkitUserSelect: 'none',
+                      WebkitTouchCallout: 'none', WebkitTapHighlightColor: 'transparent' }}>
+            <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: active ? 'crosshair' : 'grab' }} />
 
             {/* Kopfzeile: nur der Rückweg ins Menü; alle Zahlen sitzen zentriert oben */}
-            <div {...rvMenu.props} style={{ position: 'fixed', top: 14, left: 14, zIndex: 10, ...rvMenu.style }}>
-                <button onClick={onExit} style={{ ...btn, display: 'flex', alignItems: 'center', gap: 6 }} title="Zurück zum Hauptmenü">
-                    <Ico name="back" size={12} /> Menü
-                </button>
-            </div>
+            {compact ? (
+                <div style={{ position: 'fixed', top: `calc(8px + ${SAFE_T})`, left: `calc(8px + ${SAFE_L})`, zIndex: 10 }}>
+                    <button onClick={onExit} title="Zurück zum Hauptmenü"
+                            style={{ ...glass, width: 40, height: 40, borderRadius: 13, padding: 0, cursor: 'pointer', color: '#e8eaed',
+                                     display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ico name="back" size={16} />
+                    </button>
+                </div>
+            ) : (
+                <div {...rvMenu.props} style={{ position: 'fixed', top: 14, left: 14, zIndex: 10, ...rvMenu.style }}>
+                    <button onClick={onExit} style={{ ...btn, display: 'flex', alignItems: 'center', gap: 6 }} title="Zurück zum Hauptmenü">
+                        <Ico name="back" size={12} /> Menü
+                    </button>
+                </div>
+            )}
 
             {/* Beschneiungs-Zentrale: Wasservorrat, Bedarf und aktuelles Wetter */}
-            {stats && <StatusBoard stats={stats} onFocus={focusProblem} money={money} level={level} fmt={fmt} />}
+            {stats && <StatusBoard stats={stats} onFocus={focusProblem} money={money} level={level} fmt={fmt} compact={compact} />}
 
-            {/* Bau-Seitenleiste links: Kategorien untereinander, Varianten als Untergruppe */}
+            {compact ? (
+                /* Handy: Werkzeugleiste unten – alle Kategorien nebeneinander, mit dem Daumen erreichbar */
+                <div className="mt-noscrollbar" style={{
+                    position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 11, boxSizing: 'border-box',
+                    height: `calc(${BAR_H}px + ${SAFE_B})`,
+                    padding: `6px calc(6px + ${SAFE_R}) calc(6px + ${SAFE_B}) calc(6px + ${SAFE_L})`,
+                    display: 'flex', alignItems: 'stretch', gap: 4, overflowX: 'auto', touchAction: 'pan-x',
+                    background: 'rgba(16,20,27,0.72)', backdropFilter: glass.backdropFilter, WebkitBackdropFilter: glass.WebkitBackdropFilter,
+                    borderTop: '1px solid rgba(255,255,255,0.14)', boxShadow: '0 -6px 24px rgba(0,0,0,0.35)'
+                }}>
+                    {CATEGORIES.map(cat => {
+                        const isOpen = openCat === cat.key;
+                        const inUse = activeCat?.key === cat.key;      // hier steckt das aktive Werkzeug
+                        return (
+                            <button key={cat.key} title={cat.label} onClick={() => toggleCat(cat.key)} style={{
+                                flex: '1 0 40px', minWidth: 40, padding: '2px 1px', borderRadius: 10, cursor: 'pointer',
+                                display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
+                                border: isOpen ? '1px solid rgba(255,255,255,0.85)' : inUse ? '1px solid rgba(252,211,77,0.85)' : '1px solid transparent',
+                                background: isOpen ? 'rgba(255,255,255,0.16)' : inUse ? 'rgba(252,211,77,0.16)' : 'rgba(255,255,255,0.05)',
+                                color: '#e8eaed'
+                            }}>
+                                <BuildIcon itemKey={'cat_' + cat.key} emoji={cat.icon} size={19} />
+                                <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', opacity: .85,
+                                    maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.short || cat.label}</span>
+                            </button>
+                        );
+                    })}
+                    <button title="Abriss" onClick={toggleDemolish} style={{
+                        flex: '1 0 40px', minWidth: 40, padding: '2px 1px', borderRadius: 10, cursor: 'pointer',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
+                        border: active === 'demolish' ? '1px solid #f87171' : '1px solid transparent',
+                        background: active === 'demolish' ? 'rgba(220,38,38,0.35)' : 'rgba(255,255,255,0.05)', color: '#e8eaed'
+                    }}>
+                        <BuildIcon itemKey="demolish" emoji="🗑️" size={19} />
+                        <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', opacity: .85 }}>Abriss</span>
+                    </button>
+                </div>
+            ) : (
+            /* Bau-Seitenleiste links: Kategorien untereinander, Varianten als Untergruppe */
             <div {...rvBuild.props} style={{
                 position: 'fixed', top: 66, left: 14, bottom: 16, zIndex: 11, width: 74,
                 display: 'flex', flexDirection: 'column', gap: 6, padding: 7, borderRadius: 18, ...glass, ...rvBuild.style
@@ -619,7 +820,7 @@ const World3D = ({ level, onExit }) => {
                 {CATEGORIES.map(cat => {
                     const isOpen = openCat === cat.key;
                     return (
-                        <button key={cat.key} title={cat.label} onClick={() => setOpenCat(isOpen ? null : cat.key)} style={{
+                        <button key={cat.key} title={cat.label} onClick={() => toggleCat(cat.key)} style={{
                             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
                             padding: '9px 4px', borderRadius: 3, cursor: 'pointer',
                             border: isOpen ? '1px solid rgba(255,255,255,0.85)' : '1px solid transparent',
@@ -643,10 +844,16 @@ const World3D = ({ level, onExit }) => {
                     <span style={{ fontSize: 7.5, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', opacity: .8 }}>Abriss</span>
                 </button>
             </div>
+            )}
 
-            {/* Ausklapp-Panel rechts neben der Leiste */}
+            {/* Ausklapp-Panel: am Rechner rechts neben der Leiste, am Handy als Karte über der Werkzeugleiste */}
             {openCat && (
-                <div style={{
+                <div className={compact ? 'mt-noscrollbar' : undefined} style={compact ? {
+                    position: 'fixed', zIndex: 12, left: `calc(8px + ${SAFE_L})`, bottom: aboveBar,
+                    ...(narrow ? { right: `calc(8px + ${SAFE_R})` } : { width: 340 }),
+                    maxHeight: sheetMaxH, overflowY: 'auto', touchAction: 'pan-y', overscrollBehavior: 'contain',
+                    boxSizing: 'border-box', padding: 12, borderRadius: 18, ...glass, background: 'rgba(16,20,27,0.82)'
+                } : {
                     position: 'fixed', top: 66, left: 96, zIndex: 11, width: 244,
                     maxHeight: 'calc(100vh - 96px)', overflowY: 'auto',
                     padding: 12, borderRadius: 18, ...glass
@@ -655,7 +862,7 @@ const World3D = ({ level, onExit }) => {
                         <div style={{ fontSize: 10.5, fontWeight: 700, color: '#e8eaed', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
                             {CATEGORIES.find(c => c.key === openCat).icon} {CATEGORIES.find(c => c.key === openCat).label}
                         </div>
-                        <button onPointerDown={e => e.stopPropagation()} onClick={() => setOpenCat(null)} style={{ background: 'none', border: 'none', color: '#8b9098', fontSize: 17, cursor: 'pointer', lineHeight: 1 }}>×</button>
+                        <button onPointerDown={e => e.stopPropagation()} onClick={() => setOpenCat(null)} style={{ background: 'none', border: 'none', color: '#8b9098', fontSize: compact ? 24 : 17, padding: compact ? '2px 10px' : undefined, cursor: 'pointer', lineHeight: 1 }}>×</button>
                     </div>
                     {(() => {
                         // Items nach `group` bündeln — Größenvarianten erscheinen als Zeile
@@ -692,13 +899,15 @@ const World3D = ({ level, onExit }) => {
                                         <BuildIcon itemKey={b.items[0].key} emoji={b.items[0].icon} size={23} />
                                         <span style={{ fontSize: 12, fontWeight: 700, color: '#d4d8dd' }}>{b.group}</span>
                                     </div>
-                                    <div style={{ display: 'flex', gap: 5 }}>
+                                    {/* Handy: mehr als drei Varianten brechen in eine zweite Reihe um, Knöpfe fingergroß */}
+                                    <div style={{ display: 'flex', gap: 5, flexWrap: compact ? 'wrap' : 'nowrap' }}>
                                         {b.items.map(it => {
                                             const affordable = typeof it.cost !== 'number' || money >= it.cost;
                                             const sel = active === it.key;
                                             return (
                                                 <button key={it.key} onClick={() => selectItem(it)} disabled={!affordable} style={{
-                                                    flex: 1, padding: '6px 3px', borderRadius: 2, cursor: affordable ? 'pointer' : 'not-allowed',
+                                                    flex: compact && b.items.length > 3 ? '1 0 30%' : 1,
+                                                    padding: compact ? '10px 3px' : '6px 3px', borderRadius: 2, cursor: affordable ? 'pointer' : 'not-allowed',
                                                     border: sel ? '1px solid rgba(255,255,255,0.85)' : '1px solid rgba(255,255,255,0.1)',
                                                     background: sel ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.05)',
                                                     color: '#e8eaed', opacity: affordable ? 1 : 0.4, transition: 'all .12s'
@@ -721,6 +930,7 @@ const World3D = ({ level, onExit }) => {
                 <LiftSetup
                     kind={liftSetup.kind}
                     suggestion={liftSetup.suggestion}
+                    touch={touch}
                     onCancel={() => { setLiftSetup(null); setActive(null); }}
                     onConfirm={(cfg) => {
                         apiRef.current?.setLift(true, liftSetup.kind, cfg);
@@ -734,11 +944,12 @@ const World3D = ({ level, onExit }) => {
                 const done = level.objectives.filter(o => evaluateObjective(o, stats).done).length;
                 const all = level.objectives.length;
                 return (
-                    <div {...rvGoals.props} style={{ position: 'fixed', top: 58, right: 14, zIndex: 10,
+                    <div {...rvGoals.props} style={{ position: 'fixed', zIndex: 10,
+                                  ...(compact ? { top: `calc(8px + ${SAFE_T})`, right: `calc(8px + ${SAFE_R})` } : { top: 58, right: 14 }),
                                   display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8,
                                   opacity: (rvGoals.on || goalsOpen) ? 1 : 0.28, transition: 'opacity .22s ease' }}>
                         <button onClick={() => setGoalsOpen(o => !o)} title="Aufgaben"
-                                style={{ ...glass, width: 44, height: 44, borderRadius: 14, padding: 0,
+                                style={{ ...glass, width: compact ? 42 : 44, height: compact ? 40 : 44, borderRadius: 14, padding: 0,
                                          display: 'flex', flexDirection: 'column', alignItems: 'center',
                                          justifyContent: 'center', gap: 1, cursor: 'pointer',
                                          color: done === all ? '#4ade80' : '#e8eaed' }}>
@@ -746,7 +957,10 @@ const World3D = ({ level, onExit }) => {
                             <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.04em' }}>{done}/{all}</span>
                         </button>
                         {goalsOpen && (
-                            <div style={{ ...glass, width: 268, padding: '13px 14px', borderRadius: 16, color: '#e8eaed' }}>
+                            <div style={{ ...glass, width: 'min(268px, calc(100vw - 16px))', boxSizing: 'border-box',
+                                          maxHeight: compact ? Math.max(140, vp.h - BAR_H - 80) : undefined, overflowY: compact ? 'auto' : undefined,
+                                          touchAction: 'pan-y', padding: '13px 14px', borderRadius: 16, color: '#e8eaed',
+                                          ...(compact ? { background: 'rgba(16,20,27,0.82)' } : null) }}>
                                 <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.22em',
                                               textTransform: 'uppercase', color: '#9aa0a8', marginBottom: 10 }}>Aufgaben</div>
                                 {level.objectives.map((obj, i) => {
@@ -775,7 +989,12 @@ const World3D = ({ level, onExit }) => {
 
             {/* Infofeld: angeklicktes Gebäude / Parkplatz */}
             {selInfo && (
-                <div style={{ position: 'fixed', bottom: 16, right: 14, zIndex: 14, width: 272, maxHeight: 'calc(100vh - 300px)', overflowY: 'auto', padding: '12px 14px', borderRadius: 14, background: 'rgba(7,15,30,0.94)', border: '1px solid rgba(255,255,255,0.3)', color: '#e8eaed', boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
+                <div className={compact ? 'mt-noscrollbar' : undefined} style={{ position: 'fixed', zIndex: 14, overflowY: 'auto', padding: '12px 14px', borderRadius: 14, background: 'rgba(7,15,30,0.94)', border: '1px solid rgba(255,255,255,0.3)', color: '#e8eaed', boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
+                              ...(compact
+                                  // Handy: Karte über der Werkzeugleiste (hochkant über die ganze Breite)
+                                  ? { bottom: aboveBar, right: `calc(8px + ${SAFE_R})`, ...(narrow ? { left: `calc(8px + ${SAFE_L})` } : { width: 300 }),
+                                      maxHeight: sheetMaxH, boxSizing: 'border-box', touchAction: 'pan-y', overscrollBehavior: 'contain' }
+                                  : { bottom: 16, right: 14, width: 272, maxHeight: 'calc(100vh - 300px)' }) }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                             {selInfo.iconKey
@@ -783,7 +1002,7 @@ const World3D = ({ level, onExit }) => {
                                 : <span style={{ fontSize: 17 }}>{selInfo.icon}</span>}
                             <div style={{ fontSize: 15, fontWeight: 700, color: '#e8eaed' }}>{selInfo.name}</div>
                         </div>
-                        <button onPointerDown={e => e.stopPropagation()} onClick={() => { apiRef.current?.deselect?.(); setSelInfo(null); }} style={{ background: 'none', border: 'none', color: '#8b9098', fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
+                        <button onPointerDown={e => e.stopPropagation()} onClick={() => { apiRef.current?.deselect?.(); setSelInfo(null); }} style={{ background: 'none', border: 'none', color: '#8b9098', fontSize: compact ? 24 : 18, padding: compact ? '2px 10px' : undefined, cursor: 'pointer', lineHeight: 1 }}>×</button>
                     </div>
                     {/* Gäste-Portrait wie im 2D: prozedurales Gesicht aus dem Seed */}
                     {selInfo.portrait && (
@@ -941,17 +1160,59 @@ const World3D = ({ level, onExit }) => {
                 </div>
             )}
 
-            {/* Werkzeug-Hinweis */}
-            {toast && (
-                <div style={{ position: 'fixed', bottom: 64, left: '50%', transform: 'translateX(-50%)', zIndex: 13, ...chip, color: '#e8eaed', fontSize: 12, maxWidth: '90vw', background: 'rgba(7,15,30,0.94)', border: '1px solid rgba(255,255,255,0.35)', userSelect: 'text' }}>
-                    {toast}
+            {/* Kamera-Knöpfe (Finger): zweiter Weg neben den Gesten – zoomen und drehen */}
+            {touch && !selInfo && !openCat && !liftSetup && (
+                <div style={{ position: 'fixed', right: `calc(8px + ${SAFE_R})`, top: '50%', transform: 'translateY(-50%)', zIndex: 9,
+                              display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <button title="Heranzoomen" style={camBtn} onClick={() => apiRef.current?.cameraZoom?.(0.72)}><Ico name="plus" size={19} /></button>
+                    <button title="Herauszoomen" style={camBtn} onClick={() => apiRef.current?.cameraZoom?.(1.39)}><Ico name="minus" size={19} /></button>
+                    <button title="Nach links drehen" style={camBtn} onClick={() => apiRef.current?.cameraTurn?.(-Math.PI / 8)}><Ico name="turnL" size={18} /></button>
+                    <button title="Nach rechts drehen" style={camBtn} onClick={() => apiRef.current?.cameraTurn?.(Math.PI / 8)}><Ico name="turnR" size={18} /></button>
                 </div>
             )}
-            {hint() && (
-                <div style={{ position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 12, ...chip, color: '#fcd34d', fontSize: 12 }}>
-                    {hint()}
-                </div>
-            )}
+
+            {/* Unterer Stapel: Meldung, Werkzeug-Hinweis und (Finger) die Bestätigen-Leiste.
+                Der Stapel selbst fängt keine Berührungen ab – das Gelände dahinter bleibt bedienbar. */}
+            <div style={{ position: 'fixed', left: 0, right: 0, bottom: compact ? aboveBar : 20, zIndex: 13, boxSizing: 'border-box',
+                          padding: `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`,
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
+                {toast && (
+                    <div style={{ ...chip, pointerEvents: 'auto', color: '#e8eaed', fontSize: 12, maxWidth: 'min(90vw, 100%)', boxSizing: 'border-box',
+                                  background: 'rgba(7,15,30,0.94)', border: '1px solid rgba(255,255,255,0.35)',
+                                  userSelect: 'text', WebkitUserSelect: 'text' }}>
+                        {toast}
+                    </div>
+                )}
+                {/* Einmaliger Hinweis auf die Gesten, solange kein Werkzeug aktiv ist */}
+                {touch && gestureHelp && !hintText && !pendingAct && !selInfo && !openCat && (
+                    <div style={{ ...chip, pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%',
+                                  boxSizing: 'border-box', color: '#e8eaed', fontSize: 11.5, lineHeight: 1.4, padding: '8px 6px 8px 13px' }}>
+                        <span>1 Finger: verschieben · 2 Finger: zoomen und drehen · 2 Finger hoch/runter: neigen</span>
+                        <button onClick={dismissGestureHelp} title="Verstanden"
+                                style={{ flex: 'none', width: 34, height: 34, borderRadius: 10, padding: 0, cursor: 'pointer',
+                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                         background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed' }}><Ico name="close" size={15} /></button>
+                    </div>
+                )}
+                {hintText && !(compact && openCat) && (
+                    <div style={{ ...chip, pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%',
+                                  boxSizing: 'border-box', color: '#fcd34d', fontSize: 12, lineHeight: 1.4,
+                                  ...(compact ? { padding: '7px 6px 7px 12px', fontSize: 11.5 } : { padding: '5px 6px 5px 14px' }) }}>
+                        <span>{hintText}</span>
+                        <button onClick={clearTool} title="Werkzeug beenden"
+                                style={{ flex: 'none', width: compact ? 34 : 26, height: compact ? 34 : 26, borderRadius: 9, padding: 0, cursor: 'pointer',
+                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                         background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed' }}><Ico name="close" size={compact ? 15 : 12} /></button>
+                    </div>
+                )}
+                {pendingAct && !(compact && openCat) && (
+                    <ConfirmBar p={pendingAct} fmt={fmt}
+                                onOk={() => apiRef.current?.confirmPending?.()}
+                                onCancel={() => apiRef.current?.cancelPending?.()}
+                                onRotate={() => apiRef.current?.rotateBuild?.()}
+                                onUndo={() => apiRef.current?.undoPistePoint?.()} />
+                )}
+            </div>
 
             {/* Sieg-Overlay */}
             {won && !wonDismissed && (() => {

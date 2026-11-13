@@ -5,6 +5,16 @@ machen – als Kampagne durch neun Länder oder frei im Sandbox-Modus, wahlweise
 
 **Spielen:** https://mountain-tycoon.github.io/ (mit Konto – registrieren, freischalten lassen, anmelden)
 
+## Am Handy spielen
+
+Der 3D-Modus läuft auch auf dem Handy und dem Tablet:
+
+- **Ein Finger** verschiebt die Karte, **zwei Finger** zoomen und drehen, beide gemeinsam hoch oder runter
+  neigt den Blick. Am Rand gibt es dafür zusätzlich Knöpfe.
+- **Bauen:** Werkzeug wählen, Stelle antippen – es erscheint die Vorschau mit Preis. Gebaut wird erst mit dem Haken.
+- Über „Zum Home-Bildschirm" (Teilen-Menü im Browser) startet das Spiel wie eine App im Vollbild.
+- Die Bildqualität passt sich von selbst an das Gerät an.
+
 ## Was wo liegt
 
 | Ordner | Inhalt |

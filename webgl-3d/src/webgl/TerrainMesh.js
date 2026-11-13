@@ -244,8 +244,13 @@ export function buildForest(world, gridSize, opts = {}) {
     // bekommen sie ein schwaches Eigenleuchten. WICHTIG: das muss ein GRÜNTON
     // sein — `emissive` wird additiv aufgeschlagen und nicht mit der
     // Vertexfarbe multipliziert. Mit Weiß werden alle Bäume grau gewaschen.
+    // KEIN `vertexColors`: die Farbe je Baum kommt als Instanzfarbe (setColorAt) und
+    // wirkt auch ohne diesen Schalter. Mit `vertexColors: true` erwartet der Shader
+    // zusätzlich ein Farbattribut an der Geometrie – das gibt es hier nicht, es zählt
+    // dann als Schwarz. Genau deshalb standen alle Bäume als fast schwarze Kegel im
+    // Schnee, egal wie hell die Farbtöne oben in der Tabelle gewählt wurden.
     const mat = new THREE.MeshStandardMaterial({
-        vertexColors: true, roughness: 0.86,
+        roughness: 0.86,
         emissive: 0x1c2a22, emissiveIntensity: 0.75
     });
     const trunkMat = new THREE.MeshStandardMaterial({
@@ -336,13 +341,17 @@ export function buildForest(world, gridSize, opts = {}) {
         capCone(0.98, 0.34, 1.42, 8),
         capCone(0.68, 0.3, 1.98)
     ]);
+    // Laubbaum: kleinere Haube nur auf dem Scheitel – darunter bleibt ein grüner Rand
+    // (vorher saß sie wie ein Helm über der ganzen Krone).
     const capGeoBroad = (() => {
-        const c2 = new THREE.SphereGeometry(0.64, 7, 5);
-        c2.scale(1, 0.42, 1); c2.translate(0, 1.62, 0); return c2;
+        const c2 = new THREE.SphereGeometry(0.5, 7, 5);
+        c2.scale(1, 0.4, 1); c2.translate(0, 1.66, 0); return c2;
     })();
+    // Weiche Hauben: kaum Eigenleuchten. Mit 0.35 lagen sie in der Sonne weit über
+    // Weiß und strahlten in der Nahansicht als helle Höfe aus (Glühen der Bildaufbereitung).
     const snowCapMat = new THREE.MeshStandardMaterial({
-        color: 0xf4f8fd, roughness: 0.85,
-        emissive: 0xdde6f0, emissiveIntensity: 0.35,
+        color: 0xeef3fa, roughness: 0.9,
+        emissive: 0xdde6f0, emissiveIntensity: 0.08,
         transparent: true, opacity: 0
     });
     // Ein Hauben-Mesh je Baumgruppe, gleiche Reihenfolge wie groups[0..2]
@@ -441,7 +450,7 @@ export function buildForest(world, gridSize, opts = {}) {
         // Die Hauben sind der HAUPTEFFEKT: ab leichter Last sichtbar, im
         // Schneesturm voll deckend.
         for (const si of snowInsts) si.visible = load > 0.05;
-        snowCapMat.opacity = Math.min(0.82, load * 1.35);
+        snowCapMat.opacity = Math.min(0.86, load * 1.15);
         // Nur bei deutlicher Änderung neu schreiben — das Umfärben tausender
         // Instanzen samt GPU-Upload ist zu teuer für jeden Tick.
         if (Math.abs(load - lastLoad) < 0.08) return;
@@ -455,8 +464,11 @@ export function buildForest(world, gridSize, opts = {}) {
                 // Kräftig genug, dass man den Schnee wirklich SIEHT, aber mit
                 // Obergrenze 0.85, damit das Grün nie ganz verschwindet.
                 // etwas zurückhaltender als zuvor — der Schnee soll die
-                // Kronen anzuckern, nicht auslöschen
-                const f = Math.min(1, load * jitter) * 0.74;
+                // Kronen anzuckern, nicht auslöschen.
+                // (Der frühere Faktor 0.74 war abgestimmt, als die Baumfarbe gar nicht
+                //  ankam; jetzt, wo sie wirkt, bleichte er den ganzen Wald grauweiß aus.
+                //  Das Weiß tragen die Hauben, darunter bleibt das Grün sichtbar.)
+                const f = Math.min(1, load * jitter) * 0.30;
                 arr[i]     = base[i]     + (0.88 - base[i])     * f;
                 arr[i + 1] = base[i + 1] + (0.90 - base[i + 1]) * f;
                 arr[i + 2] = base[i + 2] + (0.94 - base[i + 2]) * f;
@@ -1472,7 +1484,11 @@ export function buildTerrainApron(world, gridSize, theme = {}, opts = {}) {
         // Die eigentliche Farbe kommt aus der HÖHE (siehe setSnowLine) — hier
         // wird nur die Randfarbe als Ausgangspunkt und die Weltposition der
         // Höhe mitgegeben, damit sich alles später neu einfärben lässt.
-        return { x, y, z: z2, c: e.col, alpha, v };
+        // `ei` = Rasterpunkt des Spielfelds, an dem dieser Strahl die Kante verlässt:
+        // dort holt sich die Schürze später die aktuelle Farbe des Spielfelds ab.
+        const egx = Math.max(0, Math.min(gridSize - 1, Math.round((ex + half) / tile)));
+        const egy = Math.max(0, Math.min(gridSize - 1, Math.round((ez + half) / tile)));
+        return { x, y, z: z2, c: e.col, alpha, v, ei: egy * gridSize + egx };
     };
 
     for (let i = 0; i < PER; i++) {
@@ -1486,7 +1502,7 @@ export function buildTerrainApron(world, gridSize, theme = {}, opts = {}) {
                 for (const t of [p, q, r]) {
                     pos.push(t.x, t.y, t.z);
                     col.push(t.c[0], t.c[1], t.c[2], t.alpha);
-                    meta.push(t.y, t.v, t.x, t.z);   // Höhe, Randabstand, Lage merken
+                    meta.push(t.y, t.v, t.x, t.z, t.ei);   // Höhe, Randabstand, Lage, Kantenpunkt merken
                 }
             }
         }
@@ -1509,6 +1525,25 @@ export function buildTerrainApron(world, gridSize, theme = {}, opts = {}) {
     mesh.frustumCulled = false;
     mesh.renderOrder = -800;
     mesh.userData.setHaze = (c) => { hazeArr[0] = c.r * 0.45 + 0.55; hazeArr[1] = c.g * 0.45 + 0.55; hazeArr[2] = c.b * 0.45 + 0.55; };
+    /**
+     * Punkt AUF der vernetzten Schürze zu den Parametern u (0..1 einmal um die Karte)
+     * und v (0..1 nach außen) – also dort, wo die Fläche wirklich gezeichnet wird, nicht
+     * dort, wo die Höhenformel sie zwischen den Stützpunkten hätte. Für alles, was auf
+     * der Schürze stehen soll (Bäume).
+     */
+    mesh.userData.pointAt = (u, v) => {
+        u = ((u % 1) + 1) % 1; v = clamp01(v);
+        const fi = u * PER, i = Math.min(PER - 1, Math.floor(fi)), s = fi - i;
+        const k = Math.min(RINGS - 1, Math.floor(Math.pow(v, 1 / 1.35) * RINGS));   // Umkehrung von v = (k/RINGS)^1.35
+        const v0 = Math.pow(k / RINGS, 1.35), v1 = Math.pow((k + 1) / RINGS, 1.35);
+        const t = clamp01((v - v0) / Math.max(1e-9, v1 - v0));
+        const u0 = i / PER, u1 = (i + 1) / PER;
+        const A = ptAt(u0, v0), B = ptAt(u1, v0), C = ptAt(u1, v1), D = ptAt(u0, v1);
+        // dieselbe Aufteilung des Vierecks wie beim Vernetzen: [A,B,C] und [A,C,D]
+        return s >= t
+            ? { x: A.x + s * (B.x - A.x) + t * (C.x - B.x), y: A.y + s * (B.y - A.y) + t * (C.y - B.y), z: A.z + s * (B.z - A.z) + t * (C.z - B.z) }
+            : { x: A.x + t * (D.x - A.x) + s * (C.x - D.x), y: A.y + t * (D.y - A.y) + s * (C.y - D.y), z: A.z + t * (D.z - A.z) + s * (C.z - D.z) };
+    };
 
     /**
      * Färbt die Schürze nach HÖHENPROFIL und Schneelage neu ein — genau wie
@@ -1525,17 +1560,66 @@ export function buildTerrainApron(world, gridSize, theme = {}, opts = {}) {
     // snowLineWorldY = Schneegrenze in Weltmetern; intern wird in
     // Heightmap-Einheiten gerechnet — exakt wie repaintSnowCover.
     const snowWarmth = theme.snowWarmth || 0;
-    mesh.userData.setSnowLine = (snowLineWorldY) => {
+    /**
+     * Farbe des Spielfelds an einem Kantenpunkt: Mittel über ein paar Kacheln längs
+     * der Kante und ein Stück ins Feld hinein (einzelne Ausreißer fallen so nicht auf).
+     * `tc` sind die aktuellen Eckfarben des Spielfelds (3 Werte je Rasterpunkt).
+     */
+    const edgeColorAt = (ei, tc) => {
+        const gx = ei % gridSize, gy = (ei - gx) / gridSize;
+        let ix = 0, iy = 0;                                  // Richtung ins Feld hinein
+        if (gy === 0) iy = 1; else if (gy === gridSize - 1) iy = -1;
+        else if (gx === 0) ix = 1; else ix = -1;
+        const ax = iy !== 0 ? 1 : 0, ay = ix !== 0 ? 1 : 0;    // Richtung längs der Kante
+        let r = 0, g = 0, b = 0, n = 0, wood = 0;
+        // längs der Kante breiter mitteln als ein Schürzenstreifen breit ist – sonst wechseln
+        // benachbarte Streifen hart die Farbe (Kamm-Muster hinter bewaldeten Kanten)
+        for (let k = 0; k <= 2; k++) for (let j = -7; j <= 7; j++) {
+            const x = Math.max(0, Math.min(gridSize - 1, gx + ix * k + ax * j));
+            const y = Math.max(0, Math.min(gridSize - 1, gy + iy * k + ay * j));
+            const o = (y * gridSize + x) * 3;
+            r += tc[o]; g += tc[o + 1]; b += tc[o + 2]; n++;
+            const lt = landcover[y * gridSize + x];
+            if (lt === 1 || lt === 5 || lt === 6) wood++;
+        }
+        // vierter Wert: Waldanteil an dieser Stelle der Kante (0..1)
+        return [r / n, g / n, b / n, wood / n];
+    };
+    /**
+     * `edgeCols` (optional): die aktuellen Eckfarben des Spielfelds. Damit schließt die
+     * Schürze an der Kante FARBGLEICH an – egal ob dort Wiese, Waldboden, Schnee oder
+     * Wasser liegt – und geht erst ein Stück weiter draußen in ihre eigene Färbung über.
+     * Ohne diese Angabe sah man die Karte als Quadrat: innen grüne Wiese, direkt dahinter Weiß.
+     */
+    mesh.userData.setSnowLine = (snowLineWorldY, edgeCols = null) => {
         const limit = snowLineWorldY / hScale;
         const ca = geo.attributes.color, arr = ca.array;
         const nor = geo.attributes.normal ? geo.attributes.normal.array : null;
-        for (let i = 0, m2 = 0; i < arr.length; i += 4, m2 += 4) {
+        const edgeCache = edgeCols ? new Map() : null;
+        for (let i = 0, m2 = 0; i < arr.length; i += 4, m2 += 5) {
             const y = meta[m2], v = meta[m2 + 1], px = meta[m2 + 2], pz = meta[m2 + 3];
             const h = y / hScale;
             const gx = (px + half) / tile, gy = (pz + half) / tile;   // Rasterlage (auch außerhalb)
             const alt = (h - minZ) / range;
             // 1) exakt die Spielfeldformel: Grundfarbe -> Grün -> Naturschnee
-            const shade = snowShade(openGroundColor(alt, snowWarmth), h, limit, gx, gy);
+            //    Der Hang der Schürze fällt überall gleich ab – die Schneegrenze lief deshalb
+            //    als schnurgerader heller Streifen parallel zur Kartenkante durchs Tal. Ein
+            //    weiträumiges Wellenfeld hebt und senkt die wirksame Höhe: der Schnee greift
+            //    in Mulden zungenförmig hinab, auf Rücken weicht er zurück. Direkt an der
+            //    Kante bleibt es bei der echten Höhe (dort übernimmt ohnehin die Randfarbe).
+            const lobe = Math.sin(px * 0.021 + 0.6) * Math.sin(pz * 0.017 - 1.3) * 0.6
+                       + Math.sin((px + pz) * 0.011 + 2.1) * 0.25 + Math.sin(px * 0.047 - pz * 0.039) * 0.15;
+            const out01 = sm01(v / 0.05);
+            const hSnow = h + lobe * (7.5 / hScale) * out01;
+            const ground = openGroundColor(alt, snowWarmth);
+            let shade = snowShade(ground, hSnow, limit, gx, gy);
+            if (out01 > 0) {
+                // Die Schürze ist weit draußen grob vernetzt. Ein scharfer Schneerand würde dort
+                // als Treppenkante sichtbar – deshalb über einen Höhenbereich gemittelt (weicher Saum).
+                const spread = (4.5 / hScale) * out01;
+                const lo = snowShade(ground, hSnow - spread, limit, gx, gy), hi = snowShade(ground, hSnow + spread, limit, gx, gy);
+                shade = [(shade[0] + lo[0] + hi[0]) / 3, (shade[1] + lo[1] + hi[1]) / 3, (shade[2] + lo[2] + hi[2]) / 3, (shade[3] + lo[3] + hi[3]) / 3];
+            }
             const nat = shade[3];
             let c = [shade[0], shade[1], shade[2]];
             // 2) weiter draußen: Wald-/Wiesen-Flickenteppich, Latschen, Fels —
@@ -1555,6 +1639,19 @@ export function buildTerrainApron(world, gridSize, theme = {}, opts = {}) {
             const ny = nor ? nor[(i / 4) * 3 + 1] : 1;
             const steep = clamp01((0.86 - ny) / 0.22) * far;
             c = mix(c, rockC, steep * 0.85);
+            // 3b) an der Kante die Farbe des Spielfelds übernehmen und nach außen auslaufen
+            //     lassen – unregelmäßig weit, damit kein gerader Saum parallel zur Kante entsteht
+            if (edgeCache && v < 0.13) {
+                const ei = meta[m2 + 4];
+                let ec = edgeCache.get(ei);
+                if (!ec) { ec = edgeColorAt(ei, edgeCols); edgeCache.set(ei, ec); }
+                const wob = Math.sin(px * 0.071 + 1.9) * Math.sin(pz * 0.063 - 0.4) + Math.sin((px - pz) * 0.037) * 0.5;
+                // Wiese und Schnee dürfen weit hinauslaufen. Waldboden nur kurz: ein Waldstück
+                // endet bald hinter der Kante – sonst zöge es sich als dunkler Streifen ins Umland.
+                const reach = (0.070 + wob * 0.028) * (1 - ec[3]) + (0.020 + wob * 0.007) * ec[3];
+                const keep = 1 - sm01((v - 0.004) / reach);
+                if (keep > 0) c = mix(c, ec, keep);
+            }
             // 4) nach außen in den Dunst ausbleichen (erst im ferneren Teil)
             c = mix(c, hazeArr, clamp01(Math.pow(clamp01((v - 0.18) / 0.82), 1.25)) * 0.88);
             arr[i] = c[0]; arr[i + 1] = c[1]; arr[i + 2] = c[2];
@@ -1577,7 +1674,10 @@ export function buildEdgeShade(world, gridSize, opts = {}) {
     const span = (gridSize - 1) * tile;
     const half = span / 2;
     const REACH = opts.reach ?? span * 1.70;
-    const IN = opts.inner ?? 3.2, OUT = opts.outer ?? 2.4, A0 = opts.alpha ?? 0.34;
+    // Nur noch ein Hauch: seit die Schürze an der Kante die Farbe des Spielfelds übernimmt,
+    // gibt es keinen Farbversatz mehr zu verdecken – der frühere kräftige Saum (0.34)
+    // zeichnete die Karte von oben als dunkel umrandetes Quadrat nach.
+    const IN = opts.inner ?? 3.2, OUT = opts.outer ?? 2.4, A0 = opts.alpha ?? 0.08;
     const hAt = (wx, wz) => {
         const fx = Math.max(0, Math.min(gridSize - 1.001, (wx + half) / tile));
         const fy = Math.max(0, Math.min(gridSize - 1.001, (wz + half) / tile));
@@ -1644,14 +1744,19 @@ export function buildEdgeShade(world, gridSize, opts = {}) {
  * Alles instanziert — auch mehrere tausend Bäume kosten praktisch nichts.
  */
 export function buildApronForest(world, gridSize, opts = {}) {
-    const { heightmap } = world;
+    const { heightmap, landcover } = world;
     const hScale = opts.hScale ?? 0.09;
     const tile = opts.tileSize ?? 1;
     const span = (gridSize - 1) * tile;
     const half = span / 2;
     // MUSS zur Schürze passen — sonst stehen die Bäume in der Luft.
     const REACH = opts.reach ?? span * 1.70;
-    const COUNT = opts.count ?? 16000;
+    const SCATTER = opts.count ?? 16000;           // locker verteilte Bäume im ganzen Umland
+    // WALDGÜRTEL: Wo auf dem Spielfeld Wald bis an die Kante reicht, läuft er dahinter
+    // dicht weiter und lichtet sich erst nach ein paar Dutzend Metern. Vorher brach
+    // jeder Wald an der Kartengrenze wie abgeschnitten ab.
+    const BELT_DEPTH = opts.beltDepth ?? 24;       // so weit reicht der dichte Gürtel (Weltmeter)
+    const BELT_MAX = opts.belt ?? 9000;            // Obergrenze; die echte Zahl folgt aus der bewaldeten Kantenlänge
     const hue = opts.hue || [0.17, 0.45, 0.27];
 
     // Höhenformel EXAKT wie in buildTerrainApron, damit die Bäume nicht
@@ -1704,12 +1809,65 @@ export function buildApronForest(world, gridSize, opts = {}) {
         transparent: true, opacity: 1
     });
 
+    /** Steht an diesem Kantenpunkt (ein paar Kacheln ins Feld hinein) Wald? */
+    const forestAtEdge = (ex, ez) => {
+        const gx = Math.round((ex + half) / tile), gy = Math.round((ez + half) / tile);
+        // Richtung ins Feld: weg von der Seite, auf der der Punkt liegt
+        const ix = gx <= 0 ? 1 : gx >= gridSize - 1 ? -1 : 0, iy = gy <= 0 ? 1 : gy >= gridSize - 1 ? -1 : 0;
+        let hit = 0;
+        for (let k = 1; k <= 4; k++) {
+            const x = Math.max(0, Math.min(gridSize - 1, gx + ix * k)), y = Math.max(0, Math.min(gridSize - 1, gy + iy * k));
+            const t = landcover ? landcover[y * gridSize + x] : 0;
+            if (t === 1 || t === 5 || t === 6) hit++;
+        }
+        return hit >= 2;
+    };
+    // Wie viel der Kartenkante ist bewaldet? Daraus folgt die Baumzahl des Gürtels: an der
+    // Kante so dicht wie im Feld (ein Baum auf zwei Kacheln), nach außen linear auslaufend.
+    let woodedEdge = 0;
+    for (let q = 0; q < 4 * (gridSize - 1); q++) {
+        const sd = Math.floor(q / (gridSize - 1)), f = (q % (gridSize - 1)) / (gridSize - 1);
+        const ex = sd === 0 ? -half + f * span : sd === 1 ? half : sd === 2 ? half - f * span : -half;
+        const ez = sd === 0 ? -half : sd === 1 ? -half + f * span : sd === 2 ? half : half - f * span;
+        if (forestAtEdge(ex, ez)) woodedEdge += tile;
+    }
+    const BELT = Math.min(BELT_MAX, Math.round(woodedEdge * BELT_DEPTH * 0.5 * 0.5));
+    const COUNT = SCATTER + BELT;
+
     const crowns = new THREE.InstancedMesh(crownGeo, crownMat, COUNT);
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, COUNT);
+    // Schneehauben für den Gürtel – dieselbe Optik wie die Hauben der Bäume auf dem Spielfeld
+    const capGeo = (() => {
+        const parts = [
+            new THREE.ConeGeometry(0.66, 0.34, 7),
+            new THREE.ConeGeometry(0.49, 0.30, 7),
+            new THREE.ConeGeometry(0.30, 0.28, 6)
+        ];
+        parts[0].translate(0, 1.12, 0); parts[1].translate(0, 1.72, 0); parts[2].translate(0, 2.26, 0);
+        const nonIdx = parts.map(q => q.toNonIndexed());
+        let n = 0; for (const q of nonIdx) n += q.attributes.position.count;
+        const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
+        let o = 0;
+        for (const q of nonIdx) {
+            pos.set(q.attributes.position.array, o * 3);
+            nor.set(q.attributes.normal.array, o * 3);
+            o += q.attributes.position.count;
+        }
+        const gg = new THREE.BufferGeometry();
+        gg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        gg.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+        return gg;
+    })();
+    const capMat = new THREE.MeshStandardMaterial({
+        color: 0xeef3fa, roughness: 0.9, emissive: 0xdde6f0, emissiveIntensity: 0.08,
+        transparent: true, opacity: 0
+    });
+    const caps = new THREE.InstancedMesh(capGeo, capMat, Math.max(1, BELT));
+    caps.visible = false; caps.frustumCulled = false;
     const dummy = new THREE.Object3D();
     const colArr = new Float32Array(COUNT * 3);
 
-    let placed = 0, guard = 0;
+    let placed = 0, guard = 0, beltPlaced = 0;
     while (placed < COUNT && guard < COUNT * 8) {
         guard++;
         const u = Math.random(), s4 = u * 4;
@@ -1720,27 +1878,46 @@ export function buildApronForest(world, gridSize, opts = {}) {
         else if (side === 2) { ex = half - f * span;  ez = half; }
         else                 { ex = -half;            ez = half - f * span; }
 
-        // Dichte fällt nach außen ab — quadratisch verteilt statt gleichmäßig
-        const v = Math.pow(Math.random(), 1.35) * 0.78;
-        if (v < 0.012) continue;                    // direkt an der Kante frei lassen
+        // Erst der Waldgürtel an bewaldeten Kanten (dicht, nach außen auslaufend),
+        // danach die lockere Verteilung über das ganze Umland.
+        const belt = beltPlaced < BELT && guard < COUNT * 4;
+        let v;
+        if (belt) {
+            if (!forestAtEdge(ex, ez)) continue;
+            // Dichte fällt linear nach außen ab: an der Kante wie im Feld, am Gürtelrand null
+            v = (0.9 + (BELT_DEPTH - 0.9) * (1 - Math.sqrt(Math.random()))) / REACH;
+        } else {
+            // Dichte fällt nach außen ab — quadratisch verteilt statt gleichmäßig
+            v = Math.pow(Math.random(), 1.35) * 0.78;
+            if (v < 0.012) continue;                // direkt an der Kante frei lassen
+        }
         const len = Math.hypot(ex, ez) || 1;
         const d = v * REACH;
-        const x = ex + (ex / len) * d, z = ez + (ez / len) * d;
+        let x = ex + (ex / len) * d, z = ez + (ez / len) * d;
 
         // GENAU dieselbe Höhenformel wie die Schürze — gemeinsame Funktion,
         // damit die Bäume nicht schweben, wenn das Relief geändert wird.
         const a = Math.atan2(ez, ex);
-        const y = apronHeight(edgeY(ex, ez), a, v).y;
+        const yFormula = apronHeight(edgeY(ex, ez), a, v).y;
+        let y = yFormula;
+        // Die Schürze ist grob vernetzt: zwischen ihren Stützpunkten weicht die Fläche von
+        // der Formel ab. Kennt man die vernetzte Fläche, steht der Baum genau darauf –
+        // wichtig vor allem im Waldgürtel direkt an der Kante, wo man es sonst sähe.
+        if (opts.surfacePoint) { const sp = opts.surfacePoint(u, v); x = sp.x; y = sp.y; z = sp.z; }
         // ===== BAUMGRENZE & WALDINSELN =====
         // Oberhalb der Baumgrenze wächst nichts; darunter stehen die Bäume
         // nicht gleichmäßig, sondern in Waldstücken mit Lichtungen dazwischen,
         // und an Steilflanken (Fels) dünnt der Bestand aus.
-        if (y > treeLine) continue;
-        const cl = Math.sin(x * 0.085 + 1.3) * Math.sin(z * 0.071 - 0.7) + Math.sin((x - z) * 0.047) * 0.6;
-        if (cl < -0.35 && Math.random() > 0.10) continue;          // Lichtung
-        const sl = apronHeight(edgeY(ex + 0.6, ez), a, v).y - y;    // grobe Steilheit
-        if (Math.abs(sl) > 1.1 && Math.random() > 0.3) continue;   // Felsflanke
-        const nearTop = clamp01((y - (treeLine - 2.5)) / 2.5);      // Krüppelzone
+        if (!belt) {
+            if (placed - beltPlaced >= SCATTER) break;                  // lockere Verteilung ist vollständig
+            if (y > treeLine) continue;
+            const cl = Math.sin(x * 0.085 + 1.3) * Math.sin(z * 0.071 - 0.7) + Math.sin((x - z) * 0.047) * 0.6;
+            if (cl < -0.35 && Math.random() > 0.10) continue;          // Lichtung
+            const sl = apronHeight(edgeY(ex + 0.6, ez), a, v).y - yFormula;   // grobe Steilheit
+            if (Math.abs(sl) > 1.1 && Math.random() > 0.3) continue;   // Felsflanke
+        } else beltPlaced++;
+        // Krüppelzone unter der Baumgrenze (der Gürtel setzt nur fort, was im Feld ohnehin steht)
+        const nearTop = belt ? 0 : clamp01((y - (treeLine - 2.5)) / 2.5);
 
         const sc = (0.75 + Math.random() * 0.6) * (1 - nearTop * 0.45);
         dummy.position.set(x, y, z);
@@ -1749,6 +1926,7 @@ export function buildApronForest(world, gridSize, opts = {}) {
         dummy.updateMatrix();
         crowns.setMatrixAt(placed, dummy.matrix);
         trunks.setMatrixAt(placed, dummy.matrix);
+        if (belt) caps.setMatrixAt(placed, dummy.matrix);   // Gürtelbäume belegen die ersten Plätze
 
         // Farbe: nach außen in den Dunst ausbleichen
         const fade = clamp01(Math.pow(v / 0.72, 0.9)) * 0.8;
@@ -1760,29 +1938,45 @@ export function buildApronForest(world, gridSize, opts = {}) {
     }
     crowns.count = placed; trunks.count = placed;
     crowns.instanceMatrix.needsUpdate = true; trunks.instanceMatrix.needsUpdate = true;
+    caps.count = beltPlaced; caps.instanceMatrix.needsUpdate = true;
     crownGeo.setAttribute('color', new THREE.InstancedBufferAttribute(colArr, 3));
 
     const group = new THREE.Group();
-    group.add(crowns); group.add(trunks);
+    group.add(crowns); group.add(trunks); group.add(caps);
     group.renderOrder = -790;
     crowns.frustumCulled = false; trunks.frustumCulled = false;
-    group.userData.setSnow = (load) => {
-        // leichte Aufhellung bei Schneefall, wie beim Wald auf der Karte
-        const f = Math.min(1, load) * 0.5;
-        crownMat.emissiveIntensity = 0.9 + f * 0.5;
-    };
-    // Schneelage: Kronen oberhalb der Schneegrenze werden weiß überzuckert —
-    // im selben Rhythmus wie Schürze und Spielfeld.
+    // Schnee auf den Kronen – aus zwei Quellen, es zählt die stärkere:
+    //   Schneelage: Kronen oberhalb der Schneegrenze sind weiß überzuckert (wie Schürze und Spielfeld)
+    //   Schneefall: frische Last auf allen Kronen. Die Bäume auf dem Spielfeld tragen dann
+    //               Hauben; hier draußen gibt es keine, also hellt die Krone selbst auf –
+    //               sonst stünde hinter der Kante ein dunkler Wald neben einem verschneiten.
     const baseCol = Float32Array.from(colArr);
-    group.userData.setSnowLine = (snowLineWorldY, band = 2.0) => {
+    let lineY = Infinity, lineBand = 2.0, snowLoad = 0;
+    const recolor = () => {
         const ca = crownGeo.getAttribute('color'), arr = ca.array;
+        const byLoad = Math.min(1, snowLoad) * 0.56;
         for (let i = 0; i < placed; i++) {
-            const cov = clamp01((treeY[i] - (snowLineWorldY - band)) / (band * 2)) * 0.62;
+            const byLine = clamp01((treeY[i] - (lineY - lineBand)) / (lineBand * 2)) * 0.62;
+            // Gürtel direkt an der Kante: genau wie die Bäume auf dem Spielfeld – das Weiß
+            // tragen die Hauben, die Krone selbst hellt nur leicht auf.
+            const cov = i < beltPlaced ? Math.min(1, snowLoad) * 0.30 : Math.max(byLine, byLoad);
             arr[i * 3]     = baseCol[i * 3]     + (0.90 - baseCol[i * 3])     * cov;
             arr[i * 3 + 1] = baseCol[i * 3 + 1] + (0.93 - baseCol[i * 3 + 1]) * cov;
             arr[i * 3 + 2] = baseCol[i * 3 + 2] + (0.97 - baseCol[i * 3 + 2]) * cov;
         }
         ca.needsUpdate = true;
+    };
+    group.userData.setSnow = (load) => {
+        load = Math.max(0, Math.min(1, load));
+        caps.visible = beltPlaced > 0 && load > 0.05;
+        capMat.opacity = Math.min(0.86, load * 1.15);       // wie die Hauben auf dem Spielfeld
+        if (Math.abs(load - snowLoad) < 0.08) return;      // nur bei deutlicher Änderung neu einfärben
+        snowLoad = load;
+        recolor();
+    };
+    group.userData.setSnowLine = (snowLineWorldY, band = 2.0) => {
+        lineY = snowLineWorldY; lineBand = band;
+        recolor();
     };
     return group;
 }

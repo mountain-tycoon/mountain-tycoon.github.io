@@ -282,9 +282,98 @@
     backdrop-filter: blur(14px);
 }
 
+/* ---------- Schmale Fenster, Tablets, Handy quer ---------- */
 @media (max-width: 1080px) {
     .mm-stage { grid-template-columns: 1fr; }
     .mm-scroller { width: min(620px, 92vw); }
-    .mm-sign { justify-self: center; margin: 0 0 24px; width: min(520px, 92vw); align-self: end; }
     .mm-logo { width: 210px; top: 16px; left: 18px; }
+    /* Das Schild schwebt als eigene Ebene über der Levelliste. (Vorher rutschte es
+       in eine zweite Spalte rechts aus dem Bild und war nicht mehr erreichbar.) */
+    .mm-sign {
+        position: fixed; z-index: 40; left: 50%; bottom: 16px; margin: 0;
+        width: min(560px, calc(100vw - 24px));
+        max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px);
+        overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+        transform: translateX(-50%);
+        animation: mm-rise-center 0.32s cubic-bezier(.2,.9,.25,1) both;
+    }
+    .mm-sign::-webkit-scrollbar { width: 0; }
+    /* „Starten" bleibt immer erreichbar, auch wenn der Text darüber rollt */
+    .mm-sign-actions {
+        position: sticky; bottom: 0; z-index: 1;
+        margin: 6px -4px -14px; padding: 14px 4px 14px;
+        background: linear-gradient(180deg, rgba(20,26,35,0) 0, #141a23 34%);
+    }
+    .mm-sign-hang { display: none; }
+    .mm-sign-close { top: 6px; right: 8px; width: 40px; height: 40px; font-size: 22px; }
+}
+@keyframes mm-rise-center {
+    from { opacity: 0; transform: translate(-50%, 26px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes mm-rise {
+    from { opacity: 0; transform: translateY(26px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* ---------- Handy hochkant ---------- */
+@media (max-width: 700px) {
+    .mm-logo { width: 128px; top: calc(8px + env(safe-area-inset-top, 0px)); left: 12px; }
+    .mm-modes { top: calc(18px + env(safe-area-inset-top, 0px)); right: 12px; gap: 2px; }
+    .mm-mode { padding: 8px 13px; font-size: 11.5px; letter-spacing: 0.07em; }
+    .mm-scroller {
+        width: calc(100vw - 24px); gap: 12px;
+        padding: calc(106px + env(safe-area-inset-top, 0px)) 0 calc(96px + env(safe-area-inset-bottom, 0px));
+        -webkit-mask-image: linear-gradient(180deg, transparent 0, transparent 54px, #000 104px, #000 calc(100% - 60px), transparent 100%);
+                mask-image: linear-gradient(180deg, transparent 0, transparent 54px, #000 104px, #000 calc(100% - 60px), transparent 100%);
+    }
+    .mm-hero:hover, .mm-hero.on { transform: none; }
+    /* Liftschild als Karte von unten, über die ganze Breite */
+    .mm-sign {
+        left: 0; right: 0; bottom: 0; width: auto;
+        max-height: 88vh; max-height: 88dvh;
+        transform: none; animation-name: mm-rise;
+    }
+    .mm-sign-plate {
+        border-radius: 18px 18px 0 0; border-bottom: 0;
+        padding: 22px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+    }
+    .mm-sign-plate::before, .mm-sign-plate::after { display: none; }
+    .mm-sign-head h2 { font-size: 22px; }
+    .mm-go { padding: 15px 0; }
+    .mm-sandbox-wrap { align-items: flex-start; padding: calc(104px + env(safe-area-inset-top, 0px)) 12px 24px; }
+    .mm-sandbox-inner { width: 100%; box-sizing: border-box; padding: 16px; }
+}
+
+/* ---------- Handy quer (wenig Höhe) ----------
+   Kopfzeile schrumpft, das Schild bleibt unter ihr und rollt in sich. */
+@media (max-height: 520px) and (max-width: 1080px) {
+    .mm-logo { width: 104px; top: calc(6px + env(safe-area-inset-top, 0px)); left: calc(14px + env(safe-area-inset-left, 0px)); }
+    .mm-modes { top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(14px + env(safe-area-inset-right, 0px)); }
+    .mm-mode { padding: 7px 14px; font-size: 11.5px; }
+    .mm-scroller {
+        padding: 84px 0 44px;
+        -webkit-mask-image: linear-gradient(180deg, transparent 0, transparent 40px, #000 84px, #000 calc(100% - 36px), transparent 100%);
+                mask-image: linear-gradient(180deg, transparent 0, transparent 40px, #000 84px, #000 calc(100% - 36px), transparent 100%);
+    }
+    .mm-sign {
+        bottom: 8px;
+        max-height: calc(100vh - 88px); max-height: calc(100dvh - 88px);
+    }
+    .mm-sign-plate { padding: 16px 20px 14px; border-radius: 12px; }
+    .mm-sign-head { padding-bottom: 9px; }
+    .mm-sign-head h2 { font-size: 20px; }
+    .mm-sign-tag { margin-top: 9px; }
+    .mm-sign-facts { margin-top: 10px; }
+    .mm-sign-goals { margin-top: 12px; }
+    .mm-sign-goals ul { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
+    .mm-sign-actions { margin-top: 14px; }
+    .mm-sandbox-wrap { align-items: flex-start; padding: 80px 14px 16px; }
+}
+
+/* ---------- Ohne Maus (Finger) ---------- */
+@media (hover: none) {
+    /* Kein Aufhellen beim Drüberfahren möglich: freigeschaltete Karten gleich heller zeigen */
+    .mm-hero:not(.locked) img { filter: brightness(0.9) contrast(1.04); }
+    .mm-hero:not(.locked):hover { transform: none; }
 }

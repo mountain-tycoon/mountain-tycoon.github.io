@@ -78,3 +78,37 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+/* ===== Handy =====
+   Die Seite selbst soll sich nicht mitziehen, nachfedern oder Schrift vergrößern –
+   bewegt wird nur, was im Spiel dafür gedacht ist. */
+html, body {
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+#root {
+  height: 100dvh; /* sichtbare Höhe ohne die ein- und ausfahrende Adressleiste */
+}
+
+button {
+  touch-action: manipulation; /* kein Doppeltipp-Zoom, keine Wartezeit beim Antippen */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Ohne Maus bliebe die Hover-Umrandung nach dem Antippen stehen */
+@media (hover: none) {
+  button:hover {
+    border-color: transparent;
+  }
+}
+
+/* Wischbare Leisten ohne sichtbaren Rollbalken */
+.mt-noscrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mt-noscrollbar::-webkit-scrollbar {
+  display: none;
+}

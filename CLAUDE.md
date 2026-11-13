@@ -30,6 +30,30 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - Anmeldung lokal ausprobieren: `worker/README.md` (Abschnitt „Lokal testen"), Server-Tests mit
   `node tools/authtest.mjs`.
 
+## 3D-Modus: Bedienung, Handy, Grafik
+- **Eingabe** (`attachOrbit` in `Scene3D.js`, Pointer Events): Maus – links drehen, rechts/Shift verschieben, Rad zoomen.
+  Finger – einer verschiebt (der berührte Punkt bleibt unter dem Finger), zwei zoomen/drehen, beide gemeinsam
+  hoch/runter neigen.
+- **Finger bauen nie direkt:** Antippen merkt die Aktion nur vor (`setPending`), das HUD zeigt die
+  Bestätigen-Leiste (`ConfirmBar` in `World3D.jsx`), erst `confirmPending()` führt aus. Mit der Maus bleibt es
+  beim sofortigen Klick. Wer ein Werkzeug ergänzt, muss in `onUp` beide Wege bedienen (`needConfirm`).
+- **Handy-Layout** in `World3D.jsx`: `useViewport()` liefert `compact` (kleiner Bildschirm → Leiste unten, Felder
+  als Karten von unten) und `coarse` (Finger → Kamera-Knöpfe, andere Hinweistexte). Nichts darf nur per
+  Drüberfahren erreichbar sein.
+- **Bildqualität** regelt sich selbst: Stufen `QUALITY` und Messung `qualityFrame` in `Scene3D.js`
+  (Stand je Gerät in `localStorage['mt.quality']`). Neue teure Effekte dort an eine Stufe hängen.
+- **Farben:** Die Bildaufbereitung (Composer) gibt die Werte ohne Tonwert-/Farbraumstufe aus; das Bild ist darauf
+  abgestimmt. Nicht nebenbei auf den direkten Renderpfad oder eine Ausgabestufe umstellen.
+- **Fallstrick:** `vertexColors: true` nur setzen, wenn die Geometrie ein Farbattribut hat – sonst wird das
+  Material schwarz. Farben je Instanz (`setColorAt`) brauchen den Schalter nicht.
+- **Kartenrand:** Das Umland (Schürze) übernimmt an der Kante die Farbe des Spielfelds
+  (`apron.userData.setSnowLine(…, farben)` am Ende von `repaintSnowCover`); der Wald läuft als Gürtel über die
+  Kante weiter (`buildApronForest`).
+- **Ausprobieren:** nur bei `npm run dev` gibt es `window.__mtCam` (Kamera stellen: `orbit.setState`,
+  Tageszeit: `clock`/`CYCLE`, Qualitätsstufe: `quality.set`, Geländepunkt unter einem Bildpunkt: `raycastTerrain`).
+  Die Uhr dabei nur vorwärts stellen.
+- App-Symbole neu erzeugen: `python3 tools/make-app-icons.py public/bg/logo.png public/pwa` (in `webgl-3d/`).
+
 ## Veröffentlichen
 - Jeder Push auf `main` baut `webgl-3d` und veröffentlicht es über GitHub Actions auf GitHub Pages
   (`.github/workflows/deploy.yml`); nach ein bis zwei Minuten ist es live. Pull Requests werden nur gebaut.
