@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { localSaveIndex, remoteSaveIndex, agoText } from '../../savegames';
 import {
     CAMPAIGN_LEVELS,
     SANDBOX_DEFAULTS,
@@ -144,6 +145,31 @@ const MainMenu = ({ onStartLevel }) => {
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [hoveredLevel, setHoveredLevel] = useState(null);
     const [progress] = useState(() => loadProgress());
+    // Spielstände des Spielers: sofort die vom Gerät, kurz darauf ergänzt um die vom Konto
+    const [saves, setSaves] = useState(() => localSaveIndex());
+    useEffect(() => {
+        let alive = true;
+        remoteSaveIndex().then((remote) => {
+            if (!alive) return;
+            setSaves((prev) => {
+                const out = { ...prev };
+                for (const [id, r] of Object.entries(remote)) if (!out[id] || (r.t || 0) > (out[id].t || 0)) out[id] = r;
+                return out;
+            });
+        });
+        return () => { alive = false; };
+    }, []);
+    const [confirmFresh, setConfirmFresh] = useState(null);     // Level, für das „Neu beginnen" bestätigt werden soll
+    /** Kurzfassung eines Spielstands, z. B. „2 Lifte · 7 Gebäude · 1,94 Mio. € · vor 5 Min." */
+    const saveText = (sv) => {
+        const q = sv.sum || {};
+        const parts = [];
+        if (q.lifts) parts.push(q.lifts === 1 ? '1 Lift' : `${q.lifts} Lifte`);
+        if (q.buildings) parts.push(q.buildings === 1 ? '1 Gebäude' : `${q.buildings} Gebäude`);
+        if (Number.isFinite(q.money)) parts.push(q.money >= 1e6 ? `${(q.money / 1e6).toFixed(2).replace('.', ',')} Mio. €` : `${Math.round(q.money).toLocaleString('de-DE')} €`);
+        parts.push(agoText(sv.t));
+        return parts.join(' · ');
+    };
     // Hintergrundbild alle 5 Sekunden weiterschalten
     const [bgIndex, setBgIndex] = useState(0);
     useEffect(() => {
@@ -240,13 +266,14 @@ const MainMenu = ({ onStartLevel }) => {
                                 <button
                                     key={level.id}
                                     className={`mm-hero ${unlocked ? '' : 'locked'} ${selected ? 'on' : ''}`}
-                                    onClick={() => unlocked && setSelectedLevel(selected ? null : level)}
+                                    onClick={() => { if (unlocked) { setConfirmFresh(null); setSelectedLevel(selected ? null : level); } }}
                                     disabled={!unlocked}
                                 >
                                     {/* Nummer, Name und Land sind bereits Teil der Grafik */}
                                     <img src={heroFor(level)} alt={level.name} loading="lazy" />
                                     {!unlocked && <span className="mm-hero-lock">Gesperrt</span>}
                                     {completed && unlocked && <span className="mm-hero-done">Geschafft</span>}
+                                    {unlocked && saves[level.id] && <span className="mm-hero-save">Spielstand</span>}
                                 </button>
                             );
                         })}
@@ -281,9 +308,28 @@ const MainMenu = ({ onStartLevel }) => {
                                             ))}
                                         </ul>
                                     </div>
+                                    {saves[selectedLevel.id] && (
+                                        <p className="mm-sign-save">
+                                            <b>Dein Spielstand</b>{saveText(saves[selectedLevel.id])}
+                                        </p>
+                                    )}
                                     <div className="mm-sign-actions">
-                                        <button className="mm-go" onClick={() => onStartLevel(selectedLevel, '3d')}>Starten</button>
-                                        <button className="mm-go alt" onClick={() => onStartLevel(selectedLevel, '2d')}>2D</button>
+                                        {saves[selectedLevel.id] ? (
+                                            <>
+                                                <button className="mm-go" onClick={() => onStartLevel(selectedLevel, '3d')}>Fortsetzen</button>
+                                                {/* Erst nachfragen: der Stand wird dabei verworfen */}
+                                                <button className={`mm-go alt ${confirmFresh === selectedLevel.id ? 'warn' : ''}`}
+                                                    onClick={() => {
+                                                        if (confirmFresh === selectedLevel.id) onStartLevel(selectedLevel, '3d', { fresh: true });
+                                                        else setConfirmFresh(selectedLevel.id);
+                                                    }}>
+                                                    {confirmFresh === selectedLevel.id ? 'Stand löschen?' : 'Neu beginnen'}
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button className="mm-go" onClick={() => onStartLevel(selectedLevel, '3d')}>Starten</button>
+                                        )}
+                                        <button className="mm-go alt slim" onClick={() => onStartLevel(selectedLevel, '2d')}>2D</button>
                                     </div>
                                 </div>
                             </aside>

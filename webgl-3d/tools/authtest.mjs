@@ -131,6 +131,54 @@ check('Fortschritt ohne Anmeldung → 401', r.status === 401);
 r = await call('GET', '/admin/accounts', { token: adminToken });
 check('Verwaltung zeigt die Zahl der geschafften Level', (r.data.accounts || []).find((a) => a.email === anna.email)?.levels === 3);
 
+console.log('\nSpielstände');
+const now = Date.now();
+const stand = (t, money) => ({
+    v: 1, level: 'mittelgebirge', t, money, played: 120, sim: { revenue: 5000 },
+    sum: { lifts: 1, buildings: 2, km: 0.8, revenue: 5000 },
+    log: [{ a: 'b', t: 'imbiss', x: 100, y: 120, r: 0 }, { a: 'l', k: 'platter', n: 'Tellerlift 2', c: null, ax: 1, az: 2, bx: 30, bz: 40 }],
+});
+r = await call('GET', '/saves', { token: userToken });
+check('anfangs keine Spielstände', r.status === 200 && r.data.saves && Object.keys(r.data.saves).length === 0, JSON.stringify(r.data));
+r = await call('GET', '/save?level=mittelgebirge', { token: userToken });
+check('unbekanntes Level → none', r.status === 200 && r.data.none === true);
+r = await call('PUT', '/save?level=mittelgebirge', { token: userToken, body: stand(now - 5000, 1900000) });
+check('Spielstand gespeichert', r.status === 200 && r.data.ok === true, JSON.stringify(r.data));
+r = await call('GET', '/save?level=mittelgebirge', { token: userToken });
+check('Spielstand kommt vollständig zurück', r.data.save?.money === 1900000 && r.data.save?.log?.length === 2 && r.data.save?.log?.[1]?.n === 'Tellerlift 2', JSON.stringify(r.data).slice(0, 200));
+r = await call('GET', '/saves', { token: userToken });
+check('Übersicht nennt Level, Zeit und Kurzfassung', r.data.saves?.mittelgebirge?.sum?.lifts === 1 && r.data.saves?.mittelgebirge?.sum?.money === 1900000 && r.data.saves?.mittelgebirge?.t === now - 5000, JSON.stringify(r.data));
+r = await call('PUT', '/save?level=mittelgebirge', { token: userToken, body: stand(now - 60000, 1) });
+check('älterer Stand überschreibt nichts', r.status === 200 && r.data.ok === false && r.data.stale === true, JSON.stringify(r.data));
+r = await call('GET', '/save?level=mittelgebirge', { token: userToken });
+check('… der neuere bleibt', r.data.save?.money === 1900000);
+r = await call('PUT', '/save?level=mittelgebirge', { token: userToken, body: stand(now - 1000, 2100000) });
+r = await call('GET', '/save?level=mittelgebirge', { token: userToken });
+check('neuerer Stand ersetzt den alten', r.data.save?.money === 2100000);
+r = await call('PUT', '/save?level=alpen', { token: userToken, body: { ...stand(now - 900, 3000000), level: 'alpen' } });
+r = await call('GET', '/saves', { token: userToken });
+check('jedes Level hat seinen eigenen Stand', Object.keys(r.data.saves || {}).length === 2 && r.data.saves.alpen?.sum?.money === 3000000);
+r = await call('GET', '/save?level=mittelgebirge', { token: adminToken });
+check('ein anderes Konto sieht den Stand nicht', r.status === 200 && r.data.none === true);
+r = await call('GET', '/save?level=mittelgebirge');
+check('Spielstand ohne Anmeldung → 401', r.status === 401);
+r = await call('PUT', '/save?level=..%2Fprogress', { token: userToken, body: stand(now, 1) });
+check('ungültige Level-Kennung abgelehnt', r.status === 400);
+r = await call('PUT', '/save?level=mittelgebirge', { token: userToken, body: { v: 1, t: now, money: 5 } });
+check('Stand ohne Bauliste abgelehnt', r.status === 400);
+r = await call('PUT', '/save?level=mittelgebirge', { token: userToken, body: { ...stand(now, 1), log: [{ a: 'x', pad: 'x'.repeat(410000) }] } });
+check('übergroßer Stand abgelehnt → 413', r.status === 413);
+r = await call('PUT', '/save?level=mittelgebirge', { token: userToken, body: { deleted: true, t: now } });
+check('„Neu beginnen" verwirft den Stand', r.status === 200 && r.data.ok === true);
+r = await call('GET', '/save?level=mittelgebirge', { token: userToken });
+check('… zurück bleibt ein Löschvermerk', r.data.deleted === true && r.data.t === now);
+r = await call('GET', '/saves', { token: userToken });
+check('… und die Übersicht führt das Level nicht mehr', !r.data.saves?.mittelgebirge && !!r.data.saves?.alpen);
+r = await call('PUT', '/save?level=mittelgebirge', { token: userToken, body: stand(now - 2000, 7) });
+check('ein älteres Gerät holt den verworfenen Stand nicht zurück', r.data.ok === false && r.data.stale === true);
+r = await call('PUT', '/save?level=mittelgebirge', { token: userToken, body: stand(now + 1000, 2000000) });
+check('ein neu begonnenes Spiel wird wieder gespeichert', r.data.ok === true);
+
 console.log('\nPasswort');
 r = await call('POST', '/password', { token: userToken, body: { old: 'falsches-altes', password: 'neues-passwort-1' } });
 check('Ändern mit falschem alten Passwort abgelehnt', r.status === 403);
@@ -175,6 +223,15 @@ r = await call('POST', '/auth', { body: { email: anna.email, password: annaPw3 }
 check('gesperrtes Konto kann sich nicht anmelden', r.status === 403 && r.data.status === 'declined');
 r = await call('PUT', '/admin/accounts', { token: adminToken, body: { email: anna.email, status: 'removed' } });
 check('Entfernen', r.status === 200 && !(r.data.accounts || []).some((a) => a.email === anna.email));
+// Mit dem Konto verschwinden auch die Spielstände: dieselbe Adresse fängt bei null an.
+{
+    const again = await call('POST', '/register', { body: { ...anna, password: annaPw3 } });
+    await call('PUT', '/admin/accounts', { token: adminToken, body: { email: anna.email, status: 'approved' } });
+    const login = await call('POST', '/auth', { body: { email: anna.email, password: annaPw3 } });
+    const saves = await call('GET', '/saves', { token: login.data.token });
+    check('entferntes Konto: Spielstände sind mit weg', again.status === 200 && saves.status === 200 && Object.keys(saves.data.saves || {}).length === 0, JSON.stringify(saves.data));
+    await call('PUT', '/admin/accounts', { token: adminToken, body: { email: anna.email, status: 'removed' } });
+}
 r = await call('PUT', '/admin/accounts', { token: adminToken, body: { email: anna.email, status: 'approved' } });
 check('entferntes Konto ist weg → 404', r.status === 404);
 r = await call('GET', '/admin/logins', { token: adminToken });

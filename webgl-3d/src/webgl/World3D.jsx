@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { generateWorldData, upsampleWorld } from '../engine/utils';
 import { createScene3D } from './Scene3D.js';
 import { evaluateObjective, objectiveLabel, formatObjectiveValue, markLevelCompleted, CAMPAIGN_LEVELS, MASSIFS } from '../constants/campaign';
+import { canSave, createAutosave } from '../savegames';
 
 // ===== BILDSCHIRM UND EINGABEART =====
 // Steuert das kompakte Layout fürs Handy: Werkzeuge unten statt links, Bedienfelder
@@ -215,11 +216,8 @@ const ICON_PATHS = {
     mega:  'M3 10v4h3l7 4V6l-7 4zM17 9a4 4 0 0 1 0 6',
     back:  'M15 5l-7 7 7 7',
     // Bedienknöpfe (Handy): als Strichsymbole, weil Pfeil-Schriftzeichen je nach Gerät fehlen oder bunt ausfallen
-    plus:  'M12 5v14M5 12h14',
-    minus: 'M5 12h14',
     check: 'M5 12.5l4.5 4.5L19 7.5',
     close: 'M6 6l12 12M18 6L6 18',
-    turnL: 'M2.5 4.5v6h6M4.6 15a8.5 8.5 0 1 0 2-8.8L2.5 10.5',
     turnR: 'M21.5 4.5v6h-6M19.4 15a8.5 8.5 0 1 1-2-8.8l4.1 4.3',
     undo:  'M9 14L4 9l5-5M20 20v-7a4 4 0 0 0-4-4H4',
     bed:   'M3 18V8M3 14h18v4M3 14V11h7v3M21 14v-2a2 2 0 0 0-2-2h-9'
@@ -610,9 +608,10 @@ const ConfirmBar = ({ p, fmt, onOk, onCancel, onRotate, onUndo }) => {
     );
 };
 
-const World3D = ({ level, onExit }) => {
+const World3D = ({ level, onExit, initialSave = null }) => {
     const canvasRef = useRef(null);
     const apiRef = useRef(null);
+    const wonRef = useRef(false);        // Level geschafft? Steht mit im Spielstand.
     const vp = useViewport();
     const compact = vp.compact;          // Handy-Layout: Werkzeuge unten, Felder als Karten von unten
     const touch = vp.coarse;             // Bedienung mit dem Finger
@@ -664,12 +663,31 @@ const World3D = ({ level, onExit }) => {
         api.setOnStats((st) => {
             setStats(st);
             if ((level?.objectives?.length > 0) && level.objectives.every(o => evaluateObjective(o, st).done)) {
+                wonRef.current = true;
                 setWon(prev => { if (!prev && level?.id && !level.isSandbox) markLevelCompleted(level.id); return true; });
             }
         });
+        // ===== SPIELSTAND =====
+        // Fortsetzen: das gespeicherte Skigebiet wieder aufbauen. Danach sichert das Spiel von
+        // selbst – nach jeder Bauaktion, regelmäßig und beim Verlassen (Gerät und Konto).
+        const saving = canSave(level);
+        if (saving && initialSave) {
+            const res = api.loadSave(initialSave);
+            if (res.ok && initialSave.won) { wonRef.current = true; setWon(true); setWonDismissed(true); }   // nicht bei jedem Fortsetzen neu gratulieren
+            if (res.ok && res.skipped > 0) {
+                setToast(res.skipped === 1 ? 'Ein Bauwerk ließ sich nicht wiederherstellen.' : `${res.skipped} Bauwerke ließen sich nicht wiederherstellen.`);
+                clearTimeout(window.__toastT); window.__toastT = setTimeout(() => setToast(''), 12000);
+            }
+            setMoney(api.getMoney());
+        }
+        const saver = saving ? createAutosave(level.id, () => ({ ...api.getSave(), won: wonRef.current })) : null;
+        if (saver) api.setOnSaveChange(() => saver.changed());
         setStats(api.getStats());
-        return () => { api.dispose(); apiRef.current = null; };
-    }, [level]);
+        return () => {
+            if (saver) { saver.flush(true); saver.dispose(); }
+            api.dispose(); apiRef.current = null;
+        };
+    }, [level, initialSave]);
 
     const applyTool = (item) => {
         const api = apiRef.current; if (!api) return;
@@ -744,8 +762,6 @@ const World3D = ({ level, onExit }) => {
     // Unterkante für alles, was über der Werkzeugleiste des Handy-Layouts sitzt
     const aboveBar = `calc(${BAR_H + 8}px + ${SAFE_B})`;
     const sheetMaxH = Math.max(150, Math.round(narrow ? vp.h * 0.46 : vp.h - BAR_H - 96));
-    const camBtn = { ...glass, width: 42, height: 42, borderRadius: 13, padding: 0, cursor: 'pointer', color: '#e8eaed',
-                     fontSize: 19, fontWeight: 600, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' };
 
     return (
         <div style={{ position: 'fixed', inset: 0, background: '#0b1a30', overflow: 'hidden',
@@ -1157,17 +1173,6 @@ const World3D = ({ level, onExit }) => {
                             ))}
                         </div>
                     )}
-                </div>
-            )}
-
-            {/* Kamera-Knöpfe (Finger): zweiter Weg neben den Gesten – zoomen und drehen */}
-            {touch && !selInfo && !openCat && !liftSetup && (
-                <div style={{ position: 'fixed', right: `calc(8px + ${SAFE_R})`, top: '50%', transform: 'translateY(-50%)', zIndex: 9,
-                              display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <button title="Heranzoomen" style={camBtn} onClick={() => apiRef.current?.cameraZoom?.(0.72)}><Ico name="plus" size={19} /></button>
-                    <button title="Herauszoomen" style={camBtn} onClick={() => apiRef.current?.cameraZoom?.(1.39)}><Ico name="minus" size={19} /></button>
-                    <button title="Nach links drehen" style={camBtn} onClick={() => apiRef.current?.cameraTurn?.(-Math.PI / 8)}><Ico name="turnL" size={18} /></button>
-                    <button title="Nach rechts drehen" style={camBtn} onClick={() => apiRef.current?.cameraTurn?.(Math.PI / 8)}><Ico name="turnR" size={18} /></button>
                 </div>
             )}
 

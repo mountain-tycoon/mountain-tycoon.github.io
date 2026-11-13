@@ -4,7 +4,7 @@
 import { BUILD } from '../buildInfo';
 
 /** Schnittstellen-Stand, den diese Seite vom Server braucht (SERVER_V in worker/worker.js). */
-export const SERVER_V = 1;
+export const SERVER_V = 2;
 
 const RAW = String(import.meta.env.VITE_AUTH_ENDPOINT || '').trim().replace(/\/+$/, '');
 const IS_FILE = typeof location !== 'undefined' && location.protocol === 'file:';
@@ -49,15 +49,18 @@ export class AuthError extends Error {
     constructor(message, status = 0, data = {}) { super(message); this.name = 'AuthError'; this.status = status; this.data = data; }
 }
 
-/** @param {{method?: string, body?: object, auth?: boolean|string}} [opt] auth: true = gemerktes Token, string = dieses Token */
-async function call(path, { method = 'GET', body, auth = false } = {}) {
+/**
+ * @param {{method?: string, body?: object, auth?: boolean|string, keepalive?: boolean}} [opt]
+ *   auth: true = gemerktes Token, string = dieses Token · keepalive: Anfrage überlebt das Schließen der Seite
+ */
+async function call(path, { method = 'GET', body, auth = false, keepalive = false } = {}) {
     if (!AUTH_ENDPOINT) throw new AuthError('Anmeldeserver nicht eingerichtet');
     const headers = {};
     if (body !== undefined) headers['content-type'] = 'application/json';
     if (auth) headers['x-token'] = typeof auth === 'string' ? auth : store.get(K.token);
     let res;
     try {
-        res = await fetch(AUTH_ENDPOINT + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, cache: 'no-store' });
+        res = await fetch(AUTH_ENDPOINT + path, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, cache: 'no-store', keepalive });
     } catch {
         throw new AuthError('Anmeldeserver nicht erreichbar – bitte die Internetverbindung prüfen');
     }
@@ -77,6 +80,10 @@ export const api = {
     setPassword: (password, old, token) => call('/password', { method: 'POST', auth: token || true, body: { password, old } }),
     getProgress: () => call('/progress', { auth: true }),
     putProgress: (completed) => call('/progress', { method: 'PUT', auth: true, body: { completed } }),
+    listSaves: () => call('/saves', { auth: true }),
+    getSave: (levelId) => call('/save?level=' + encodeURIComponent(levelId), { auth: true }),
+    /** save: Spielstand oder {deleted: true, t} · keepalive: beim Verlassen der Seite */
+    putSave: (levelId, save, keepalive = false) => call('/save?level=' + encodeURIComponent(levelId), { method: 'PUT', auth: true, body: save, keepalive }),
     adminAccounts: () => call('/admin/accounts', { auth: true }),
     adminSetStatus: (email, status) => call('/admin/accounts', { method: 'PUT', auth: true, body: { email, status } }),
     adminReset: (email) => call('/admin/reset', { method: 'POST', auth: true, body: { email } }),

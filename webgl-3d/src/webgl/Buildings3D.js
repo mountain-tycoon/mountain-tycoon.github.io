@@ -5,6 +5,7 @@
 // Alle Höhen in WELT-Einheiten des 3D-Terrains (y = height * hScale).
 // ============================================================
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // ===== WIND FÜR DIE ANLAGEN =====
 // Scene3D meldet Böenstärke und Richtung hierher; alle hängenden Kabinen
@@ -876,9 +877,14 @@ function makeLabelTexture(text, color = 0xffffff, bg = 0x1d4ed8) {
     cx.fillStyle = cssColor(bg, '#1d4ed8');
     cx.fillRect(0, 0, 256, 72);
     cx.fillStyle = cssColor(color, '#ffffff');
-    cx.font = 'bold 40px Helvetica, Arial, sans-serif';
+    // Schrift so weit verkleinern, dass der Text ganz aufs Band passt (lange Namen wurden abgeschnitten)
+    const label = String(text).slice(0, 16);
+    let size = 40;
+    cx.font = `bold ${size}px Helvetica, Arial, sans-serif`;
+    const wide = cx.measureText(label).width;
+    if (wide > 228) { size = Math.max(18, Math.floor(size * 228 / wide)); cx.font = `bold ${size}px Helvetica, Arial, sans-serif`; }
     cx.textAlign = 'center'; cx.textBaseline = 'middle';
-    cx.fillText(String(text).slice(0, 16), 128, 38);
+    cx.fillText(label, 128, 38);
     const tx = new THREE.CanvasTexture(cv);
     tx.anisotropy = 4; tx.needsUpdate = true;
     return tx;
@@ -1223,6 +1229,150 @@ function stationHouse(w, d, wallH, yaw = 0, seed = 0) {
  * groundYs: Array von Terrain-Y-Werten entlang der Strecke (0..1),
  *           damit das Seil dem Geländeprofil folgt (Gondeln nie im Berg).
  */
+/**
+ * UMLAUFKABINE – moderner Bausatz für 4er-, 6er- und 8er-Gondelbahnen.
+ *
+ * Statt eines Würfels mit aufgesetzten Scheiben: abgerundete Wanne in Wagenfarbe,
+ * umlaufende getönte Panoramaverglasung, gewölbte Dachhaube, Gehänge mit Klemme,
+ * Schürze unten und Skiköcher außen neben den Türen.
+ *
+ * Die Form wird EINMAL je Bahn gebaut; alle Kabinen teilen sich die Geometrien, und
+ * jede Kabine besteht nur aus vier Teilen (Wagenfarbe, Glas, Anbauteile, Werbung) –
+ * das sind deutlich weniger Zeichenaufrufe als bei der alten Kabine aus rund 18 Einzelteilen.
+ * Ursprung ist die Klemme am Seil, die Kabine hängt darunter.
+ */
+function makeCabinKit({ big = false, small = false, adText = null, adColor = 0xffffff, adBg = 0x1d4ed8 } = {}) {
+    const CW = big ? 1.12 : small ? 0.62 : 0.75;      // Breite (quer zur Fahrt)
+    const CD = CW * 1.05;                              // Länge (in Fahrtrichtung)
+    const CH = big ? 1.05 : small ? 0.74 : 0.85;       // Höhe
+    const cabY = big ? -1.22 : -1.05;                  // Kabinenmitte unter dem Seil
+    const bottom = cabY - CH / 2, top = cabY + CH / 2;
+    const R = CW * 0.19;                               // Eckenradius des Grundrisses
+
+    // Scheibe mit abgerundetem Grundriss, Unterkante bei y = 0. `bevel` rundet zusätzlich die Kanten oben/unten.
+    // (Die Fase wächst nach außen – der Grundriss wird deshalb um sie verkleinert, damit w und d die Außenmaße bleiben.)
+    const slab = (w, d, h, r, bevel = 0) => {
+        w -= 2 * bevel; d -= 2 * bevel; r = Math.max(0.01, r - bevel);
+        const sh = new THREE.Shape();
+        const x = -w / 2, y = -d / 2;
+        sh.moveTo(x + r, y); sh.lineTo(x + w - r, y); sh.quadraticCurveTo(x + w, y, x + w, y + r);
+        sh.lineTo(x + w, y + d - r); sh.quadraticCurveTo(x + w, y + d, x + w - r, y + d);
+        sh.lineTo(x + r, y + d); sh.quadraticCurveTo(x, y + d, x, y + d - r);
+        sh.lineTo(x, y + r); sh.quadraticCurveTo(x, y, x + r, y);
+        const g = new THREE.ExtrudeGeometry(sh, { depth: Math.max(0.005, h - 2 * bevel), bevelEnabled: bevel > 0,
+            bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 5 });
+        g.rotateX(-Math.PI / 2);                       // Grundriss auf den Boden legen, Höhe nach oben
+        g.translate(0, bevel, 0);
+        return g;
+    };
+    const plain = (g) => (g.index ? g.toNonIndexed() : g);
+    const at = (g, x, y, z) => { g.translate(x, y, z); return plain(g); };
+    // Eckfarbe für Teile, die sich ein Material teilen (Anbauteile in Silber, Anthrazit, bunt)
+    const tint = (g, hex) => {
+        const c = new THREE.Color(hex), n = g.attributes.position.count, arr = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
+        g.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+        return g;
+    };
+
+    // ----- Wagenfarbe: Wanne, Dachhaube, vier Ecksäulen -----
+    const hShell = CH * 0.40, hRoof = CH * 0.20;
+    const post = CW * 0.075;
+    const bodyParts = [
+        at(slab(CW, CD, hShell, R, CH * 0.035), 0, bottom, 0),
+        at(slab(CW * 0.98, CD * 0.98, hRoof, R, CH * 0.06), 0, top - hRoof, 0)
+    ];
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        bodyParts.push(at(new THREE.BoxGeometry(post, CH * 0.46, post), sx * (CW / 2 - post * 0.75), cabY + CH * 0.07, sz * (CD / 2 - post * 0.75)));
+    }
+    const bodyGeo = mergeGeometries(bodyParts);
+
+    // ----- Verglasung: ein umlaufendes Band zwischen Wanne und Dach -----
+    const glassGeo = at(slab(CW * 0.955, CD * 0.955, CH * 0.50, R * 0.95), 0, bottom + hShell - CH * 0.04, 0);
+
+    // ----- Anbauteile (ein Material, Farbe je Teil) -----
+    const SILVER = 0xc9d2dc, DARK = 0x262c35;
+    const det = [];
+    // Zierleiste unter dem Fensterband und Schürze am Boden
+    det.push(tint(at(slab(CW * 1.025, CD * 1.025, 0.03, R * 1.02), 0, bottom + hShell - 0.015, 0), SILVER));
+    det.push(tint(at(slab(CW * 1.035, CD * 1.035, 0.055, R * 1.03), 0, bottom + 0.012, 0), DARK));
+    // Türfugen an beiden Längsseiten (die große Kabine hat Doppeltüren)
+    for (const sx of [-1, 1]) for (const dz of (big ? [-CD * 0.2, CD * 0.2] : [0])) {
+        det.push(tint(at(new THREE.BoxGeometry(0.014, CH * 0.78, 0.022), sx * (CW / 2 + 0.003), cabY - CH * 0.02, dz), DARK));
+    }
+    // Gehänge: Joch auf dem Dach, Tragarm, Kopf und Klemme mit Rollen am Seil
+    det.push(tint(at(new THREE.BoxGeometry(CW * 0.46, 0.05, 0.09), 0, top + 0.02, 0), SILVER));
+    const armLen = Math.max(0.1, -top - 0.16);
+    det.push(tint(at(new THREE.CylinderGeometry(big ? 0.034 : 0.027, big ? 0.05 : 0.04, armLen, 8), 0, top + 0.04 + armLen / 2, 0), SILVER));
+    det.push(tint(at(new THREE.BoxGeometry(0.15, 0.13, 0.30), 0, -0.10, 0), DARK));
+    det.push(tint(at(new THREE.BoxGeometry(0.18, 0.11, 0.36), 0, 0, 0), SILVER));
+    for (const rz of [-0.12, 0.12]) {
+        const roll = new THREE.CylinderGeometry(0.06, 0.06, 0.1, 10); roll.rotateX(Math.PI / 2);
+        det.push(tint(at(roll, 0, 0.02, rz), DARK));
+    }
+    // Skiköcher außen neben den Türen – mit ein paar Paar Ski darin
+    const SKI = [0xe23b3b, 0xf5b60a, 0x2f8fd6, 0x22a06b, 0xf2f4f7, 0xf97316];
+    let skiNo = 0;
+    for (const sx of [-1, 1]) {
+        const rx = sx * (CW / 2 + 0.05), rz = CD * 0.29;
+        det.push(tint(at(new THREE.BoxGeometry(0.075, CH * 0.20, CD * 0.26), rx, bottom + hShell * 0.62, rz), DARK));
+        for (let k = 0; k < 3; k++) {
+            const ski = new THREE.BoxGeometry(0.018, CH * 0.62, 0.034);
+            det.push(tint(at(ski, rx + sx * 0.012, bottom + hShell * 0.62 + CH * 0.24, rz - CD * 0.08 + k * CD * 0.08), SKI[skiNo++ % SKI.length]));
+        }
+    }
+    const detailGeo = mergeGeometries(det);
+
+    // ----- Werbebanderole auf der Wanne (vier Seiten, ein Teil) -----
+    let adGeo = null, adMat = null;
+    if (adText) {
+        const planes = [];
+        const hAd = hShell * 0.52, yAd = bottom + hShell * 0.50;
+        for (const [ax, az, ry, w] of [[CW / 2 + 0.006, 0, Math.PI / 2, CD - 2 * R], [-CW / 2 - 0.006, 0, -Math.PI / 2, CD - 2 * R],
+                                       [0, CD / 2 + 0.006, 0, CW - 2 * R], [0, -CD / 2 - 0.006, Math.PI, CW - 2 * R]]) {
+            const pl = new THREE.PlaneGeometry(w, hAd); pl.rotateY(ry);
+            planes.push(at(pl, ax, yAd, az));
+        }
+        adGeo = mergeGeometries(planes);
+        adMat = new THREE.MeshBasicMaterial({ map: makeLabelTexture(adText, adColor, adBg), transparent: true });
+    }
+
+    // Materialien: Glas und Anbauteile einmal je Bahn, die Wagenfarbe je Farbton
+    // Dunkel getönt und nur leicht spiegelnd – mit viel Metallanteil spiegelte die Scheibe
+    // den hellen Schnee und wirkte milchig statt gläsern.
+    const glassMat = new THREE.MeshStandardMaterial({
+        color: 0x15202b, roughness: 0.10, metalness: 0.15,
+        transparent: true, opacity: 0.84
+    });
+    glassMat.userData.isWindow = true;                 // glimmt nachts warm (Innenlicht)
+    const detailMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.42, metalness: 0.5, envMapIntensity: 0.6 });
+    const bodyMats = new Map();
+    const bodyMat = (hex) => {
+        let m = bodyMats.get(hex);
+        if (!m) { m = new THREE.MeshStandardMaterial({ color: hex, roughness: 0.38, metalness: 0.18, envMapIntensity: 0.5 }); bodyMats.set(hex, m); }
+        return m;
+    };
+
+    return {
+        /** Hängt eine Kabine in der Farbe `hex` an die Gruppe `gg` (Ursprung = Klemme am Seil). */
+        attach(gg, hex) {
+            const body = new THREE.Mesh(bodyGeo, bodyMat(hex)); body.castShadow = true; gg.add(body);
+            gg.add(new THREE.Mesh(detailGeo, detailMat));
+            const glass = new THREE.Mesh(glassGeo, glassMat); glass.renderOrder = 1; gg.add(glass);
+            if (adGeo) gg.add(new THREE.Mesh(adGeo, adMat));
+        },
+        // Gäste stehen auf dem KABINENBODEN und werden auf Innenhöhe skaliert – eine
+        // ungeschrumpfte Figur (~1.55 hoch) passt in die Kabine nicht hinein.
+        seatInfo: {
+            seats: big ? 8 : small ? 4 : 6,
+            y: bottom + 0.05,
+            spread: CW * 0.28,
+            rows: 2, rowGap: CD * 0.25,
+            scale: Math.min(1, (CH * 0.84) / 1.55)
+        }
+    };
+}
+
 export function makeLift(a, b, groundYs = null, opts = {}) {
     const group = new THREE.Group();
     const dir = new THREE.Vector3().subVectors(b, a);
@@ -1442,18 +1592,23 @@ export function makeLift(a, b, groundYs = null, opts = {}) {
     const platter = opts.kind === 'platter';       // Tellerlift: 1 Person je Bügel
     const nSeats = opts.seats || (chair ? 4 : 2);  // 2er/4er/6er-Sessel
     const gondolas = [];
+    // Kabinenbahn: Form einmal bauen, alle Kabinen dieser Bahn teilen sie sich
+    const cabinKit = (!chair && !surface)
+        ? makeCabinKit({ big: !!opts.cabin8, small: !!opts.cabin4, adText: opts.adText, adColor: opts.adColor, adBg: opts.adBg }) : null;
     const nGond = Math.max(3, Math.floor(len / (surface ? 5 : chair ? 6 : opts.cabin8 ? 12 : opts.cabin4 ? 6 : 8)));
     const gGeo = new THREE.BoxGeometry(0.75, 0.85, 0.75);
     const seatMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.7 });
     const riderCols = [0xef4444, 0x2563eb, 0x16a34a, 0xf59e0b, 0x9333ea];
     for (let i = 0; i < nGond; i++) {
         const gg = new THREE.Group();
-        // Klemme direkt am Seil
-        const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.34), M.metal);
-        clamp.position.y = 0; gg.add(clamp);
-        for (const rz of [-0.11, 0.11]) {
-            const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.1, 8), M.woodDark);
-            roll.rotation.x = Math.PI / 2; roll.position.set(0, 0.02, rz); gg.add(roll);
+        // Klemme direkt am Seil (bei Kabinen steckt sie schon im Bausatz)
+        if (!cabinKit) {
+            const clamp = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.12, 0.34), M.metal);
+            clamp.position.y = 0; gg.add(clamp);
+            for (const rz of [-0.11, 0.11]) {
+                const roll = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.1, 8), M.woodDark);
+                roll.rotation.x = Math.PI / 2; roll.position.set(0, 0.02, rz); gg.add(roll);
+            }
         }
         if (surface) {
             // Schleppbügel (T-Bar): langes Seil zum Boden, Querbügel, stehender Skifahrer
@@ -1524,100 +1679,12 @@ export function makeLift(a, b, groundYs = null, opts = {}) {
             gg.userData.riders = riders;
             gg.userData.seatInfo = { seats: nSeats, y: -0.80, spread: 0.37 };
         } else {
-            // ===== GONDELKABINE =====
-            // `big` = 8er-Kabinenbahn: deutlich größer, mit umlaufendem
-            // Panoramafenster­band, Doppeltür und flacherem Dach mit Reling.
-            const big = !!opts.cabin8;
-            const small = !!opts.cabin4;   // kompakte 4er-Kabine
-            const CW = big ? 1.12 : small ? 0.62 : 0.75;   // Breite/Tiefe der Kabine
-            const CH = big ? 1.05 : small ? 0.74 : 0.85;   // Höhe
-            const arm = new THREE.Mesh(new THREE.CylinderGeometry(big ? 0.036 : 0.028, big ? 0.036 : 0.028, big ? 0.62 : 0.55), M.metal);
-            arm.position.y = big ? -0.36 : -0.32; gg.add(arm);
-            // Lackierung: entweder die im Baudialog gewählte Farbe (dann alle
-            // Kabinen einheitlich) oder das abwechselnde Levelschema.
-            // Auch hier gebrauchter Lack statt Hochglanz
-            // Eigene Materialinstanz je Kabine, damit das Innenlicht einzeln
-            // gesteuert werden kann (geteilte Materialien ließen sich nicht
-            // getrennt beleuchten).
-            const srcMat = opts.cabinColor != null
-                ? { color: opts.cabinColor } : (i % 2 ? M.cabinB : M.cabinR);
-            const bodyMat = new THREE.MeshStandardMaterial({
-                color: srcMat.color, roughness: 0.42, metalness: 0.42, envMapIntensity: 0.55
-            });
-            gg.userData.bodyMat = bodyMat;
-            const cabY = big ? -1.22 : -1.05;
-            const cab = new THREE.Mesh(new THREE.BoxGeometry(CW, CH, CW), bodyMat);
-            cab.position.y = cabY; cab.castShadow = true; gg.add(cab);
-
-            // Verglasung: neutral getönt, DOPPELSEITIG (sonst ist die Scheibe
-            // von außen unsichtbar) und pro Seite korrekt ausgerichtet.
-            const glassMat = new THREE.MeshStandardMaterial({
-                color: 0x8b929b, roughness: 0.24, metalness: 0.12,
-                transparent: true, opacity: 0.92, side: THREE.DoubleSide
-            });
-            glassMat.userData.isWindow = true;
-            const gw = CW * 0.78, gh = big ? 0.56 : 0.42;   // Scheibengröße
-            const off = CW / 2 + 0.012;                      // knapp außen auf der Wand
-            // [x, z, yaw] — yaw dreht die Scheibennormale nach außen
-            const sides = [
-                [ off, 0,  Math.PI / 2],   // rechts
-                [-off, 0, -Math.PI / 2],   // links
-                [0,  off, 0],              // vorn
-                [0, -off, Math.PI]         // hinten
-            ];
-            for (const [px, pz, yaw] of sides) {
-                const pane = new THREE.Mesh(new THREE.PlaneGeometry(gw, gh), glassMat);
-                pane.position.set(px, cabY + (big ? 0.12 : 0.08), pz);
-                pane.rotation.y = yaw;
-                gg.add(pane);
-            }
-            // Zierleisten ober- und unterhalb des Fensterbands
-            const beltT = new THREE.Mesh(new THREE.BoxGeometry(CW + 0.04, 0.05, CW + 0.04), M.metal);
-            beltT.position.y = cabY + (big ? 0.44 : 0.3); gg.add(beltT);
-            const beltB = new THREE.Mesh(new THREE.BoxGeometry(CW + 0.04, 0.04, CW + 0.04), M.metal);
-            beltB.position.y = cabY - (big ? 0.2 : 0.15); gg.add(beltB);
-            // Türspalt(e): die große Kabine hat eine breite Doppeltür
-            for (const sx of (big ? [-0.28, 0.28] : [0])) {
-                const seam = new THREE.Mesh(new THREE.BoxGeometry(0.02, gh, CW + 0.03), M.metal);
-                seam.position.set(sx, cabY + (big ? 0.12 : 0.08), 0); gg.add(seam);
-            }
-            // Dach: klein = gewölbt, groß = flach mit Reling und Dachluke
-            if (big) {
-                const roofP = new THREE.Mesh(new THREE.BoxGeometry(CW + 0.1, 0.09, CW + 0.1), bodyMat);
-                roofP.position.y = cabY + CH / 2 + 0.04; roofP.castShadow = true; gg.add(roofP);
-                const rail = new THREE.Mesh(new THREE.TorusGeometry(CW * 0.52, 0.022, 6, 16), M.metal);
-                rail.rotation.x = Math.PI / 2; rail.position.y = cabY + CH / 2 + 0.16; gg.add(rail);
-                const hatch = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.05, 10), M.metal);
-                hatch.position.y = cabY + CH / 2 + 0.1; gg.add(hatch);
-            } else {
-                const roofC = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), bodyMat);
-                roofC.scale.set(1, 0.42, 1); roofC.position.y = cabY + 0.43; roofC.castShadow = true; gg.add(roofC);
-            }
-            // Nummernschild vorn
-            const num = new THREE.Mesh(new THREE.BoxGeometry(big ? 0.26 : 0.2, big ? 0.17 : 0.14, 0.02),
-                new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0xcbd5e1, emissiveIntensity: 0.3 }));
-            num.position.set(0, cabY + (big ? 0.5 : 0.35), off + 0.01); gg.add(num);
-            // Gäste stehen auf dem KABINENBODEN und werden auf Innenhöhe
-            // skaliert — eine ungeschrumpfte Figur (~1.55 hoch) passt in eine
-            // 0.85 hohe Kabine nicht hinein und klebte vorher außen dran.
-            gg.userData.seatInfo = {
-                seats: big ? 8 : small ? 4 : 6,
-                y: cabY - CH / 2 + 0.02,          // Bodenhöhe innen
-                spread: CW * 0.3,
-                rows: 2, rowGap: CW * 0.26,
-                scale: Math.min(1, (CH * 0.88) / 1.55)
-            };
-            // Werbebanderole auf der Kabine — Text je Level (siehe opts.adText)
-            if (opts.adText) {
-                const adTex = makeLabelTexture(opts.adText, opts.adColor || 0xffffff, opts.adBg || 0x1d4ed8);
-                const adMat = new THREE.MeshBasicMaterial({ map: adTex, transparent: true, side: THREE.DoubleSide });
-                const aOff = CW / 2 + 0.016;
-                for (const [ax, az, ry] of [[aOff, 0, Math.PI / 2], [-aOff, 0, -Math.PI / 2],
-                                            [0, aOff, 0], [0, -aOff, Math.PI]]) {
-                    const ad = new THREE.Mesh(new THREE.PlaneGeometry(CW * 0.86, big ? 0.24 : 0.2), adMat);
-                    ad.position.set(ax, cabY - (big ? 0.36 : 0.23), az); ad.rotation.y = ry; gg.add(ad);
-                }
-            }
+            // ===== GONDELKABINE (Bausatz siehe makeCabinKit) =====
+            // Lackierung: die im Baudialog gewählte Farbe (dann alle Kabinen einheitlich)
+            // oder das abwechselnde Rot/Blau des Levels.
+            const paint = opts.cabinColor != null ? opts.cabinColor : (i % 2 ? M.cabinB : M.cabinR).color.getHex();
+            cabinKit.attach(gg, paint);
+            gg.userData.seatInfo = cabinKit.seatInfo;
         }
         gg.rotation.y = Math.atan2(nd.x, nd.z); // längs zur Fahrtrichtung
         group.add(gg);

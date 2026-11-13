@@ -10,10 +10,16 @@ machen – als Kampagne durch neun Länder oder frei im Sandbox-Modus, wahlweise
 Der 3D-Modus läuft auch auf dem Handy und dem Tablet:
 
 - **Ein Finger** verschiebt die Karte, **zwei Finger** zoomen und drehen, beide gemeinsam hoch oder runter
-  neigt den Blick. Am Rand gibt es dafür zusätzlich Knöpfe.
+  neigt den Blick.
 - **Bauen:** Werkzeug wählen, Stelle antippen – es erscheint die Vorschau mit Preis. Gebaut wird erst mit dem Haken.
 - Über „Zum Home-Bildschirm" (Teilen-Menü im Browser) startet das Spiel wie eine App im Vollbild.
 - Die Bildqualität passt sich von selbst an das Gerät an.
+
+## Spielstand
+
+Das Spiel sichert von selbst: nach jedem Bauen, regelmäßig zwischendurch und beim Verlassen. Der Stand
+gehört zum Konto – wer sich auf einem anderen Gerät anmeldet, findet sein Skigebiet im Menü unter
+„Fortsetzen" wieder. „Neu beginnen" verwirft den Stand eines Levels (mit Rückfrage).
 
 ## Was wo liegt
 
@@ -42,7 +48,8 @@ unten links (und `/version.txt`).
 ## Anmeldung
 
 Spieler registrieren sich mit Name, E-Mail und eigenem Passwort; der Admin schaltet sie in der
-„Verwaltung" frei. Der Kampagnen-Fortschritt hängt am Konto und wandert so von Gerät zu Gerät.
+„Verwaltung" frei. Der Kampagnen-Fortschritt und die Spielstände (das gebaute Skigebiet je Level)
+hängen am Konto und wandern so von Gerät zu Gerät.
 Einrichtung und Pflege des Anmeldeservers: `webgl-3d/worker/README.md`.
 
 ## Mit Claude weiterbauen

@@ -8,7 +8,8 @@ Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
   - `src/App.jsx` – App-Wurzel (Anmeldung → Hauptmenü ↔ Spiel), das 2D-Spiel (`Game`) und sein HUD
   - `src/engine/SkiResortManager.js` – Simulation: Gäste-KI, Lifte, Pisten, Fahrzeuge, Wirtschaft
   - `src/components/game/` – 2D-Renderer (`WorldCanvas.jsx`, `DrawingUtils.js`)
-  - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`)
+  - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`)
+  - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
   - `src/components/menu/` – Hauptmenü und Ladebildschirm
   - `src/constants/` – Gebäude, Gäste, Lifte, Pisten, Kampagne (`campaign.js`: Level, Aufgaben, Fortschritt)
   - `src/auth/` – Anmeldung: Anmeldeseite, Konto-Leiste, Verwaltung, Fortschritts-Abgleich
@@ -38,10 +39,16 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Bestätigen-Leiste (`ConfirmBar` in `World3D.jsx`), erst `confirmPending()` führt aus. Mit der Maus bleibt es
   beim sofortigen Klick. Wer ein Werkzeug ergänzt, muss in `onUp` beide Wege bedienen (`needConfirm`).
 - **Handy-Layout** in `World3D.jsx`: `useViewport()` liefert `compact` (kleiner Bildschirm → Leiste unten, Felder
-  als Karten von unten) und `coarse` (Finger → Kamera-Knöpfe, andere Hinweistexte). Nichts darf nur per
-  Drüberfahren erreichbar sein.
-- **Bildqualität** regelt sich selbst: Stufen `QUALITY` und Messung `qualityFrame` in `Scene3D.js`
-  (Stand je Gerät in `localStorage['mt.quality']`). Neue teure Effekte dort an eine Stufe hängen.
+  als Karten von unten) und `coarse` (Finger → andere Hinweistexte). Nichts darf nur per Drüberfahren
+  erreichbar sein. Eigene Kamera-Knöpfe gibt es bewusst nicht – die Gesten genügen.
+- **Bildqualität** regelt sich selbst: Stufen `QUALITY` (0–4, Auflösung/Schatten/Glühen/Glättung) und
+  Messung `qualityFrame` in `Scene3D.js` (Stand je Gerät in `localStorage['mt.quality']`). Gerechnet wird in der
+  Anzeige-Auflösung, die Farbstufe schärft leicht nach. Neue teure Effekte dort an eine Stufe hängen.
+- **Wasser** (`Water3D.js`): `prepareWater` gräbt Seebecken und Bachbetten ein (vor dem Geländenetz),
+  `buildWater` legt eine Shader-Fläche darüber (Tiefe, Wellen, Spiegelung, Strömung). Wasserpunkte sind
+  `landcover === 2`; die Bodenfarbe darunter kommt aus `waterBedColor`.
+- **Gondelkabinen** der 4er-/6er-/8er-Bahnen kommen aus `makeCabinKit` in `Buildings3D.js`: Form einmal je
+  Bahn, jede Kabine nur vier Teile. Teile, die sich ein Material teilen, tragen ihre Farbe als Eckfarbe.
 - **Farben:** Die Bildaufbereitung (Composer) gibt die Werte ohne Tonwert-/Farbraumstufe aus; das Bild ist darauf
   abgestimmt. Nicht nebenbei auf den direkten Renderpfad oder eine Ausgabestufe umstellen.
 - **Fallstrick:** `vertexColors: true` nur setzen, wenn die Geometrie ein Farbattribut hat – sonst wird das
@@ -53,6 +60,19 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Tageszeit: `clock`/`CYCLE`, Qualitätsstufe: `quality.set`, Geländepunkt unter einem Bildpunkt: `raycastTerrain`).
   Die Uhr dabei nur vorwärts stellen.
 - App-Symbole neu erzeugen: `python3 tools/make-app-icons.py public/bg/logo.png public/pwa` (in `webgl-3d/`).
+
+## Spielstände (3D)
+- Gespeichert wird nicht die Szene, sondern **was der Spieler getan hat**: jede Bauaktion der Reihe nach
+  (`logAction` in `Scene3D.js`), dazu Kontostand und Kennzahlen. `getSave()` liefert das als schlichtes Objekt,
+  `loadSave()` baut die Aktionen auf dem frisch erzeugten Gelände nach – ohne Bauzeit und Kosten.
+  **Wer eine neue Bauaktion ergänzt, muss sie vormerken und in `loadSave` nachspielen**, sonst fehlt sie nach
+  dem Laden. Das Gelände eines Levels muss dafür bei jedem Start gleich entstehen (kein `Math.random()` für
+  Dinge, die das Bauen beeinflussen).
+- `src/savegames.js`: Stand sofort aufs Gerät (`localStorage`, je Spieler und Level), zusätzlich ans Konto
+  (`GET/PUT /save`, Übersicht `GET /saves`). Es gilt der jüngere Stand; „Neu beginnen" hinterlässt einen
+  Löschvermerk. Hochgeladen wird höchstens alle 90 s und beim Verlassen – das schont das Schreibkontingent.
+- Im Menü: „Fortsetzen" / „Neu beginnen" (`MainMenu.jsx`); geladen wird während des Ladebildschirms (`App.jsx`).
+- Die Sandbox und der 2D-Modus haben keinen Spielstand.
 
 ## Veröffentlichen
 - Jeder Push auf `main` baut `webgl-3d` und veröffentlicht es über GitHub Actions auf GitHub Pages

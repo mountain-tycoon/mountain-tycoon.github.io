@@ -1,8 +1,9 @@
 # Anmeldeserver (Cloudflare Worker + KV, kostenlos)
 
 Gleiches Prinzip wie bei Interventional Lab: Spieler registrieren sich mit Name, E-Mail und eigenem
-Passwort, der Admin schaltet sie frei, danach melden sie sich an. Der Kampagnen-Fortschritt hängt am
-Konto und wandert so von Gerät zu Gerät. Gespeichert werden nur Passwort-Hashes (PBKDF2).
+Passwort, der Admin schaltet sie frei, danach melden sie sich an. Der Kampagnen-Fortschritt und die
+Spielstände (das gebaute Skigebiet je Level) hängen am Konto und wandern so von Gerät zu Gerät.
+Gespeichert werden nur Passwort-Hashes (PBKDF2).
 
 ## Einmalig einrichten (etwa fünf Minuten, kostenloses Cloudflare-Konto)
 

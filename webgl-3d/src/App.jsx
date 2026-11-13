@@ -15,6 +15,7 @@ import AuthGate from './auth/AuthGate.jsx';
 import AccountBar from './auth/AccountBar.jsx';
 import { api, authEnabled, getSession, clearSession } from './auth/authClient';
 import { syncProgress, installProgressSync } from './auth/progressSync';
+import { canSave, loadBestSave, discardSave } from './savegames';
 import { checkForNewBuild } from './buildInfo';
 import {
   evaluateObjective,
@@ -3435,6 +3436,9 @@ const App = () => {
   // Anmeldung (nur wenn ein Anmeldeserver eingetragen ist – siehe auth/authClient.js)
   const [account, setAccount] = useState(() => (authEnabled() ? getSession() : null));
   const [menuKey, setMenuKey] = useState(0);
+  // Spielstand des gestarteten Levels (3D): wird während des Ladebildschirms geholt
+  const [activeSave, setActiveSave] = useState(null);
+  const pendingSave = useRef(null);
 
   // Beim Seitenstart: neue Fassung online? Dann einmal frisch laden.
   useEffect(() => { checkForNewBuild(); }, []);
@@ -3466,19 +3470,31 @@ const App = () => {
   };
 
   // Beim Levelstart erst den Ladebildschirm zeigen, dann die Welt aufbauen.
-  const handleStartLevel = (level, mode = '2d') => {
+  // opts.fresh: „Neu beginnen" – ein vorhandener Spielstand wird verworfen.
+  const handleStartLevel = (level, mode = '2d', opts = {}) => {
+    pendingSave.current = null;
+    if (mode === '3d' && canSave(level)) {
+      if (opts.fresh) discardSave(level.id);
+      else pendingSave.current = loadBestSave(level.id).catch(() => null);   // läuft, während der Ladebildschirm steht
+    }
     setPendingLevel({ level, mode });
   };
-  const finishLoading = () => {
+  const finishLoading = async () => {
     if (!pendingLevel) return;
+    const next = pendingLevel;
+    let save = null;
+    try { save = await pendingSave.current; } catch { save = null; }
+    setActiveSave(save || null);
     setSessionKey(k => k + 1);
-    setViewMode(pendingLevel.mode);
-    setActiveLevel(pendingLevel.level);
+    setViewMode(next.mode);
+    setActiveLevel(next.level);
     setPendingLevel(null);
   };
 
   const handleExitToMenu = () => {
     setActiveLevel(null);
+    setActiveSave(null);
+    setMenuKey(k => k + 1);     // Menü frisch aufbauen: es zeigt dann den eben gesicherten Spielstand
   };
 
   if (authEnabled() && !account) {
@@ -3503,6 +3519,7 @@ const App = () => {
       <World3D
         key={`3d-${activeLevel.id}-${sessionKey}`}
         level={activeLevel}
+        initialSave={activeSave}
         onExit={handleExitToMenu}
       />
     );

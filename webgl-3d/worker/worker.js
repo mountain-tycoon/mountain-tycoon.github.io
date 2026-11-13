@@ -6,7 +6,8 @@
 //             schaltet Konten frei, setzt Passwörter per Einmalcode zurück, sieht die Anmeldungen.
 //   Spieler – registriert sich mit Vorname, Nachname, E-Mail und eigenem Passwort; nach der
 //             Freischaltung meldet er sich mit E-Mail und Passwort an. Gespeichert wird nur ein
-//             PBKDF2-Hash. Der Kampagnen-Fortschritt hängt am Konto und wandert so von Gerät zu Gerät.
+//             PBKDF2-Hash. Der Kampagnen-Fortschritt und die Spielstände (das gebaute Skigebiet je
+//             Level) hängen am Konto und wandern so von Gerät zu Gerät.
 //
 // GET  /version                                           → {v, app}
 // POST /register        {first, last, email, password}    → {ok, status, ticket | token, name, role}
@@ -17,15 +18,20 @@
 // POST /password        (x-token) {old, password}         → {ok}   (nach einem Einmalcode ohne old)
 // GET  /progress        (x-token)                         → {completed: [levelId], t}
 // PUT  /progress        (x-token) {completed: [levelId]}  → {completed, t}   (Vereinigung beider Stände)
+// GET  /saves           (x-token)                         → {saves: {levelId: {t, sum}}}
+// GET  /save?level=…    (x-token)                         → {save} | {none: true} | {deleted: true, t}
+// PUT  /save?level=…    (x-token) Spielstand | {deleted, t} → {ok, t} | {ok: false, stale: true, t}
 // GET  /admin/accounts  (Admin)                           → {accounts: […]}
 // PUT  /admin/accounts  (Admin) {email, status}           → {ok, accounts}   approved|declined|pending|removed
 // POST /admin/reset     (Admin) {email}                   → {ok, code, accounts}
 // GET  /admin/logins    (Admin)                           → [{name, t, build}]
 //
 // KV-Schlüssel: acc:<email> (Konto, öffentliche Felder zusätzlich als Metadaten), tok:<token>,
-// reg:<ticket>, progress:<konto>, rows (Anmeldeprotokoll), fail:<kennung>:<ip>, regs:<tag>.
+// reg:<ticket>, progress:<konto>, save:<konto>:<level> (Spielstand, Kurzfassung als Metadaten),
+// rows (Anmeldeprotokoll), fail:<kennung>:<ip>, regs:<tag>.
 
-const SERVER_V = 1;
+const SERVER_V = 2;
+const MAX_SAVE_BYTES = 400000;            // ein Spielstand ist ein paar Kilobyte groß – das ist reichlich Luft
 const TOKEN_TTL = 60 * 60 * 24 * 60;      // eine Anmeldung gilt 60 Tage
 const TICKET_TTL = 60 * 60 * 24 * 30;     // so lange fragt die Seite nach der Freischaltung
 const MAX_FAILS = 8, FAIL_TTL = 15 * 60;  // Fehlversuche je Kennung und Absender
@@ -220,6 +226,49 @@ async function route(req, env, send) {
     return send(next);
   }
 
+  // Spielstände je Konto und Level. Es gilt der jüngere Stand: ein Gerät mit veraltetem Stand
+  // überschreibt nichts Neueres. „Neu beginnen" hinterlässt einen Löschvermerk, damit ein anderes
+  // Gerät seinen alten Stand nicht wieder hochlädt.
+  if (path === '/saves' && m === 'GET') {
+    if (!s) return need();
+    const saves = {};
+    const prefix = 'save:' + s.key + ':';
+    for (const k of await listAll(prefix)) {
+      const md = k.metadata || {};
+      if (!md.deleted) saves[k.name.slice(prefix.length)] = { t: md.t || 0, sum: md.sum || null };
+    }
+    return send({ saves });
+  }
+  if (path === '/save' && (m === 'GET' || m === 'PUT')) {
+    if (!s) return need();
+    const levelId = clean(url.searchParams.get('level'), 40);
+    if (!/^[a-z0-9_-]+$/i.test(levelId)) return send({ error: 'Level fehlt' }, 400);
+    const key = 'save:' + s.key + ':' + levelId;
+    if (m === 'GET') {
+      const cur = await getJSON(key, null);
+      if (!cur) return send({ none: true });
+      return cur.deleted ? send({ deleted: true, t: cur.t || 0 }) : send({ save: cur });
+    }
+    const raw = await req.text();
+    if (raw.length > MAX_SAVE_BYTES) return send({ error: 'Spielstand zu groß' }, 413);
+    let b = null;
+    try { b = JSON.parse(raw); } catch { b = null; }
+    if (!b || typeof b !== 'object' || !Number.isFinite(b.t)) return send({ error: 'ungültiger Spielstand' }, 400);
+    const t = Math.min(b.t, Date.now() + 60000);                       // keine Stände „aus der Zukunft"
+    const { metadata: old } = await kv.getWithMetadata(key);
+    if (old && old.t > t) return send({ ok: false, stale: true, t: old.t });
+    if (b.deleted) {
+      await kv.put(key, JSON.stringify({ v: 1, deleted: true, t }), { metadata: { t, deleted: true } });
+      return send({ ok: true, t });
+    }
+    if (b.v !== 1 || !Array.isArray(b.log)) return send({ error: 'ungültiger Spielstand' }, 400);
+    const q = b.sum && typeof b.sum === 'object' ? b.sum : {};
+    const num = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : 0);
+    const sum = { lifts: num(q.lifts), buildings: num(q.buildings), km: num(q.km), revenue: num(q.revenue), money: num(b.money), played: num(b.played) };
+    await kv.put(key, JSON.stringify({ ...b, t, level: levelId }), { metadata: { t, sum } });
+    return send({ ok: true, t });
+  }
+
   // ---- Verwaltung
   if (!path.startsWith('/admin/')) return send({ error: 'unbekannt' }, 404);
   if (!s || s.role !== 'admin') return send({ error: 'nur für den Admin' }, s ? 403 : 401);
@@ -232,6 +281,7 @@ async function route(req, env, send) {
     const status = String(b.status || '');
     if (status === 'removed') {
       await kv.delete('acc:' + norm(acc.email)); await kv.delete('progress:' + norm(acc.email));
+      for (const k of await listAll('save:' + norm(acc.email) + ':')) await kv.delete(k.name);   // Spielstände gehen mit
       return send({ ok: true, accounts: await listAccounts(null, acc.email) });
     }
     if (status !== 'approved' && status !== 'declined' && status !== 'pending') return send({ error: 'unbekannter Status' }, 400);

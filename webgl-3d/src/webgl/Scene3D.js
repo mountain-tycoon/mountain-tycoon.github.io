@@ -4,7 +4,8 @@
 // mit gelände-folgender Gondelbahn, animierte Details.
 // ============================================================
 import * as THREE from 'three';
-import { buildTerrainMesh, buildForest, buildRocks, buildLakeMesh, buildGlacier, buildTerrainApron, buildApronForest, buildValleyHaze, buildApronLights, buildEdgeShade, FOREST_MIX_TABLE, snowLayer, apronHeight } from './TerrainMesh.js';
+import { buildTerrainMesh, buildForest, buildRocks, buildGlacier, buildTerrainApron, buildApronForest, buildValleyHaze, buildApronLights, buildEdgeShade, FOREST_MIX_TABLE, snowLayer, apronHeight } from './TerrainMesh.js';
+import { prepareWater, buildWater } from './Water3D.js';
 import { MATS, makeChalet, makeHotel, makeRestaurant, makeTicketOffice, makeLift, makeChairlift, makeChairlift2, makeChairlift6, makePlatterLift, makeMagicCarpet, makeSurfaceLift, makeAerialTram, makeAerialTramXL, makeGondola8, makeGondola4, makeMegaGondola, makeVillage, makeParking, makeParkingGarage, makeSnowCannon, makeFunpark, makeSummitCross, makeBench, makeSignpost, makeTextSprite, makeFloodlight, findTopPeaks, makeSkiSchool, makeSkiRental, makeShop, makeImbiss, makeBusStop, makeSnowcatGarage, makeToilet, makeRunDressing, makeHalfpipeShell,
     makeHotelClass, HOTEL_BEDS, makeChaletClass, makeGastro, makeMedicalStation, makeHospital, makeWorkshop,
     makeReservoir, makeBigReservoir, makeKicker, makeHalfpipe, makeRaceCourse, makeApresSkiBar, makePartyTent, makeDisco, makeSauna, makeThermalBath, makeIceRink,
@@ -294,16 +295,8 @@ function attachOrbit(camera, dom, target, span = 300, opts = {}) {
     // Weicher Kameraflug zu einem Punkt: Ziel und Abstand werden über
     // mehrere Frames herangezogen, statt hart umzuspringen.
     let glide = null;
-    // Bedienknöpfe im HUD: Drehung und Zoom werden über ein paar Bilder ausgespielt statt zu springen.
-    let pendTurn = 0, pendZoom = 0;                  // Rest-Drehung (Bogenmaß), Rest-Zoom (logarithmisch)
     const step = () => {
         keyStep();
-        if (Math.abs(pendTurn) > 1e-4 || Math.abs(pendZoom) > 1e-4) {
-            const a = pendTurn * 0.24, z = pendZoom * 0.24;
-            pendTurn -= a; pendZoom -= z;
-            az += a; zoomBy(Math.exp(z));
-            apply();
-        }
         if (glide) {
             glide.t = Math.min(1, glide.t + 0.045);
             const e = glide.t * glide.t * (3 - 2 * glide.t);
@@ -328,10 +321,6 @@ function attachOrbit(camera, dom, target, span = 300, opts = {}) {
         setDist: (d)=>{ dist=d; if (groundAt) target.y = pivotY(); apply(); },
         /** Alle Lauscher entfernen (beim Verlassen des Levels). */
         dispose: () => ac.abort(),
-        /** Für Bedienknöpfe: f < 1 zoomt heran, f > 1 heraus. */
-        zoom: (f) => { if (f > 0) pendZoom += Math.log(f); },
-        /** Für Bedienknöpfe: um den Drehpunkt drehen (Bogenmaß). */
-        turn: (rad) => { pendTurn += rad; },
         /** Abstand Kamera–Drehpunkt, wie er gerade wirklich gilt (für den Dunst). */
         viewDist: () => Math.min(dist, eff),
         // Zustand lesen/setzen – für Prüfungen und spätere Kamerafahrten
@@ -484,6 +473,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const worldSpan = (gridSize-1)*tile;
     const half = worldSpan/2;
     const heightmap = world.heightmap;
+    // Seebecken und Bachbetten eingraben – als Erstes, bevor irgendetwas die Höhen liest
+    const waterInfo = prepareWater(world, gridSize, { hScale });
     // Bodenfreiheit für alle Figuren: die Sohle liegt knapp ÜBER dem Gelände.
     // Ohne diesen Abstand versinken Gäste je nach Hangneigung im Schnee.
     const GROUND_CLEAR = 0.1;
@@ -1267,6 +1258,17 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     let sledCanReach = null; // Erreichbarkeitsprüfung fürs Skidoo (Pfadsuche)
     let _dbgWalkers = null;  // nur für Tests: Anreise-Fußgänger
     const emitStats = () => { if (onStats) onStats(getStats()); };
+    // ===== SPIELSTAND (früh deklariert: die Bildschleife zählt die Spielzeit von Anfang an) =====
+    // Gespeichert wird nicht die Szene, sondern was der Spieler getan hat: jede Bauaktion
+    // in ihrer Reihenfolge, dazu Kontostand und Kennzahlen (siehe getSave / loadSave unten).
+    // Beim Laden werden die Aktionen auf dem frisch erzeugten Gelände noch einmal
+    // ausgeführt – ohne Bauzeit und ohne Kosten. Wer eine neue Bauaktion ergänzt, muss sie
+    // hier vormerken (logAction) und in loadSave nachspielen, sonst fehlt sie nach dem Laden.
+    const saveLog = [];
+    let replaying = false;             // gerade wird ein Spielstand nachgebaut
+    let onSaveChange = null;           // meldet dem HUD: es gibt etwas zu sichern
+    let playSeconds = 0;               // gespielte Zeit in diesem Gebiet
+    const logAction = (a) => { if (replaying) return; saveLog.push(a); if (onSaveChange) onSaveChange(); };
     // ===== ÖKONOMIE-SIMULATION =====
     const sim = { served: 0, active: 0, revenue: 0, satisfaction: 78, timeAcc: 0, dayProfit: 0, bestDayProfit: 0, dayAcc: 0, dayRevenue: 0, dayCost: 0, carActive: 0, carGuestsToday: 0, groom: 85 };
     // ===== ÖKONOMIE (Konzept aus dem 2D-Spiel übernommen) =====
@@ -2097,14 +2099,11 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const glacier = buildGlacier(glacierTiles, heightmap, gridSize, { hScale, tile });
     if (glacier) scene.add(glacier);
 
-    // Echte Seen: einfache blaue Wasserfläche auf mittlerer Kachelhöhe (wie zuvor)
-    const lakeMeshes = [];
+    // Wasser: Seen und Bäche als eine glatte Fläche mit Tiefe, Wellen und Strömung (Water3D.js)
+    const water = buildWater(world, gridSize, waterInfo, { tileSize: tile });
+    if (water) scene.add(water);
     let firstLake = null;
     for (const lk of findLakes(world.landcover, heightmap, gridSize)) {
-        const m = buildLakeMesh(lk.tiles, heightmap, gridSize, lk.z, { hScale, tile });
-        m.userData.baseY = m.position.y;
-        scene.add(m);
-        lakeMeshes.push(m);
         if (!firstLake) {
             // eine Uferkachel (Nachbar ist Land) als Bank-Standort
             for (const idx of lk.tiles) {
@@ -3525,7 +3524,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             }
         });
         place(makeSignpost(), vx + 2, vy + 2, 0.5, 1.4);
-        if (lakeMeshes.length && firstLake) place(makeBench(), firstLake.gx, firstLake.gy, firstLake.rot, 1.2);
+        if (firstLake) place(makeBench(), firstLake.gx, firstLake.gy, firstLake.rot, 1.2);
 
         // ===== FLANIERENDE GÄSTE an der Talstation =====
         const hubs = [[vx+3,vy+1],[vx-1,vy+4],[vx+6,vy-3],[vx-3,vy+2],[vx+2,vy+6],[vx+9,vy+2]];
@@ -3592,18 +3591,28 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 uContrast:{ value: 1.04 },
                 uSat:     { value: 0.94 },
                 uLift:    { value: new THREE.Color(0x121c28) },
-                uGain:    { value: new THREE.Color(0xfff8ee) }
+                uGain:    { value: new THREE.Color(0xfff8ee) },
+                // Leichtes Nachschärfen: gleicht die Weichheit der Kantenglättung aus
+                uTexel:   { value: new THREE.Vector2(1 / 1280, 1 / 720) },
+                uSharp:   { value: 0.3 }
             },
             vertexShader: `
                 varying vec2 vUv;
                 void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
             fragmentShader: `
                 uniform sampler2D tDiffuse;
-                uniform float uTime, uVignette, uContrast, uSat;
+                uniform float uTime, uVignette, uContrast, uSat, uSharp;
                 uniform vec3 uLift, uGain;
+                uniform vec2 uTexel;
                 varying vec2 vUv;
                 void main() {
                     vec3 c = texture2D(tDiffuse, vUv).rgb;
+                    // Nachschärfen: Abstand zum Mittel der vier Nachbarn verstärken
+                    if (uSharp > 0.0) {
+                        vec3 nb = texture2D(tDiffuse, vUv + vec2(uTexel.x, 0.0)).rgb + texture2D(tDiffuse, vUv - vec2(uTexel.x, 0.0)).rgb
+                                + texture2D(tDiffuse, vUv + vec2(0.0, uTexel.y)).rgb + texture2D(tDiffuse, vUv - vec2(0.0, uTexel.y)).rgb;
+                        c = max(vec3(0.0), c + (c - nb * 0.25) * uSharp);
+                    }
                     // Kontrast um die Bildmitte
                     c = (c - 0.5) * uContrast + 0.5;
                     // Schatten kühl anheben, Lichter warm tönen
@@ -3630,18 +3639,22 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     }
 
     // ===================== BILDQUALITÄT PASST SICH AN =====================
-    // Stufe 3 ist die volle Qualität (wie bisher am Rechner). Hält ein Gerät die
-    // Bildrate nicht, geht es stufenweise herunter: erst Auflösung und Schattenkarte,
-    // dann das Glühen, zuletzt die Kantenglättung. Läuft es wieder flüssig, geht es
-    // vorsichtig wieder hinauf. Handys beginnen auf Stufe 2 und bleiben höchstens dort.
+    // Jede Stufe legt fest, wie fein gerechnet wird (Bildpunkte je CSS-Pixel, gedeckelt durch
+    // das Gerät), wie groß die Schattenkarte ist und ob Glühen und Kantenglättung laufen.
+    // Die Szene wird in genau der Auflösung gerechnet, in der sie angezeigt wird – früher
+    // lag ein Verkleinerungsschritt dazwischen, das Bild wirkte dadurch weich (am Handy mit
+    // seinen dichten Displays besonders).
+    // Hält ein Gerät die Bildrate nicht, geht es stufenweise herunter; läuft es flüssig,
+    // geht es vorsichtig hinauf – bis zur vollen Schärfe (Stufe 4).
     const QUALITY = [
-        { px: 1.0,  cpx: 1.0,  shadow: 1024, bloom: false, smaa: false },
-        { px: 1.25, cpx: 1.0,  shadow: 2048, bloom: false, smaa: true },
-        { px: 1.5,  cpx: 1.25, shadow: 2048, bloom: true,  smaa: true },
-        { px: 1.75, cpx: 1.5,  shadow: 4096, bloom: true,  smaa: true }
+        { px: 1.0,  shadow: 1024, bloom: false, smaa: false, sharp: 0 },
+        { px: 1.25, shadow: 2048, bloom: false, smaa: true,  sharp: 0.30 },
+        { px: 1.5,  shadow: 2048, bloom: true,  smaa: true,  sharp: 0.30 },
+        { px: 1.75, shadow: smallTouch ? 2048 : 4096, bloom: true, smaa: true, sharp: 0.28 },
+        { px: 2.0,  shadow: smallTouch ? 2048 : 4096, bloom: true, smaa: true, sharp: 0.25 }
     ];
-    const Q_MAX = smallTouch ? 2 : 3;
-    let qTier = Q_MAX;
+    const Q_MAX = QUALITY.length - 1;
+    let qTier = smallTouch ? 2 : 3;              // Startstufe: Handy vorsichtiger als Rechner
     try {
         const stored = parseInt(localStorage.getItem('mt.quality'), 10);
         if (stored >= 0 && stored <= Q_MAX) qTier = stored;      // letzter Stand dieses Geräts
@@ -3654,11 +3667,16 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         // Hochkant (Handy) ist das Bild schmal: ein weiterer Blickwinkel zeigt wieder genug vom Gebiet.
         camera.fov = camera.aspect >= 1 ? 50 : Math.min(66, 50 + (1 - camera.aspect) * 32);
         camera.updateProjectionMatrix();
-        renderer.setPixelRatio(Math.min(dpr, q.px));
+        const ratio = Math.min(dpr, q.px);
+        renderer.setPixelRatio(ratio);
         renderer.setSize(w, h);
         if (composer) {
-            composer.setPixelRatio(Math.min(dpr, q.cpx));
+            composer.setPixelRatio(ratio);
             composer.setSize(w, h);          // gibt die Größe an alle Stufen der Bildaufbereitung weiter
+        }
+        if (gradePass) {
+            gradePass.uniforms.uTexel.value.set(1 / Math.max(1, w * ratio), 1 / Math.max(1, h * ratio));
+            gradePass.uniforms.uSharp.value = q.sharp;
         }
     };
     const applyQuality = () => {
@@ -3675,20 +3693,24 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     applyQuality();
     // Messung: mittlere Bildrate je Zwei-Sekunden-Fenster. Pausen (Tab im Hintergrund)
     // und die Ladephase zählen nicht.
-    let qFrames = 0, qTime = 0, qGood = 0, qNeed = 2, qWarm = 0, qLastUp = -1e9, qClock = 0;
+    //   unter 26 Bilder/s           → eine Stufe herunter
+    //   über 52 Bilder/s, mehrfach  → eine Stufe hinauf – auf Probe: fällt die Bildrate danach
+    //                                 unter 45, geht es zurück und der nächste Versuch wartet länger
+    let qFrames = 0, qTime = 0, qGood = 0, qNeed = 2, qWarm = 0, qProbe = 0;
     const qualityFrame = (rawDt) => {
-        qClock += Math.min(rawDt, 1);
         if (document.visibilityState !== 'visible' || rawDt > 0.4) { qFrames = 0; qTime = 0; return; }
         if (qWarm < 4) { qWarm += rawDt; return; }
         qFrames++; qTime += rawDt;
         if (qTime < 2) return;
         const fps = qFrames / qTime; qFrames = 0; qTime = 0;
-        if (fps < 26 && qTier > 0) {
-            if (qClock - qLastUp < 14) qNeed = Math.min(64, qNeed * 2);   // der letzte Schritt hinauf war zu viel: länger warten
+        const probing = qProbe > 0;
+        if (probing) qProbe--;
+        if (qTier > 0 && (fps < 26 || (probing && fps < 45))) {
+            if (probing) { qNeed = Math.min(64, qNeed * 3); qProbe = 0; }   // der Schritt hinauf war zu viel
             qTier--; qGood = 0; qWarm = 3; applyQuality();
-        } else if (fps > 50 && qTier < Q_MAX) {
-            if (++qGood >= qNeed) { qTier++; qGood = 0; qWarm = 3; qLastUp = qClock; applyQuality(); }
-        } else qGood = 0;
+        } else if (fps > 52 && qTier < Q_MAX && !probing) {
+            if (++qGood >= qNeed) { qTier++; qGood = 0; qWarm = 3; qProbe = 3; applyQuality(); }
+        } else if (fps <= 52) qGood = 0;
     };
 
     // Startblick auf das Resort: Ziel zwischen Talstation und Gipfel, Distanz nach Kartengröße
@@ -3728,7 +3750,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         scene.fog.near = near; scene.fog.far = near + FOG_DEPTH;
     };
     updateFog();
-    if (import.meta.env.DEV) window.__mtCam = { orbit, camera, surfaceAt, solidAt, terrain, apron, rocks, forest, scene, sun, renderer, THREE, half };   // nur beim Entwickeln: Kamera und Szene prüfen
+    if (import.meta.env.DEV) window.__mtCam = { orbit, camera, surfaceAt, solidAt, terrain, apron, rocks, forest, scene, sun, renderer, THREE, half, world, heightmap, hScale, gridSize };   // nur beim Entwickeln: Kamera und Szene prüfen
 
     // Schnee-Partikel
     const snow = (() => {
@@ -6096,6 +6118,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 horiz.lerp(_skyH.set(0xffcb95), glow * 0.7);
             }
             skyDome.userData.setColors(zenith, middle, horiz);
+            // Der Himmel spiegelt sich im Wasser
+            if (water) water.userData.setEnv({ day, sunDir: sun.position, sunColor: sun.color, zenith: middle, horizon: horiz });
+        } else if (water) {
+            water.userData.setEnv({ day, sunDir: sun.position, sunColor: sun.color, horizon: scene.background });
         }
         // Kulisse voll beleuchten: Sonnenazimut, Tageszeit und Abendrot.
         // So glühen genau die Grate auf, die zur Sonne zeigen.
@@ -6204,7 +6230,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     let raf=0; const clock=new THREE.Clock(); let lastT=0;
     if (import.meta.env.DEV && window.__mtCam) {   // nur beim Entwickeln: Tageszeit und Qualitätsstufe stellen
         Object.assign(window.__mtCam, { clock, CYCLE, raycastTerrain: (x, y) => raycastTerrain(x, y),
-            quality: { get: () => qTier, set: (n) => { qTier = Math.max(0, Math.min(3, n | 0)); applyQuality(); } } });
+            quality: { get: () => qTier, set: (n) => { qTier = Math.max(0, Math.min(Q_MAX, n | 0)); applyQuality(); } } });
     }
     const animate=()=>{
         const t=clock.getElapsedTime();
@@ -6212,6 +6238,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         // Nie rückwärts: eine negative Zeitspanne ließe Gäste „vor" den Anfang ihrer Strecke laufen.
         const dt=Math.max(0, Math.min(0.1, rawDt)); lastT=t;
         qualityFrame(rawDt);   // Bildrate messen, Qualität bei Bedarf anpassen
+        playSeconds += dt;
         const dayNow = applyDaylight(t);
         if (clouds.userData.update) clouds.userData.update(dt);
         // Wolken sind Himmelsschmuck: steigt die Kamera in ihre Höhe oder darüber,
@@ -6233,7 +6260,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         updateConstructions(dt);
         updateQueue(t);
         for (const u of updaters) u(t);
-        for (const wm of lakeMeshes) { wm.position.y = wm.userData.baseY + Math.sin(t*1.3)*0.03; wm.userData.flow?.(Math.min(0.1, t - (wm.userData._tFlow ?? t))); wm.userData._tFlow = t; }
+        if (water) water.userData.update(dt);     // Wellen und Strömung
         // ===== WIND: Böen treiben Schnee, Fahnen und Wipfel =====
         updateWind(t, dt);
         // Schneefall folgt dem Wetter: bei Föhn rieselt nichts, im Sturm dicht.
@@ -8202,6 +8229,79 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             showDirArrow(ghost.userData.type, wx, wz, st.minY, ghostRot);
         }
     };
+    /**
+     * Lift zwischen zwei Geländepunkten bauen (Art: `liftKind`, Name/Lackierung: `pendingLift`).
+     * Eigene Funktion, damit auch ein geladener Spielstand Lifte nachbauen kann.
+     */
+    const constructLift = (start, pt, cost) => {
+        const grE = worldToGrid(pt.x, pt.z);
+        const N = Math.max(8, Math.round(start.pt.distanceTo(pt) / 4));
+        const samples = [];
+        for (let i = 0; i <= N; i++) {
+            const t = i / N;
+            samples.push(yAtSmooth(start.gx + (grE.gx - start.gx) * t, start.gy + (grE.gy - start.gy) * t));
+        }
+        const a = new THREE.Vector3(start.pt.x, start.pt.y, start.pt.z);
+        const b = new THREE.Vector3(pt.x, pt.y, pt.z);
+        // Lackierung aus dem Baudialog — nur Gondel-/Kabinenbahnen
+        const lo = (pendingLift && pendingLift.color != null)
+            ? { ...liftOpts, cabinColor: pendingLift.color } : liftOpts;
+        const lift = liftKind === 'chair' ? makeChairlift(a, b, samples, lo)
+            : liftKind === 'chair2' ? makeChairlift2(a, b, samples, lo)
+            : liftKind === 'chair6' ? makeChairlift6(a, b, samples, lo)
+            : liftKind === 'platter' ? makePlatterLift(a, b, samples, lo)
+            : liftKind === 'carpet' ? makeMagicCarpet(a, b, samples)
+            : liftKind === 'tbar' ? makeSurfaceLift(a, b, samples, lo)
+            : liftKind === 'tram' ? makeAerialTram(a, b, samples, { neonAd: nextNeonAd() })
+            : liftKind === 'tramxl' ? makeAerialTramXL(a, b, samples, { ...lo, neonAd: nextNeonAd() })
+            : liftKind === 'mega' ? makeMegaGondola(a, b, samples, { ...lo, neonAd: nextNeonAd() })
+            : liftKind === 'gondola4' ? makeGondola4(a, b, samples, lo)
+            : liftKind === 'gondola8' ? makeGondola8(a, b, samples, lo)
+            : makeLift(a, b, samples, { maxMast: 14, ...lo });
+        scene.add(lift.group); applyGlassEnv(lift.group); registerFlags(lift.group);
+        if (lift.group.userData.setNight) nightLit.push(lift.group);
+        // Bauphase: Gerüst/Kran an der Talstation, danach fährt der Lift an
+        startConstruction(lift.group, 14, () => { updaters.push(lift.update); if (lift.setOccupancy) liftHandles.push(lift); },
+            a.clone(), { a: a.clone(), b: b.clone() });
+        // Felsen entlang der Trasse räumen — sonst verschwinden
+        // Stützen und Stationen zwischen den Blöcken.
+        if (rocks?.userData?.clearAlong) {
+            rocks.userData.clearAlong(
+                [{ gx: start.gx, gy: start.gy }, { gx: grE.gx, gy: grE.gy }], 4.5);
+        }
+        // Bodengebundene Lifte (Schlepplift): Wald roden + Boden beschneien entlang der Trasse
+        if (liftKind === 'tbar') {
+            const lane = [{ gx: start.gx, gy: start.gy }, { gx: grE.gx, gy: grE.gy }];
+            clearForestAlongPath(lane);
+            snowifyGroundAlongPath(lane, 3.0);
+        }
+        // Beide Stationen im Raster sperren
+        for (const q of [start.pt, pt]) {
+            const g9 = worldToTile(q.x, q.z);
+            const n9 = footprintSize(2), o9 = parcelOrigin(g9.gx, g9.gy, n9);
+            parcelClaim(o9.gx, o9.gy, n9, OCC_BUILD, 'lift');
+        }
+        // Gäste-Route: höherer Endpunkt = oben
+        const s0 = { gx: start.gx, gy: start.gy }, s1 = { gx: grE.gx, gy: grE.gy };
+        const topSt = yAtSmooth(s0.gx, s0.gy) >= yAtSmooth(s1.gx, s1.gy) ? s0 : s1;
+        const botSt = topSt === s0 ? s1 : s0;
+        const lp = LIFT_PARAMS[liftKind] || LIFT_PARAMS.chair;
+        const route = makeLiftRoute(topSt, botSt, liftKind, lp);
+        // BEIDE Stationen anklickbar machen — sonst gibt es keine Infos
+        // zur Anlage, wenn man auf die Berg- oder Talstation klickt.
+        for (const st2 of [start.pt, pt]) {
+            addSelectable({ type: 'lift', cost, x: st2.x, z: st2.z, r: 3.0 });
+        }
+        route.name = (pendingLift && pendingLift.name) || nextLiftName(liftKind);
+        route.model = lift;      // Fahrzeuge für die echte Sitzplatzvergabe
+        guestRoutes.push(route);
+        logAction({ a: 'l', k: liftKind, n: route.name, c: (pendingLift && pendingLift.color != null) ? pendingLift.color : null,
+            ax: +start.pt.x.toFixed(2), az: +start.pt.z.toFixed(2), bx: +pt.x.toFixed(2), bz: +pt.z.toFixed(2) });
+        pendingLift = null;
+        money -= cost; built.lift++;
+        if (onMoney) onMoney(money); emitStats();
+        return true;
+    };
     /** Finger: Bauvorschau an die angetippte Stelle setzen und zum Bestätigen vormerken. */
     const buildPending = (pt) => {
         if (!ghost) return;
@@ -8295,6 +8395,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             if (e.__confirmed) setPending({ kind: 'roadStart', ok: false });
             if (roadOK) {
                 addRoad(roadStart.gx, roadStart.gy, sgx, sgy, 3.6);
+                logAction({ a: 'r', x0: roadStart.gx, y0: roadStart.gy, x1: sgx, y1: sgy });
                 money -= cost; if (onMoney) onMoney(money); emitStats();
                 recomputeCarPath();                                   // Autos nutzen das erweiterte Netz
                 roadStart = { gx: sgx, gy: sgy };                     // ab Endpunkt weiterbauen (Kette)
@@ -8327,72 +8428,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                     why: !longEnough ? 'zu kurz' : 'zu wenig Geld' });
                 return;
             }
-            if (money >= cost && liftStart.pt.distanceTo(pt) > 6) {
-                const grE = worldToGrid(pt.x, pt.z);
-                const N = Math.max(8, Math.round(liftStart.pt.distanceTo(pt) / 4));
-                const samples = [];
-                for (let i = 0; i <= N; i++) {
-                    const t = i / N;
-                    samples.push(yAtSmooth(liftStart.gx + (grE.gx - liftStart.gx) * t, liftStart.gy + (grE.gy - liftStart.gy) * t));
-                }
-                const a = new THREE.Vector3(liftStart.pt.x, liftStart.pt.y, liftStart.pt.z);
-                const b = new THREE.Vector3(pt.x, pt.y, pt.z);
-                // Lackierung aus dem Baudialog — nur Gondel-/Kabinenbahnen
-                const lo = (pendingLift && pendingLift.color != null)
-                    ? { ...liftOpts, cabinColor: pendingLift.color } : liftOpts;
-                const lift = liftKind === 'chair' ? makeChairlift(a, b, samples, lo)
-                    : liftKind === 'chair2' ? makeChairlift2(a, b, samples, lo)
-                    : liftKind === 'chair6' ? makeChairlift6(a, b, samples, lo)
-                    : liftKind === 'platter' ? makePlatterLift(a, b, samples, lo)
-                    : liftKind === 'carpet' ? makeMagicCarpet(a, b, samples)
-                    : liftKind === 'tbar' ? makeSurfaceLift(a, b, samples, lo)
-                    : liftKind === 'tram' ? makeAerialTram(a, b, samples, { neonAd: nextNeonAd() })
-                    : liftKind === 'tramxl' ? makeAerialTramXL(a, b, samples, { ...lo, neonAd: nextNeonAd() })
-                    : liftKind === 'mega' ? makeMegaGondola(a, b, samples, { ...lo, neonAd: nextNeonAd() })
-                    : liftKind === 'gondola4' ? makeGondola4(a, b, samples, lo)
-                    : liftKind === 'gondola8' ? makeGondola8(a, b, samples, lo)
-                    : makeLift(a, b, samples, { maxMast: 14, ...lo });
-                scene.add(lift.group); applyGlassEnv(lift.group); registerFlags(lift.group);
-                if (lift.group.userData.setNight) nightLit.push(lift.group);
-                // Bauphase: Gerüst/Kran an der Talstation, danach fährt der Lift an
-                startConstruction(lift.group, 14, () => { updaters.push(lift.update); if (lift.setOccupancy) liftHandles.push(lift); },
-                    a.clone(), { a: a.clone(), b: b.clone() });
-                // Felsen entlang der Trasse räumen — sonst verschwinden
-                // Stützen und Stationen zwischen den Blöcken.
-                if (rocks?.userData?.clearAlong) {
-                    rocks.userData.clearAlong(
-                        [{ gx: liftStart.gx, gy: liftStart.gy }, { gx: grE.gx, gy: grE.gy }], 4.5);
-                }
-                // Bodengebundene Lifte (Schlepplift): Wald roden + Boden beschneien entlang der Trasse
-                if (liftKind === 'tbar') {
-                    const lane = [{ gx: liftStart.gx, gy: liftStart.gy }, { gx: grE.gx, gy: grE.gy }];
-                    clearForestAlongPath(lane);
-                    snowifyGroundAlongPath(lane, 3.0);
-                }
-                // Beide Stationen im Raster sperren
-                for (const q of [liftStart.pt, pt]) {
-                    const g9 = worldToTile(q.x, q.z);
-                    const n9 = footprintSize(2), o9 = parcelOrigin(g9.gx, g9.gy, n9);
-                    parcelClaim(o9.gx, o9.gy, n9, OCC_BUILD, 'lift');
-                }
-                // Gäste-Route: höherer Endpunkt = oben
-                const s0 = { gx: liftStart.gx, gy: liftStart.gy }, s1 = { gx: grE.gx, gy: grE.gy };
-                const topSt = yAtSmooth(s0.gx, s0.gy) >= yAtSmooth(s1.gx, s1.gy) ? s0 : s1;
-                const botSt = topSt === s0 ? s1 : s0;
-                const lp = LIFT_PARAMS[liftKind] || LIFT_PARAMS.chair;
-                const route = makeLiftRoute(topSt, botSt, liftKind, lp);
-                // BEIDE Stationen anklickbar machen — sonst gibt es keine Infos
-                // zur Anlage, wenn man auf die Berg- oder Talstation klickt.
-                for (const st2 of [liftStart.pt, pt]) {
-                    addSelectable({ type: 'lift', cost, x: st2.x, z: st2.z, r: 3.0 });
-                }
-                route.name = (pendingLift && pendingLift.name) || nextLiftName(liftKind);
-                route.model = lift;      // Fahrzeuge für die echte Sitzplatzvergabe
-                guestRoutes.push(route);
-                pendingLift = null;
-                money -= cost; built.lift++;
-                if (onMoney) onMoney(money); emitStats();
-            }
+            if (money >= cost && liftStart.pt.distanceTo(pt) > 6) constructLift(liftStart, pt, cost);
             // aufräumen + abwählen
             if (liftMarker) { scene.remove(liftMarker); liftMarker = null; }
             if (liftPreview) { scene.remove(liftPreview); liftPreview = null; }
@@ -8686,6 +8722,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         showParcelGrid(false);                       // Baumodus beendet -> Raster aus
         hideSnowRange(); hideDirArrow();
         if (ghost) { scene.remove(ghost); ghost = null; }
+        logAction({ a: 'b', t: type, x: +gr0.gx.toFixed(3), y: +gr0.gy.toFixed(3), r: +ghostRot.toFixed(4) });
         if (onBuildDone) onBuildDone();
         return true;
     };
@@ -8766,6 +8803,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         selectedSel = null; if (onSelect) onSelect(null);
         money += Math.round(b.cost * 0.6); // 60% Erstattung
         if (onMoney) onMoney(money); emitStats();
+        logAction({ a: 'd', t: b.type, x: +b.rec.x.toFixed(2), z: +b.rec.z.toFixed(2) });
         return true;
     };
     // ===== INFO-AUSWAHL: Gebäude/Parkplatz anklicken -> Infofeld =====
@@ -8887,7 +8925,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const cost = pisteCostForPts(pistePts);
         if (pistePts.length >= 2 && money >= cost) {
             const ok = buildPistePath(pistePts);
-            if (ok) { money -= cost; if (onMoney) onMoney(money); emitStats(); }
+            if (ok) {
+                money -= cost; if (onMoney) onMoney(money); emitStats();
+                logAction({ a: 'p', w: pisteWidth, lit: pisteLit, pts: pistePts.map(q => [+q.gx.toFixed(2), +q.gy.toFixed(2)]) });
+            }
         }
         clearPisteDraft();
         pisteMode = false;
@@ -8959,7 +9000,102 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     canvas.addEventListener('pointercancel', onTouchEnd);
     canvas.addEventListener('dblclick', onDblClick);
 
+    // ===== SPIELSTAND: SICHERN UND LADEN =====
+    const SIM_KEYS = ['served', 'revenue', 'satisfaction', 'dayProfit', 'bestDayProfit', 'dayAcc', 'dayRevenue',
+                      'dayCost', 'groom', 'reput', 'attract', 'mood', 'carGuestsToday'];
+    /** Aktueller Spielstand als schlichtes Objekt (JSON-tauglich). */
+    const getSave = () => {
+        const simOut = {};
+        for (const k of SIM_KEYS) if (Number.isFinite(sim[k])) simOut[k] = +sim[k].toFixed(3);
+        return {
+            v: 1, level: level?.id || '', t: Date.now(),
+            money: Math.round(money), played: Math.round(playSeconds),
+            sim: simOut,
+            eco: { skiPass: eco.skiPass, ad: { id: eco.ad.id, daysLeft: eco.ad.daysLeft } },
+            lots: parkingLots.filter(l => l.price != null).map(l => ({ x: +l.gx.toFixed(1), y: +l.gy.toFixed(1), p: l.price })),
+            // Kurzfassung für die Anzeige im Menü: was der Spieler selbst gebaut hat
+            sum: {
+                lifts: saveLog.filter(a => a.a === 'l').length,
+                buildings: Math.max(0, saveLog.filter(a => a.a === 'b').length - saveLog.filter(a => a.a === 'd').length),
+                km: +piste.total.toFixed(1), revenue: Math.round(sim.revenue)
+            },
+            log: saveLog.slice()
+        };
+    };
+    /**
+     * Spielstand laden: die gemerkten Aktionen der Reihe nach nachbauen, dann Kontostand
+     * und Kennzahlen übernehmen. Was sich nicht mehr bauen lässt (etwa nach einer
+     * Änderung am Spiel), wird übersprungen – der Rest bleibt erhalten.
+     */
+    const loadSave = (data) => {
+        if (!data || data.v !== 1 || !Array.isArray(data.log)) return { ok: false, applied: 0, skipped: 0 };
+        // Während des Nachbauens bleibt das HUD stumm (keine Meldungen, kein Werkzeugwechsel)
+        const keep = { onMoney, onStats, onBuildDone, onToast, onSelect, onBuildHint, onPending,
+                       ghostRot, liftKind, pisteWidth, pisteLit, pendingLift };
+        onMoney = onStats = onBuildDone = onToast = onSelect = onBuildHint = onPending = null;
+        replaying = true;
+        const at = (x, z) => new THREE.Vector3(x, yAtSmooth((x + half) / tile, (z + half) / tile), z);
+        let applied = 0, skipped = 0;
+        for (const a of data.log.slice(0, 5000)) {
+            money = 1e12;                                  // Nachbauen kostet nichts
+            let ok = false;
+            try {
+                if (a.a === 'b') {
+                    ghostRot = +a.r || 0;
+                    ok = !!placeBuildingAt(a.t, { gx: +a.x, gy: +a.y });
+                } else if (a.a === 'l') {
+                    const A = at(+a.ax, +a.az), B = at(+a.bx, +a.bz);
+                    if (LIFT_PARAMS[a.k] && A.distanceTo(B) > 6) {
+                        liftKind = a.k;
+                        pendingLift = { name: String(a.n || ''), color: a.c ?? null };
+                        const gA = worldToGrid(A.x, A.z);
+                        ok = !!constructLift({ pt: A, gx: gA.gx, gy: gA.gy }, B, liftCost(A, B));
+                    }
+                } else if (a.a === 'p') {
+                    pisteWidth = a.w || 'medium'; pisteLit = !!a.lit;
+                    ok = !!buildPistePath((a.pts || []).map(q => ({ gx: +q[0], gy: +q[1] })));
+                } else if (a.a === 'r') {
+                    addRoad(+a.x0, +a.y0, +a.x1, +a.y1, 3.6); ok = true;
+                } else if (a.a === 'd') {
+                    const i = placedBuildings.findIndex(b => b.type === a.t && Math.abs(b.rec.x - a.x) < 0.8 && Math.abs(b.rec.z - a.z) < 0.8);
+                    if (i >= 0) ok = !!demolishIndex(i);
+                }
+            } catch (err) {
+                console.warn('[Spielstand] Aktion übersprungen:', a, err);
+            }
+            if (ok) { applied++; saveLog.push(a); } else skipped++;
+        }
+        // Bauzeiten überspringen: alles steht sofort fertig da
+        for (const c of constructions) c.t = c.dur;
+        updateConstructions(0);
+        if (garagePos) garageReady = true;
+        recomputeCarPath();
+        // Zahlen übernehmen
+        money = Number.isFinite(data.money) ? data.money : ((level && level.startingMoney) || 2000000);
+        playSeconds = Number.isFinite(data.played) ? data.played : 0;
+        for (const k of SIM_KEYS) if (data.sim && Number.isFinite(data.sim[k])) sim[k] = data.sim[k];
+        if (data.eco) {
+            eco.skiPass = Number.isFinite(data.eco.skiPass) ? data.eco.skiPass : null;
+            const ad = data.eco.ad;
+            eco.ad = (ad && AD_PACKAGES.some(pk => pk.id === ad.id) && ad.daysLeft > 0) ? { id: ad.id, daysLeft: +ad.daysLeft } : { id: null, daysLeft: 0 };
+        }
+        for (const q of (Array.isArray(data.lots) ? data.lots : [])) {
+            const lot = parkingLots.find(l => Math.abs(l.gx - q.x) < 1 && Math.abs(l.gy - q.y) < 1);
+            if (lot && Number.isFinite(q.p)) lot.price = q.p;
+        }
+        replaying = false;
+        ({ onMoney, onStats, onBuildDone, onToast, onSelect, onBuildHint, onPending, ghostRot, liftKind, pisteWidth, pisteLit, pendingLift } = keep);
+        deselect();
+        if (onMoney) onMoney(money);
+        emitStats();
+        return { ok: true, applied, skipped };
+    };
+
     return {
+        // ----- Spielstand -----
+        getSave(){ return getSave(); },
+        loadSave(data){ return loadSave(data); },
+        setOnSaveChange(cb){ onSaveChange = cb; },
         dispose(){ cancelAnimationFrame(raf); orbit.dispose(); window.removeEventListener('resize',onResize); window.visualViewport?.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onHover); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('pointerup',onTouchEnd); canvas.removeEventListener('pointercancel',onTouchEnd); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
         // ----- Bedienung per Finger: vorgemerkte Aktion bestätigen oder verwerfen -----
         setOnPending(cb){ onPending = cb; },
@@ -8967,9 +9103,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         cancelPending(){ cancelPending(); },
         undoPistePoint(){ undoPistePoint(); },
         rotateBuild(){ rotateBuild(); },
-        // ----- Kamera-Knöpfe im HUD -----
-        cameraZoom(f){ orbit.zoom(f); },
-        cameraTurn(rad){ orbit.turn(rad); },
         setBuild(type){ deselect(); currentBuild = type; demolishMode = false; endLift(); endPiste(); endRoad(); showParcelGrid(!!type); if (!type) { hideSnowRange(); hideDirArrow(); } if (type) makeGhost(type); else if (ghost) { scene.remove(ghost); ghost = null; } },
         deselect(){ deselect(); },
         setDemolish(on){ deselect(); demolishMode = on; currentBuild = null; endLift(); endPiste(); endRoad(); if (ghost) { scene.remove(ghost); ghost = null; } },
@@ -9067,6 +9200,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             if (money < pk.cost) return false;
             money -= pk.cost;
             eco.ad = { id: pk.id, daysLeft: AD_DAYS };
+            if (onSaveChange) onSaveChange();
             if (onMoney) onMoney(money);
             emitStats();
             if (onSelect && selectedSel) onSelect(infoFor(selectedSel));
@@ -9074,6 +9208,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         },
         cancelAdPackage(){
             eco.ad = { id: null, daysLeft: 0 };
+            if (onSaveChange) onSaveChange();
             emitStats();
             if (onSelect && selectedSel) onSelect(infoFor(selectedSel));
         },
@@ -9082,6 +9217,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             const p = Math.max(1, Math.round(v));
             if (selectedSel.type === 'ticket') eco.skiPass = p;
             else if (selectedSel.lot) selectedSel.lot.price = p;
+            if (onSaveChange) onSaveChange();
             if (onSelect) onSelect(infoFor(selectedSel));
         },
         buildDefs: BUILD_DEFS
