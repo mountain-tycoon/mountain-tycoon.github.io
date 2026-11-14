@@ -21,7 +21,9 @@ Im 3D-Modus kann man das eigene Skigebiet abfahren: „Fahren" in der Werkzeugle
 anklicken oder antippen, an der es losgehen soll. Am Rechner lenken A/D oder die Pfeiltasten, W ist Schuss
 (im Stand und bergauf: gehen), S bremst. Am Handy lenken zwei große Tasten links und rechts, beide zugleich
 bremsen, und wer das Bild gedrückt hält, fährt Schuss oder geht. Unten an einer Talstation steigt man per Knopf
-in die nächste Kabine und kann sich während der Bergfahrt umsehen. „Beenden" (oder Esc) führt zurück zum Bauen.
+in die nächste Kabine und kann sich während der Bergfahrt umsehen. Kicker, Funpark und Halfpipe lassen sich
+selbst befahren (Sprünge mit Drehung), auf der Rennstrecke läuft die Zeit mit, und an einer Hütte kann man
+einkehren (E) und die Aussicht genießen. Dazu gibt es Fahrgeräusche – abschaltbar über „Ton an/aus". „Beenden" (oder Esc) führt zurück zum Bauen.
 
 ## Spielstand
 

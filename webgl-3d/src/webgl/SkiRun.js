@@ -9,6 +9,7 @@
 // ============================================================
 import * as THREE from 'three';
 import { makePlayerSkier, PLAYER_SCALE } from './SkiFigure.js';
+import { createSkiSound } from './SkiSound.js';
 
 const G = 8.4;              // Hangabtrieb
 const FALL = 15;            // Fallbeschleunigung im Sprung
@@ -27,6 +28,8 @@ const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
  *   hasSnowAt(gx, gy)   liegt eine fahrbare Decke?
  *   isBuilt(gx, gy)     steht hier ein Gebäude?
  *   routes()            Lifte und Pisten des Gebiets
+ *   runAt(wx, wz)       Anlage an dieser Stelle (Kicker, Funpark, Halfpipe, Rennstrecke) oder null
+ *   huts()              Einkehrmöglichkeiten: [{ x, z, name }]
  *   touch()             Bedienung mit dem Finger? (für die Hinweistexte)
  *   onState(info)       Meldung ans HUD (mehrmals je Sekunde), null = beendet
  */
@@ -197,6 +200,15 @@ export function createSkiRun(deps) {
     };
     const clearDust = () => { dustLife.fill(0); dustPos.fill(-1e5); dustGeo.attributes.position.needsUpdate = true; };
     let offer = null;           // Lift, in den man gerade einsteigen könnte
+    let hutOffer = null;        // Hütte in Reichweite
+    let rest = null;            // Einkehr: { name, a } – die Kamera kreist um die Terrasse
+    let jump = null;            // laufender Sprung: Drehung, Halfpipe-Hilfe
+    let hCos = 1;               // Anteil des Tempos, der waagerecht wirkt (am Steilhang weniger)
+    let race = null;            // Zeitnahme auf der Rennstrecke
+    const bestTimes = new Map();
+    const sound = createSkiSound();
+    const runAt = deps.runAt || (() => null);
+    const fmtS = (t) => t.toFixed(1).replace('.', ',') + ' s';
     let emitT = 0, bumpT = 0, hintT = 0, hint = '';
     const input = { left: false, right: false, brake: false, tuck: false };
     const keys = new Set();
@@ -209,7 +221,8 @@ export function createSkiRun(deps) {
     const blockedAt = (x, z) => {
         if (Math.abs(x) > half - 1.2 || Math.abs(z) > half - 1.2) return 'edge';
         const gx = toG(x), gy = toG(z);
-        if (isBuilt(Math.round(gx), Math.round(gy))) return 'building';
+        // Kicker, Funpark, Halfpipe und Rennstrecke belegen zwar Bauplatz, sind aber zum Durchfahren da
+        if (isBuilt(Math.round(gx), Math.round(gy)) && !deps.runAt?.(x, z)) return 'building';
         // Auf der Piste ist der Weg frei: sie überbrückt Bäche, und Felsblöcke (nur grob
         // gerastert bekannt) sind dort geräumt.
         const water = lcAt(gx, gy) === 2, rock = solidAt(x, z) > surfaceAt(x, z) + 0.7;
@@ -257,7 +270,28 @@ export function createSkiRun(deps) {
     };
     const liftLabel = (r) => r.name || 'Lift';
 
-    const say = (text) => { hint = text; hintT = 2.6; emitT = 0; };
+    const say = (text, secs = 2.6) => { hint = text; hintT = secs; emitT = 0; };
+    /** Absprung: über einer Anlage gibt es eine Drehung dazu, an der Pipe-Kante geht es senkrecht hoch und zurück in die Wand. */
+    const takeOff = () => {
+        const q = runAt(pos.x, pos.z);
+        const T = Math.max(0, 2 * vy / FALL);                       // erwartete Flugzeit
+        jump = { t: 0, T, spin: 0, turns: 0, pipe: null };
+        if (!q || q.type === 'racecourse') return;
+        if (q.type === 'halfpipe' && Math.abs(q.across) > 3) {
+            const sgn = Math.sign(q.across);
+            jump.pipe = { ix: -sgn * q.px, iz: -sgn * q.pz };
+            th = 2 * q.axis - th;                                   // an der Pipe-Achse gespiegelt: es geht zurück in die Rinne
+        }
+        // Über einer Anlage gehört eine Drehung dazu, sobald der Absprung trägt. Bergab gelandet dauert der Flug
+        // länger als auf ebenem Grund gerechnet – die Drehung bekommt deshalb mindestens 0,8 s.
+        if (vy > 1.4 || T > 0.5) { jump.turns = T > 1.25 ? 2 : 1; jump.T = Math.max(0.8, T * 1.25); jump.spin = (steerS < 0 ? 1 : -1) * Math.PI * 2 * jump.turns; }
+    };
+    const land = (ground, gvy) => {
+        if (airT > 0.25) { burstDust(Math.min(70, 20 + airT * 60)); squat = Math.min(1, airT * 1.6); sound.thump(Math.min(1, airT)); }
+        if (jump && jump.turns && jump.t >= jump.T * 0.8) say(`${jump.turns * 360}° – sauber gelandet`);
+        pos.y = ground; air = false; vy = gvy; jump = null;
+    };
+
     const emit = () => {
         if (!onState) return;
         onState(on ? {
@@ -266,7 +300,11 @@ export function createSkiRun(deps) {
             cabin: !!(ride && ride.inside),
             look: !!(ride && ride.car),
             waiting: !!(ride && ride.car === null && ride.model),
-            lift: !ride && offer ? liftLabel(offer) : null,
+            lift: !ride && !rest && offer ? liftLabel(offer) : null,
+            hut: !ride && !rest && hutOffer ? hutOffer.name : null,
+            resting: rest ? rest.name : null,
+            timer: race ? fmtS(race.t) : null,
+            sound: sound.wanted(),
             hint: hintT > 0 ? hint : ''
         } : null);
     };
@@ -428,7 +466,10 @@ export function createSkiRun(deps) {
         bumpT -= dt;
         if (mesh.userData.carrying !== walking) mesh.userData.setCarry(walking);
         // Weiterfahren, sofern nichts im Weg steht
-        const nx = pos.x + dx * v * dt, nz = pos.z + dz * v * dt;
+        // v ist das Tempo entlang der Schneeoberfläche: am Steilhang (Halfpipe-Wand) geht davon wenig in die Waagerechte
+        if (!air) hCos = 1 / Math.sqrt(1 + s * s);
+        let nx = pos.x + dx * v * hCos * dt, nz = pos.z + dz * v * hCos * dt;
+        if (air && jump && jump.pipe) { nx += jump.pipe.ix * 1.7 * dt; nz += jump.pipe.iz * 1.7 * dt; }   // über der Pipe-Kante: zurück in die Wand treiben
         const why = v > 0 ? blockedAt(nx, nz) : null;
         if (why && !blockedAt(pos.x, pos.z)) {
             if (v > 2) say(why === 'water' ? 'Wasser – hier geht es nicht weiter'
@@ -438,18 +479,38 @@ export function createSkiRun(deps) {
         } else { pos.x = nx; pos.z = nz; }
         // Höhe: am Boden kleben – außer das Gelände fällt schneller weg, als man fällt (Kuppe, Schanze)
         const ground = surfaceAt(pos.x, pos.z);
-        const gvy = (ground - lastGround) / Math.max(dt, 1e-3);     // so schnell steigt oder fällt der Boden unter den Skiern
+        // so schnell steigt oder fällt der Boden unter den Skiern – steigen kann man höchstens mit dem eigenen Tempo
+        // (an einer Stufe, etwa der Kante der Halfpipe, spränge der Wert sonst ins Uferlose)
+        const gvy = Math.min(v, (ground - lastGround) / Math.max(dt, 1e-3));
         lastGround = ground;
         if (air) {
             vy -= FALL * dt; pos.y += vy * dt;
-            if (pos.y <= ground) { if (airT > 0.25) { burstDust(Math.min(70, 20 + airT * 60)); squat = Math.min(1, airT * 1.6); } pos.y = ground; air = false; vy = gvy; }
-            else airT += dt;
+            if (pos.y <= ground) { land(ground, gvy); }
+            else { airT += dt; if (jump) jump.t += dt; }
         } else if (v > 4 && gvy < vy - FALL * dt - 0.6) {
-            airT = 0;
+            airT = 0; takeOff();
             air = true; vy -= FALL * dt; pos.y += vy * dt;
             if (pos.y <= ground) { pos.y = ground; air = false; vy = gvy; }
         } else { pos.y = ground; vy = gvy; }
         squat = Math.max(0, squat - dt * 2.2);
+        // Rennstrecke: Zeit läuft vom ersten bis zum letzten Tor
+        const q = runAt(pos.x, pos.z);
+        if (q && q.type === 'racecourse') {
+            if (!race && q.along < -q.hl + 3 && v > 2) { race = { key: q.key, t: 0 }; say('Riesentorlauf – die Zeit läuft'); }
+            else if (race && q.along > q.hl - 1.5) {
+                const best = bestTimes.get(race.key);
+                if (best === undefined || race.t < best) bestTimes.set(race.key, race.t);
+                say(`Im Ziel: ${fmtS(race.t)}` + (best === undefined ? '' : race.t < best ? ' – neue Bestzeit!' : ` · Bestzeit ${fmtS(best)}`), 4.5);
+                race = null;
+            }
+        } else if (race) race = null;                    // Strecke verlassen
+        if (race) { race.t += dt; emitT = Math.min(emitT, 0.05); }
+        // Einkehr möglich? Langsam und nah an einer Hütte
+        hutOffer = null;
+        if (v < 3 && deps.huts) {
+            let bd = 8;
+            for (const h of deps.huts()) { const d = Math.hypot(h.x - pos.x, h.z - pos.z); if (d < bd) { bd = d; hutOffer = h; } }
+        }
         stepTrail(!air && !walking && hasSnowAt(toG(pos.x), toG(pos.z)));
         // Einsteigen möglich? Langsam und nah an einer Talstation
         offer = null;
@@ -482,7 +543,9 @@ export function createSkiRun(deps) {
         mesh.position.set(pos.x, pos.y + 0.02, pos.z);
         const lean = steerS * Math.min(0.68, 0.12 + v * 0.05);
         const pitch = ride || walking || striding ? 0 : -Math.atan(s) * (air ? 0.4 : 1);
-        mesh.rotation.set(pitch, th, lean);
+        const spun = air && jump && jump.spin ? jump.spin * Math.min(1, jump.t / Math.max(0.3, jump.T)) : 0;
+        mesh.rotation.set(spun ? 0 : pitch, th + spun, lean);
+        if (rest) { ud.setPose({ lean: 0.03, armX: 0.05, elbow: -0.2 }); return; }
         if (ride) { ud.setPose({ bendL: 0.15, bendR: 0.15, lean: 0.1, armX: -0.3, elbow: -0.4, pole: 0.7 }); return; }
         if (walking || striding) {
             // Schritt für Schritt: zu Fuß mit geschulterten Ski, auf Ski im Grätenschritt mit Stockeinsatz
@@ -496,7 +559,8 @@ export function createSkiRun(deps) {
         }
         // Fahren: Knie gebeugt, in der Kurve das Innenbein stärker; Schuss = tiefe Hocke, Stöcke unter den Armen
         // tief im Schwung, hoch beim Kantenwechsel, abfedern nach der Landung
-        const bend = 0.34 + tuckS * 0.55 + Math.min(0.14, v * 0.01) + (air ? 0.35 : 0) + Math.abs(lean) * 0.5 - hop * 0.22 + squat * 0.5;
+        const grab = spun ? 0.55 : 0;                    // in der Drehung zusammengekauert
+        const bend = grab + 0.34 + tuckS * 0.55 + Math.min(0.14, v * 0.01) + (air ? 0.35 : 0) + Math.abs(lean) * 0.5 - hop * 0.22 + squat * 0.5;
         const edge = lean * 0.75;
         ud.setPose({
             bendL: bend - edge, bendR: bend + edge, plough: brakeS,
@@ -524,6 +588,18 @@ export function createSkiRun(deps) {
                 camera.lookAt(camLook);
             }
             camPos.copy(camera.position); camTh = th;
+            return;
+        }
+        if (rest) {
+            // Einkehr: die Kamera kreist langsam um die Terrasse – Zeit für die Aussicht
+            rest.a += dt * 0.11;
+            const a = rest.a + lookYaw, el = clamp(0.3 - lookPitch, 0.05, 1.1), dist = 6.5;
+            const cx = pos.x - Math.sin(a) * Math.cos(el) * dist, cz = pos.z - Math.cos(a) * Math.cos(el) * dist;
+            camPos.set(cx, Math.max(pos.y + 1 + Math.sin(el) * dist, solidAt(cx, cz) + 0.8), cz);
+            camera.position.lerp(camPos, ease(3, dt));
+            camLook.lerp(_a.set(pos.x, pos.y + 0.9, pos.z), ease(3, dt));
+            camera.lookAt(camLook);
+            if (Math.abs(fov0 - camera.fov) > 0.05) { camera.fov += (fov0 - camera.fov) * ease(3, dt); camera.updateProjectionMatrix(); }
             return;
         }
         // Die Kamera dreht verzögert mit – so sieht man den eigenen Schwung
@@ -576,7 +652,8 @@ export function createSkiRun(deps) {
             camPos.set(x - dx * 5, pos.y + 2.4, z - dz * 5); camLook.set(x + dx * 5, pos.y + 0.8, z + dz * 5);
             pos.y += 4.5; air = true; vy = 0;             // fallen lassen
             scene.add(mesh); scene.add(dust); scene.add(tow); scene.add(trail); tow.visible = false; clearDust(); clearTrail(); fov0 = camera.fov; camRoll = 0;
-            on = true; ride = null; offer = null; hintT = 0; bumpT = 0; emitT = 0;
+            on = true; ride = null; offer = null; hutOffer = null; rest = null; jump = null; race = null; hintT = 0; bumpT = 0; emitT = 0;
+            sound.start();
             keys.clear(); Object.assign(input, { left: false, right: false, brake: false, tuck: false });
             ac = new AbortController();
             const sig = { signal: ac.signal };
@@ -593,12 +670,12 @@ export function createSkiRun(deps) {
             const release = (e) => { if (held.delete(e.pointerId) && !held.size) input.tuck = false; };
             dom.addEventListener('pointerdown', (e) => {
                 held.set(e.pointerId, { x: e.clientX, y: e.clientY });
-                if (e.pointerType !== 'mouse' && !ride) input.tuck = true;
+                if (e.pointerType !== 'mouse' && !ride && !rest) input.tuck = true;
             }, sig);
             window.addEventListener('pointermove', (e) => {
                 const h = held.get(e.pointerId);
                 if (!h) return;
-                if (ride && ride.car) {
+                if ((ride && ride.car) || rest) {
                     lookYaw += (e.clientX - h.x) * 0.006;
                     lookPitch = clamp(lookPitch + (e.clientY - h.y) * 0.005, -1.1, 0.9);
                 }
@@ -613,7 +690,8 @@ export function createSkiRun(deps) {
         /** Beenden; liefert den Ort, an dem die Fahrt endete (für die Übersichtskamera). */
         stop() {
             if (!on) return null;
-            on = false; ride = null; offer = null;
+            on = false; ride = null; offer = null; rest = null; race = null;
+            sound.stop();
             ac?.abort(); ac = null; keys.clear();
             resetPose();
             camera.near = NEAR0; camera.fov = fov0; camera.updateProjectionMatrix(); cabinIn.removeFromParent();
@@ -623,9 +701,21 @@ export function createSkiRun(deps) {
         },
         /** Eingaben der Knöpfe im HUD (Finger). */
         setInput(part) { Object.assign(input, part); },
+        /** Einkehren an der Hütte in Reichweite bzw. von dort weiterfahren. */
+        toggleHut() {
+            if (!on || ride) return false;
+            if (rest) { rest = null; mesh.userData.setCarry(false); lookYaw = 0; lookPitch = 0; emitT = 0; return true; }
+            if (!hutOffer) return false;
+            rest = { name: hutOffer.name, a: th + Math.PI };       // zuerst der Blick von vorn auf die Figur – und ins Tal dahinter
+            v = 0; lookYaw = 0; lookPitch = 0; race = null;
+            mesh.userData.setCarry(true);
+            emitT = 0;
+            return true;
+        },
+        setSound(v2) { sound.setWanted(v2); emitT = 0; },
         /** In den angebotenen Lift steigen und nach oben fahren. */
         takeLift() {
-            if (!on || ride || !offer) return false;
+            if (!on || ride || rest || !offer) return false;
             const r = offer;
             const ax = toW(r.bottom.gx), az = toW(r.bottom.gy), bx = toW(r.top.gx), bz = toW(r.top.gy);
             const ground = GROUND_LIFTS.includes(r.liftKind);
@@ -641,7 +731,9 @@ export function createSkiRun(deps) {
         step(dt, t) {
             if (!on) return;
             let s = 0;
-            if (ride) stepRide(dt); else s = stepSki(dt, readInput());
+            if (rest) { v = 0; stepDust(dt, 0, 0); }
+            else if (ride) stepRide(dt); else s = stepSki(dt, readInput());
+            sound.update({ v, carve: Math.abs(steerS) + brakeS, air, snow: !walking, ride: !!ride, cabin: !!(ride && ride.inside) });
             poseSkier(t, s, dt);
             stepCamera(dt);
             hintT -= dt; emitT -= dt;
@@ -651,6 +743,6 @@ export function createSkiRun(deps) {
         __state: () => ({ x: pos.x, y: pos.y, z: pos.z, th, v, air, ride: !!ride, offer: !!offer, hint: hintT > 0 ? hint : '', ahead: blockedAt(pos.x + Math.sin(th), pos.z + Math.cos(th)), forest: isForest(pos.x, pos.z) }),
         /** Abstand Kamera–Figur (für den Dunst). */
         viewDist: () => 8,
-        dispose() { dustTex.dispose(); ac?.abort(); if (mesh) scene.remove(mesh); scene.remove(dust); scene.remove(tow); camera.near = NEAR0; on = false; }
+        dispose() { sound.dispose(); dustTex.dispose(); ac?.abort(); if (mesh) scene.remove(mesh); scene.remove(dust); scene.remove(tow); camera.near = NEAR0; on = false; }
     };
 }

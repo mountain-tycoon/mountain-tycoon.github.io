@@ -6292,6 +6292,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     if (import.meta.env.DEV && window.__mtCam) {   // nur beim Entwickeln: Tageszeit und Qualitätsstufe stellen
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
+            // Gebäude oder Anlage ohne Bauzeit hinstellen (Prüfungen)
+            place: (type, gx, gy) => { try { return placeBuildingAt(type, { gx, gy }); } finally { for (const c of constructions) c.t = c.dur; } },
             // Lift ohne Dialog bauen (Prüfungen): Art, Tal- und Bergpunkt in Weltkoordinaten
             buildLift: (kind, ax, az, bx, bz) => { liftKind = kind; const g0 = worldToGrid(ax, az); try { return constructLift({ pt: new THREE.Vector3(ax, surfaceAt(ax, az), az), gx: g0.gx, gy: g0.gy }, new THREE.Vector3(bx, surfaceAt(bx, bz), bz), 0); } finally { for (const c of constructions) c.t = c.dur; } },   // Bauzeit überspringen
             quality: { get: () => qTier, set: (n) => { qTier = Math.max(0, Math.min(Q_MAX, n | 0)); applyQuality(); } } });
@@ -9019,8 +9021,39 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
 
     // ===== SELBST FAHREN =====
     let onSki = null;
+    /** Anlage auf einer Piste an diesem Weltpunkt: Lage längs (bergab positiv) und quer zur Achse. */
+    const skiRunAt = (wx, wz) => {
+        const gx = (wx + half) / tile, gy = (wz + half) / tile;
+        for (const rt of guestRoutes) {
+            if (!rt.runs) continue;
+            for (const rn of rt.runs) {
+                const ox = gx - rn.gx, oy = gy - rn.gy;
+                const along = ox * rn.dx + oy * rn.dy, across = -ox * rn.dy + oy * rn.dx;
+                if (Math.abs(along) > rn.hl || Math.abs(across) > (rn.type === 'halfpipe' ? 6.5 : rn.r + 1.5)) continue;
+                return { type: rn.type, along: along * tile, across: across * tile, hl: rn.hl * tile, axis: Math.atan2(rn.dx, rn.dy), px: -rn.dy, pz: rn.dx, key: rn, rn };
+            }
+        }
+        return null;
+    };
+    // Fahrfläche für den Spieler: in der Halfpipe die SCHALE (wie bei den Gästen), nicht die tiefer
+    // ausgehobene Mulde darunter.
+    const skiSurfaceAt = (wx, wz) => {
+        const base = surfaceAt(wx, wz);
+        const q = skiRunAt(wx, wz);
+        if (!q || q.type !== 'halfpipe' || !q.rn.strip) return base;
+        const u = Math.abs(q.along / q.hl), x = Math.abs(q.across) / tile;
+        if (u > 0.9 || x >= 4.9) return base;
+        const st = q.rn.strip;
+        const shellY = x <= 1.4 ? 0 : x >= 4.7 ? 3.3 : 3.3 - Math.sqrt(Math.max(0, 3.3 * 3.3 - (x - 1.4) * (x - 1.4)));
+        const yShell = st.midY - Math.tan(st.pitch) * q.along - 3.29 + shellY + 0.05;
+        const k = Math.min(1, Math.max(0, (u - 0.75) / 0.15));       // an den Enden weich aufs Gelände
+        return yShell + (base - yShell) * k;
+    };
+    const HUT_NAMES = { restaurant: 'Restaurant', imbiss: 'Imbiss', huette: 'Hütte', bergrest: 'Bergrestaurant', panorama: 'Panoramarestaurant', sterne: 'Sternerestaurant', apres: 'Après-Ski-Bar' };
     skiRun = createSkiRun({
-        scene, camera, dom: canvas, surfaceAt, solidAt, half, tile, lcAt, hasSnowAt,
+        scene, camera, dom: canvas, surfaceAt: skiSurfaceAt, solidAt: (wx, wz) => Math.max(solidAt(wx, wz), skiSurfaceAt(wx, wz)), half, tile, lcAt, hasSnowAt,
+        runAt: skiRunAt,
+        huts: () => placedBuildings.filter(b => HUT_NAMES[b.type] && b.rec).map(b => ({ x: b.rec.x, z: b.rec.z, name: HUT_NAMES[b.type] })),
         isBuilt: (gx, gy) => occAt(gx, gy) === OCC_BUILD,
         routes: () => guestRoutes,
         touch: () => lastPointerType !== 'mouse',
@@ -9152,6 +9185,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         stopSki(){ stopSki(); },
         skiInput(part){ skiRun.setInput(part); },
         skiTakeLift(){ return skiRun.takeLift(); },
+        skiToggleHut(){ return skiRun.toggleHut(); },
+        skiSound(on){ skiRun.setSound(on); },
         setOnSki(cb){ onSki = cb; },
         dispose(){ cancelAnimationFrame(raf); skiRun.dispose(); orbit.dispose(); window.removeEventListener('resize',onResize); window.visualViewport?.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onHover); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('pointerup',onTouchEnd); canvas.removeEventListener('pointercancel',onTouchEnd); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
         // ----- Bedienung per Finger: vorgemerkte Aktion bestätigen oder verwerfen -----

@@ -10,7 +10,7 @@ Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
   - `src/engine/terrainGen.js` – Landschaftserzeugung (Spielfeld samt Umland), siehe „Landschaft" unten
   - `src/components/game/` – 2D-Renderer (`WorldCanvas.jsx`, `DrawingUtils.js`)
   - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `SnowSurface.js`, `Surround3D.js`,
-    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`, `SkiFigure.js`)
+    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`, `SkiFigure.js`, `SkiSound.js`)
   - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
   - `src/components/menu/` – Hauptmenü und Ladebildschirm
   - `src/constants/` – Gebäude, Gäste, Lifte, Pisten, Kampagne (`campaign.js`: Level, Aufgaben, Fortschritt)
@@ -89,6 +89,17 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (`hop`), nach Sprüngen federt sie ab und wirft eine Schneewolke (`burstDust`). Die Kamera weitet mit dem Tempo
   den Bildwinkel, legt sich in die Kurve und rüttelt bei hoher Fahrt leicht. Hinter den Skiern bleiben Spuren
   (`stepTrail`, ein Band der letzten Meter).
+- Anlagen (`skiRunAt` in der Szene liefert Art, Lage längs/quer und Achse): Kicker und Funpark stehen im Gelände,
+  der Sprung ergibt sich aus der Fahrphysik; über einer Anlage dreht sich die Figur (`takeOff`/`land`). Halfpipe:
+  gefahren wird auf der SCHALE (`skiSurfaceAt`, dieselbe Formel wie bei den Gästen), nicht in der tieferen Mulde;
+  an der Kante geht es hoch, die Fahrtrichtung wird an der Pipe-Achse gespiegelt und die Figur treibt zurück in
+  die Wand. Rennstrecke: Zeitnahme vom ersten bis zum letzten Tor, Bestzeit je Strecke (nur für die Sitzung).
+  Anlagen belegen Bauplatz, blockieren den Fahrer aber nicht. Das Tempo `v` gilt entlang der Oberfläche
+  (`hCos`), sonst stimmt am Steilhang nichts.
+- Einkehr: nahe einem Gastro-Gebäude (`HUT_NAMES`) bietet das HUD „Einkehren" an (`toggleHut`): Ski geschultert,
+  die Kamera kreist langsam um die Stelle, Blick durch Ziehen drehbar.
+- Ton: `SkiSound.js` erzeugt alles aus Rauschen und Summern (Fahrtwind, Kanten, Liftsurren, Landung), keine
+  Dateien. Start erst aus einer Eingabe heraus; „Ton an/aus" im HUD, gespeichert in `localStorage['mt.skiSound']`.
 - Lift: nahe einer Talstation bietet das HUD die Bergfahrt an. Die Figur wartet auf das nächste Fahrzeug der
   Anlage (`model.carriers`, Platz über `model.seatPos` wie bei den Gästen) und fährt wirklich mit – aber nur
   in eine fahrende Anlage (im Bau stehen die Fahrzeuge still und sind gestaucht). `skiRun.step` läuft in der
@@ -101,7 +112,8 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   entlang. Oben steht man neben der Bergstation (`arrive`) und entscheidet selbst, wohin es geht.
 - Prüfen ohne flüssiges Bild: `window.__mtCam.ski()` liefert das Modul; `start(x, z)`, `setInput` und
   `step(1/60, t)` in einer Schleife spulen die Fahrt vor, `__state()` zeigt Ort und Tempo. `__mtCam.buildLift(art,
-  ax, az, bx, bz)` stellt ohne Dialog und Bauzeit einen Lift hin. Die Fahrzeuge bewegen sich nur in echten Bildern.
+  ax, az, bx, bz)` stellt ohne Dialog und Bauzeit einen Lift hin, `__mtCam.place(art, gx, gy)` ein Gebäude oder
+  eine Anlage (Anlagen brauchen eine extrabreite Piste: `route.width = 'xwide'`). Die Fahrzeuge bewegen sich nur in echten Bildern.
 
 ## Landschaft, Umland, Schnee
 - **Erzeugung** (`engine/terrainGen.js`): kein Aufaddieren breiter Kuppeln mehr (das ergab in jedem Level einen

@@ -634,7 +634,7 @@ const SteerPad = ({ side, onHold }) => {
 };
 
 /** Anzeige und Steuerung beim Selbstfahren. */
-const SkiHud = ({ ski, touch, compact, onStop, onLift, onInput }) => {
+const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput }) => {
     // Zwei Lenktasten: eine = lenken, beide zugleich = bremsen
     const held = useRef({ l: false, r: false });
     const hold = (k, v) => {
@@ -642,12 +642,17 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onInput }) => {
         const { l, r } = held.current;
         onInput({ left: l && !r, right: r && !l, brake: l && r });
     };
-    const steering = touch && !ski.riding;
+    const steering = touch && !ski.riding && !ski.resting;
     return (
         <>
             <div style={{ position: 'fixed', zIndex: 21, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: `calc(${compact ? 8 : 14}px + ${SAFE_L})` }}>
                 <button onClick={onStop} style={{ ...btn, display: 'flex', alignItems: 'center', gap: 6 }} title="Zurück zum Bauen (Esc)">
                     <Ico name="back" size={12} /> Beenden
+                </button>
+            </div>
+            <div style={{ position: 'fixed', zIndex: 21, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, right: `calc(${compact ? 8 : 14}px + ${SAFE_R})` }}>
+                <button onClick={() => onSound(!ski.sound)} style={{ ...btn, opacity: ski.sound ? 1 : 0.6 }} title="Ton ein- oder ausschalten">
+                    Ton {ski.sound ? 'an' : 'aus'}
                 </button>
             </div>
             {!ski.cabin && (
@@ -656,6 +661,7 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onInput }) => {
                     <div style={{ ...chip, color: '#e8eef6', display: 'flex', alignItems: 'baseline', gap: 6 }}>
                         <span style={{ fontSize: 19, fontWeight: 700, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{ski.kmh}</span>
                         <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>km/h</span>
+                        {ski.timer && <span style={{ fontSize: 15, fontWeight: 700, marginLeft: 10, color: '#fcd34d', fontVariantNumeric: 'tabular-nums' }}>{ski.timer}</span>}
                     </div>
                 </div>
             )}
@@ -670,12 +676,25 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onInput }) => {
                             : `Bergfahrt · ${ski.riding}`}
                     </div>
                 )}
+                {ski.resting && (
+                    <>
+                        <div style={{ ...chip, color: '#e8eef6', fontSize: 12 }}>Einkehr · {ski.resting} · {touch ? 'wischen' : 'mit der Maus ziehen'} zum Umsehen</div>
+                        <button onClick={onHut} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
+                            Weiterfahren{touch ? '' : ' (E)'}
+                        </button>
+                    </>
+                )}
+                {ski.hut && (
+                    <button onClick={onHut} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
+                        Einkehren · {ski.hut}{touch ? '' : ' (E)'}
+                    </button>
+                )}
                 {ski.lift && (
                     <button onClick={onLift} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
                         {ski.lift} nach oben{touch ? '' : ' (L)'}
                     </button>
                 )}
-                {!ski.riding && !ski.hint && (touch ? ski.kmh < 4 : true) && (
+                {!ski.riding && !ski.resting && !ski.hint && (touch ? ski.kmh < 4 : true) && (
                     <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5, lineHeight: 1.45 }}>
                         {touch ? 'Seitentasten lenken · beide zugleich bremsen · Bild gedrückt halten: Schuss und gehen'
                                : 'A / D oder ← / → lenken · W Schuss und gehen · S bremsen · Esc beenden'}
@@ -784,6 +803,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
         const onKey = (e) => {
             if (e.key === 'Escape') { if (picking) apiRef.current?.pickSki?.(false); else apiRef.current?.stopSki?.(); }
             else if (e.key.toLowerCase() === 'l') apiRef.current?.skiTakeLift?.();
+            else if (e.key.toLowerCase() === 'e') apiRef.current?.skiToggleHut?.();
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
@@ -875,7 +895,8 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             {/* Kopfzeile: nur der Rückweg ins Menü; alle Zahlen sitzen zentriert oben */}
             {skiing ? (
                 <SkiHud ski={ski} touch={touch} compact={compact} onStop={stopSki}
-                        onLift={() => apiRef.current?.skiTakeLift?.()} onInput={(part) => apiRef.current?.skiInput?.(part)} />
+                        onLift={() => apiRef.current?.skiTakeLift?.()} onHut={() => apiRef.current?.skiToggleHut?.()}
+                        onSound={(v) => apiRef.current?.skiSound?.(v)} onInput={(part) => apiRef.current?.skiInput?.(part)} />
             ) : compact ? (
                 <div style={{ position: 'fixed', top: `calc(8px + ${SAFE_T})`, left: `calc(8px + ${SAFE_L})`, zIndex: 10 }}>
                     <button onClick={onExit} title="Zurück zum Hauptmenü"
