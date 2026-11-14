@@ -52,6 +52,20 @@ const VERT_MAIN = /* glsl */`
     vSnowA = aSnow; vMark = aMark;
 `;
 
+// Rauschen ohne Sinus: bleibt auch bei großen Koordinaten und auf Handys stabil
+const NOISE_GLSL = /* glsl */`
+    float snHash(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+    }
+    float snNoise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(snHash(i), snHash(i + vec2(1.0, 0.0)), f.x), mix(snHash(i + vec2(0.0, 1.0)), snHash(i + vec2(1.0, 1.0)), f.x), f.y);
+    }
+`;
+
 const FRAG_DECL = /* glsl */`
     uniform float uSnowLine, uSnowBand, uFreshLoad, uDetail, uTime;
     uniform vec3 uSunDirW, uSunCol, uShade, uRockCol, uSnowCol, uHorizon;
@@ -66,17 +80,7 @@ const FRAG_DECL = /* glsl */`
     varying vec3 vSnowN;
     float gSnowCover = 0.0;      // Schneedecke an diesem Bildpunkt
     float gSnowNear = 0.0;       // 1 nah an der Kamera .. 0 fern (Feinstruktur blendet aus)
-    // Rauschen ohne Sinus: bleibt auch bei großen Koordinaten und auf Handys stabil
-    float snHash(vec2 p) {
-        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-        p3 += dot(p3, p3.yzx + 33.33);
-        return fract((p3.x + p3.y) * p3.z);
-    }
-    float snNoise(vec2 p) {
-        vec2 i = floor(p), f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        return mix(mix(snHash(i), snHash(i + vec2(1.0, 0.0)), f.x), mix(snHash(i + vec2(0.0, 1.0)), snHash(i + vec2(1.0, 1.0)), f.x), f.y);
-    }
+    ${NOISE_GLSL}
     float snFbm(vec2 p) { return snNoise(p) * 0.58 + snNoise(p * 2.13 + 7.1) * 0.28 + snNoise(p * 4.7 - 3.3) * 0.14; }
     // Windrippen: quer zum Wind eng, längs gestreckt – dazu feine Körnung
     float snRelief(vec2 q) {
@@ -259,6 +263,125 @@ export function makeSnowMaterial(uniforms, opts = {}) {
     };
     // eigener Schlüssel: Spielfeld- und Umland-Variante dürfen sich kein Programm teilen
     mat.customProgramCacheKey = () => 'snow-surface-' + (opts.bins ? 'bins' : 'attr');
+    return mat;
+}
+
+// ---- Pistenband: präparierter Schnee -----------------------------------------------------------
+// Eine gebaute Piste liegt als schmales Band knapp über dem Gelände. Sein Aussehen hängt am
+// Zustand des Abschnitts:
+//   frisch gewalzt  die Bahnen der Pistenraupe (abwechselnd einen Hauch heller und dunkler, feine
+//                   Naht dazwischen), aus der Nähe die Rillen im Schnee, leichter Glanz
+//   verspurt        Rillen und Bahnen verschwinden, graublaue längs gezogene Fahrspuren
+//   ausgeapert      das Band blendet aus, der Boden darunter kommt durch
+// Die Schwierigkeit (Eckfarbe: blau/rot/schwarz) zeigt sich aus der Ferne als Farbband wie auf
+// einem Pistenplan; aus der Nähe bleibt davon ein Hauch und eine schmale Linie an beiden Rändern,
+// damit man den Schnee sieht.
+// Eckpunkt-Daten: color = Farbe der Schwierigkeit · aBand = (Lage quer in Weltmaß, quer −1..1,
+// Lauflänge) · aAxis = Querrichtung der Piste (x, z) · aState = (Schneedecke 0..1, Zustand 0..1)
+const PISTE_VERT_DECL = /* glsl */`
+    attribute vec3 aBand;
+    attribute vec2 aAxis;
+    attribute vec2 aState;
+    varying vec3 vBand;
+    varying vec2 vAxis;
+    varying vec2 vState;
+    varying vec3 vPistePos;
+`;
+const PISTE_VERT_MAIN = /* glsl */`
+    vBand = aBand; vAxis = aAxis; vState = aState;
+    vPistePos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+`;
+const PISTE_FRAG_DECL = /* glsl */`
+    uniform vec3 uShade, uSnowCol;
+    uniform float uDetail;
+    varying vec3 vBand;
+    varying vec2 vAxis;
+    varying vec2 vState;
+    varying vec3 vPistePos;
+    float gPisteFresh = 0.0, gPisteCov = 0.0, gPisteNear = 0.0, gPisteWorn = 0.0;
+    ${NOISE_GLSL}
+`;
+const PISTE_FRAG_COLOR = /* glsl */`
+    {
+        vec3 diffCol = diffuseColor.rgb;                 // Farbe der Schwierigkeit
+        float lat = vBand.x, side = abs(vBand.y);
+        float cov = clamp(vState.x, 0.0, 1.0), q = clamp(vState.y, 0.0, 1.0);
+        float camDist = length(cameraPosition - vPistePos);
+        float near = (1.0 - smoothstep(45.0, 170.0, camDist)) * uDetail;
+        float n1 = snNoise(vPistePos.xz * 0.33 + 4.0);
+        float fresh = smoothstep(0.35, 0.95, q);
+
+        // frisch gewalzt: Bahnen der Raupe, dazwischen eine feine Naht
+        float lf = lat / 1.15;
+        float lane = floor(lf + 0.5);
+        float laneTone = mod(lane, 2.0) < 0.5 ? 1.0 : -1.0;
+        float seam = smoothstep(0.40, 0.5, abs(lf - lane));
+        vec3 snow = uSnowCol * 1.03;
+        snow *= 1.0 + laneTone * 0.020 * fresh;
+        snow *= 1.0 - seam * 0.045 * fresh;
+        // die Rillen selbst – nur aus der Nähe als Streifen, weiter weg wären sie Flimmern
+        snow *= 1.0 + sin(lat * 43.98) * 0.030 * fresh * near;
+
+        // verspurt: längs gezogene Fahrspuren und abgerutschte Stellen, stumpf und leicht grau
+        float tracks = snNoise(vec2(lat * 2.6 + n1 * 2.0, vBand.z * 0.30));
+        float ruts = snNoise(vec2(lat * 7.5 - n1 * 3.0, vBand.z * 0.85));
+        vec3 worn = uSnowCol * vec3(0.86, 0.89, 0.94) * (0.85 + 0.16 * tracks + 0.10 * ruts);
+        snow = mix(snow, worn, clamp((1.0 - q) * (0.75 + 0.25 * tracks), 0.0, 1.0));
+
+        // Schwierigkeit: fern ein Farbband, nah ein Hauch und eine Linie am Rand
+        float core = 1.0 - smoothstep(0.60, 0.76, side);
+        float tintK = mix(0.09, 0.30, smoothstep(55.0, 260.0, camDist));
+        snow = mix(snow, diffCol, core * tintK);
+        float line = smoothstep(0.82, 0.855, side) * (1.0 - smoothstep(0.90, 0.935, side));
+        snow = mix(snow, diffCol, line * 0.45);
+
+        diffuseColor.rgb = snow;
+        // am Rand läuft das Band in den Schnee daneben aus; wo die Piste ausgeapert ist, verschwindet es
+        diffuseColor.a *= (1.0 - smoothstep(0.90, 1.0, side)) * smoothstep(0.05, 0.5, cov);
+        gPisteFresh = fresh * cov; gPisteCov = cov; gPisteNear = near; gPisteWorn = (1.0 - q) * cov;
+    }
+`;
+const PISTE_FRAG_NORMAL = /* glsl */`
+    {
+        float k = gPisteFresh * gPisteNear;
+        if (k > 0.02) {
+            // Rillen quer zur Piste gekippt: je nach Sonnenstand heben sie sich als Streifen ab
+            vec3 tiltW = vec3(vAxis.x, 0.0, vAxis.y) * cos(vBand.x * 43.98) * 0.20 * k;
+            normal = normalize(normal + (viewMatrix * vec4(tiltW, 0.0)).xyz);
+        }
+        // zerfahren: unruhige, bucklige Oberfläche statt der glatten Walzspur
+        float w = gPisteWorn * gPisteNear;
+        if (w > 0.02) {
+            vec2 pq = vPistePos.xz * 1.5;
+            float b0 = snNoise(pq), bx = snNoise(pq + vec2(0.25, 0.0)), bz = snNoise(pq + vec2(0.0, 0.25));
+            normal = normalize(normal + (viewMatrix * vec4((b0 - bx) * 4.0, 0.0, (b0 - bz) * 4.0, 0.0)).xyz * 0.24 * w);
+        }
+    }
+`;
+
+/** Material für alle Pistenbänder einer Szene (eines genügt, der Zustand steht in den Eckpunkten). */
+export function makePisteMaterial(uniforms) {
+    const mat = new THREE.MeshStandardMaterial({
+        vertexColors: true, roughness: 0.85, metalness: 0.0,
+        transparent: true, depthWrite: false,
+        polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
+    });
+    mat.onBeforeCompile = (shader) => {
+        shader.uniforms.uShade = uniforms.uShade;
+        shader.uniforms.uSnowCol = uniforms.uSnowCol;
+        shader.uniforms.uDetail = uniforms.uDetail;
+        shader.vertexShader = shader.vertexShader
+            .replace('#include <common>', '#include <common>\n' + PISTE_VERT_DECL)
+            .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + PISTE_VERT_MAIN);
+        shader.fragmentShader = shader.fragmentShader
+            .replace('#include <common>', '#include <common>\n' + PISTE_FRAG_DECL)
+            .replace('#include <color_fragment>', '#include <color_fragment>\n' + PISTE_FRAG_COLOR)
+            .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(0.90, 0.60, gPisteFresh);')
+            .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + PISTE_FRAG_NORMAL)
+            .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.indirectDiffuse *= mix(vec3(1.0), uShade, gPisteCov);')
+            .replace('#include <fog_fragment>', SOFT_FOG);
+    };
+    mat.customProgramCacheKey = () => 'piste-band';
     return mat;
 }
 

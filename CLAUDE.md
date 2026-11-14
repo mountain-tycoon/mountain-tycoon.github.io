@@ -91,6 +91,12 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Kronendach). `repaintSnowCover` lädt nur noch diese Werte hoch; das Umland liest den Neuschnee aus einer
   Tabelle je Höhenstufe (`uFresh`). Wer etwas Weißes neben den Schnee stellt, gibt ihm mit `matchSnowLook`
   denselben Schattenton und Dunst (`SOFT_FOG`).
+- **Pisten:** Jede Piste (auch die Startabfahrt) hat ein Band knapp über dem Gelände (`buildPisteBand` in
+  `Scene3D.js`, Material `makePisteMaterial` in `SnowSurface.js`). Der Zustand steht je Eckpunkt in `aState`
+  (Schneedecke, Präparierzustand aus `bed.groom`) und wird in `repaintPisteBeds` fortgeschrieben: frisch gewalzt
+  = Raupenbahnen und Rillen, verspurt = graue Fahrspuren, ausgeapert = Band blendet aus. Die Farbe der
+  Schwierigkeit ist aus der Ferne ein Farbband, aus der Nähe nur ein Hauch und eine Randlinie. Wer Gelände
+  unter einer Piste ändert, ruft `bed.reseat` (macht `flattenUnderBuilding` schon).
 - **Startpunkt:** Talstation = tiefste Randkachel, von dort mindestens `BASE_IN` Kacheln ins Gebiet (sonst
   klemmt das Dorf am Rand und die Zufahrt findet keinen Weg). Bäche und Seen meiden die Linie Dorf–Gipfel.
 - **Prüfen ohne Spiel:** `node tools/relief.mjs <ordner> [level …]` zeichnet die Landschaft als Reliefbild

@@ -5,7 +5,7 @@
 // ============================================================
 import * as THREE from 'three';
 import { buildTerrainMesh, buildForest, buildRocks, buildGlacier, FOREST_MIX_TABLE } from './TerrainMesh.js';
-import { createSnowUniforms, matchSnowLook, FRESH_BINS } from './SnowSurface.js';
+import { createSnowUniforms, matchSnowLook, makePisteMaterial, FRESH_BINS } from './SnowSurface.js';
 import { buildSurround } from './Surround3D.js';
 import { prepareWater, buildWater } from './Water3D.js';
 import { MATS, makeChalet, makeHotel, makeRestaurant, makeTicketOffice, makeLift, makeChairlift, makeChairlift2, makeChairlift6, makePlatterLift, makeMagicCarpet, makeSurfaceLift, makeAerialTram, makeAerialTramXL, makeGondola8, makeGondola4, makeMegaGondola, makeVillage, makeParking, makeParkingGarage, makeSnowCannon, makeFunpark, makeSummitCross, makeBench, makeSignpost, makeTextSprite, makeFloodlight, findTopPeaks, makeSkiSchool, makeSkiRental, makeShop, makeImbiss, makeBusStop, makeSnowcatGarage, makeToilet, makeRunDressing, makeHalfpipeShell,
@@ -1881,9 +1881,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const snowGuns = built.cannon_s + built.snowcannon + built.cannon_l;
         const snowRate = snowGuns * snowmakingRatio() * dt * 1.6;   // Schnee nur mit Wasser                      // je Pistenraupe mehr Präparierung
         sim.groom = Math.max(5, Math.min(100, sim.groom - wear + groomRate + snowRate));
-        // Pistenzustand sichtbar machen: frisch = strahlend weiß, verspurt = gräulich
-        const gq = sim.groom / 100;
-        for (const m of pisteSnowMats) m.color.setRGB(0.83 + 0.12 * gq, 0.86 + 0.105 * gq, 0.86 + 0.14 * gq);
         // ===== ABSCHNITTSWEISER VERSCHLEISS =====
         // Je mehr Gäste unterwegs sind, desto schneller wird die Piste verspurt.
         // Der Wert sinkt gleichmäßig; die Raupe hebt ihn lokal wieder an.
@@ -6556,7 +6553,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const pisteDots = [];     // kleine Marker der gesetzten Punkte
     const piste = { total: 0, blue: 0, red: 0, black: 0 };
     let pisteNo = 0;                      // fortlaufende Pistennummer (wie im 2D)
-    const pisteSnowMats = [];             // Schneebett-Materialien -> Zustands-Färbung
     const pisteBeds = [];                 // {geo, grid} -> Schneebett folgt der Schneedecke
     // Nummernschild am Pistenende (anklickbar fürs Pisten-Infofeld)
     const addPisteSign = (at, no, diffHex) => {
@@ -6573,6 +6569,92 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     };
     const PISTE_HEX = { blue: 0x3b82f6, red: 0xef4444, black: 0x111827 };
     const PISTE_RGB = { blue: [0.23, 0.51, 0.96], red: [0.94, 0.27, 0.27], black: [0.11, 0.11, 0.16] };
+    // ===== PISTENBAND =====
+    // Die präparierte Fläche einer Piste: ein schmales Netz knapp über dem Gelände, fünf Punkte
+    // quer, etwa einer je Kachel längs. Wie es aussieht (frisch gewalzt mit Raupenbahnen und
+    // Rillen, verspurt, ausgeapert, Farbe der Schwierigkeit), rechnet das Material aus dem
+    // Zustand je Eckpunkt (makePisteMaterial in SnowSurface.js); repaintPisteBeds schreibt ihn fort.
+    // (Früher gab es ein weißes Band und eine farbige Markierung als zwei Netze – beide mit
+    //  verkehrtem Drehsinn, also von oben unsichtbar. Man sah Pisten nur an den Randstangen.)
+    const pisteMat = makePisteMaterial(snowU);
+    const BAND_ACROSS = [-1, -0.5, 0, 0.5, 1];
+    const BAND_LIFT = 0.06;                 // so weit liegt das Band über dem Gelände
+    const buildPisteBand = (pts, snowW, rgb) => {
+        // Mittellinie in gleichmäßigen Schritten
+        const mid = [];
+        for (let seg = 0; seg < pts.length - 1; seg++) {
+            const a = pts[seg], b = pts[seg + 1];
+            const n = Math.max(1, Math.round(Math.hypot(b.gx - a.gx, b.gy - a.gy)));
+            for (let k = seg === 0 ? 0 : 1; k <= n; k++) mid.push({ gx: a.gx + (b.gx - a.gx) * k / n, gy: a.gy + (b.gy - a.gy) * k / n });
+        }
+        const NA = BAND_ACROSS.length, W = snowW * 1.06;      // etwas über die Sollbreite: der Rand läuft weich aus
+        const pos = [], col = [], band = [], axis = [], grid = [], idx = [], gIdx = [];
+        let along = 0;
+        for (let i = 0; i < mid.length; i++) {
+            const a = mid[Math.max(0, i - 1)], b = mid[Math.min(mid.length - 1, i + 1)], c = mid[i];
+            let tx = b.gx - a.gx, ty = b.gy - a.gy; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+            const px = -ty, py = tx;
+            if (i > 0) along += Math.hypot(c.gx - mid[i - 1].gx, c.gy - mid[i - 1].gy) * tile;
+            for (let j = 0; j < NA; j++) {
+                const sd = BAND_ACROSS[j], gx = c.gx + px * W * sd, gy = c.gy + py * W * sd;
+                const wp = worldPosSmooth(gx, gy);
+                pos.push(wp.x, wp.y + BAND_LIFT, wp.z);
+                col.push(rgb[0], rgb[1], rgb[2]);
+                band.push(W * sd * tile, sd, along);
+                axis.push(px, py);
+                grid.push(gx, gy);
+                // Zustand je Querschnitt in zwei Hälften (links/rechts) – so viele Einträge hat `groom`
+                gIdx.push(2 * i + (sd > 0 ? 1 : 0));
+            }
+            if (i > 0) {
+                const r0 = (i - 1) * NA, r1 = i * NA;
+                for (let j = 0; j < NA - 1; j++) idx.push(r0 + j, r0 + j + 1, r1 + j, r0 + j + 1, r1 + j + 1, r1 + j);
+            }
+        }
+        // Drehsinn prüfen: die Fläche muss nach oben zeigen
+        if (idx.length) {
+            const A = idx[0] * 3, B = idx[1] * 3, C = idx[2] * 3;
+            const ny = (pos[B + 2] - pos[A + 2]) * (pos[C] - pos[A]) - (pos[B] - pos[A]) * (pos[C + 2] - pos[A + 2]);
+            if (ny < 0) for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+        geo.setAttribute('aBand', new THREE.Float32BufferAttribute(band, 3));
+        geo.setAttribute('aAxis', new THREE.Float32BufferAttribute(axis, 2));
+        geo.setAttribute('aState', new THREE.BufferAttribute(new Float32Array((pos.length / 3) * 2).fill(1), 2));
+        geo.setIndex(idx); geo.computeVertexNormals();
+        const mesh = new THREE.Mesh(geo, pisteMat);
+        mesh.receiveShadow = true; mesh.renderOrder = 1;
+        scene.add(mesh);
+        const rec = { geo, grid, gIdx, mesh, groom: new Float32Array(Math.max(4, mid.length * 2)).fill(1), hidden: new Set() };
+        // Band auf verändertes Gelände nachsetzen (Gebäude ebnen ein, Funpark und Halfpipe graben
+        // sich in die Piste). Über einer modellierten Anlage würde das flache Band die Form zudecken –
+        // dort wird es dauerhaft unter das Gelände gelegt (`hidden`), auch bei späterem Nachsetzen.
+        rec.reseat = (cgx, cgy, rad, hideFn = null) => {
+            const pa = geo.attributes.position;
+            let touched = false;
+            for (let i = 0, gi = 0; i < pa.count; i++, gi += 2) {
+                const gx = grid[gi], gy = grid[gi + 1];
+                if (Math.hypot(gx - cgx, gy - cgy) > rad) continue;
+                if (hideFn && hideFn(gx, gy)) rec.hidden.add(i);
+                pa.setY(i, rec.hidden.has(i) ? yAtSmooth(gx, gy) - 8 : yAtSmooth(gx, gy) + BAND_LIFT);   // −8: sicher unter der 3-m-Mulde
+                touched = true;
+            }
+            if (touched) { pa.needsUpdate = true; geo.computeVertexNormals(); }
+        };
+        return rec;
+    };
+    /** Schwierigkeit einer Strecke aus ihrem Durchschnittsgefälle (wie im 2D-Spiel). */
+    const pisteDifficulty = (pts) => {
+        let sumRun = 0, sumDrop = 0;
+        for (let k = 0; k < pts.length - 1; k++) {
+            sumDrop += Math.abs((yAtSmooth(pts[k].gx, pts[k].gy) - yAtSmooth(pts[k + 1].gx, pts[k + 1].gy)) / hScale);
+            sumRun += Math.hypot(pts[k].gx - pts[k + 1].gx, pts[k].gy - pts[k + 1].gy);
+        }
+        const grad = (sumDrop / (sumRun || 1)) * 10 / 1.5;
+        return grad >= 55 ? 'black' : grad >= 35 ? 'red' : 'blue';
+    };
     // Initiale Abfahrt = Piste 1 (läuft durchs selbe System wie gebaute Pisten)
     if (routePts.length > 1) {
         pisteNo = 1;
@@ -6727,6 +6809,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         }
         pos.needsUpdate = true;
         syncOuter(gx0, gy0, gx1, gy1);                       // das äußere Gebiet kennt die neue Höhe ebenfalls
+        // Pistenbänder in Reichweite liegen sonst über oder unter dem neuen Boden
+        for (const bed of pisteBeds) if (bed.reseat) bed.reseat(cgx, cgy, outer + 1);
         // Bäume im veränderten Bereich mitziehen — sonst schweben sie.
         if (forest?.userData?.reseat) forest.userData.reseat(cgx, cgy, outer + 2);
         if (glacier?.userData?.reseat) glacier.userData.reseat(cgx, cgy, outer + 2);
@@ -7263,32 +7347,20 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     }
     function repaintPisteBeds() {
         for (const bed of pisteBeds) {
-            // Die Startabfahrt hat KEIN Band-Mesh — dort gibt es nur die
-            // Verschleiß-Geometrie weiter unten.
-            const ca = bed.geo ? bed.geo.attributes.color : null;
-            if (ca) {
-            const arr = ca.array, grid = bed.grid;
-            for (let i = 0, gi = 0; i < arr.length; i += 3, gi += 2) {
-                const gx = Math.max(0, Math.min(gridSize - 1, Math.round(grid[gi])));
-                const gy = Math.max(0, Math.min(gridSize - 1, Math.round(grid[gi + 1])));
-                const cov = smooth01(snowCoverAt(gy * gridSize + gx));
-                // Lokaler Pistenzustand: frisch gewalzt strahlt, verspurt wird
-                // stumpf und leicht gräulich — direkt hinter der Raupe sieht
-                // der Abschnitt deshalb sofort wieder gut aus.
-                const q = bed.groom ? bed.groom[gi >> 1] : 1;
-                // DEUTLICH sichtbarer Verschleiß: frisch gewalzt = strahlend
-                // weiß, verspurt = blaugrau schattiert (wie zerfahrener Schnee
-                // am Nachmittag). Hinter der Walze springt der Abschnitt
-                // sichtbar zurück auf Weiß.
-                const wr = 0.60 + 0.40 * q;                 // Rot fällt am stärksten
-                const wg = 0.65 + 0.35 * q;
-                const wb = 0.76 + 0.24 * q;                 // Blau bleibt -> kühler Schatten
-                // ausgeapert: fahles Wintergras wie die Wiese ringsum
-                arr[i]     = (0.40 + (1 - 0.40) * cov) * wr;
-                arr[i + 1] = (0.42 + (1 - 0.42) * cov) * wg;
-                arr[i + 2] = (0.27 + (1 - 0.27) * cov) * wb;
-            }
-            ca.needsUpdate = true;
+            // Zustand je Eckpunkt ans Band geben: liegt dort Schnee, und wie frisch ist der
+            // Abschnitt gewalzt? Das Material macht daraus Raupenbahnen und Rillen (frisch),
+            // graublaue Fahrspuren (verspurt) oder blendet das Band aus (ausgeapert). Direkt
+            // hinter der Raupe springt der Abschnitt deshalb sichtbar auf „frisch" zurück.
+            const st = bed.geo ? bed.geo.attributes.aState : null;
+            if (st) {
+                const arr = st.array, grid = bed.grid, gi2 = bed.gIdx, gr = bed.groom, last = gr.length - 1;
+                for (let v = 0, gi = 0; v < gi2.length; v++, gi += 2) {
+                    const gx = Math.max(0, Math.min(gridSize - 1, Math.round(grid[gi])));
+                    const gy = Math.max(0, Math.min(gridSize - 1, Math.round(grid[gi + 1])));
+                    arr[v * 2] = smooth01(snowCoverAt(gy * gridSize + gx));
+                    arr[v * 2 + 1] = gr[Math.min(last, gi2[v])];
+                }
+                st.needsUpdate = true;
             }
             // Buckel/Dreck: wachsen mit dem Verschleiß, verschwinden hinter
             // der Walze (groom springt auf 1 -> Skalierung auf 0).
@@ -7323,14 +7395,17 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const _fxM = new THREE.Matrix4(), _fxQ = new THREE.Quaternion();
     const _fxV = new THREE.Vector3(), _fxS = new THREE.Vector3();
     const _fxUp = new THREE.Vector3(0, 1, 0);
-    // Auch die STARTABFAHRT verschleißt: sie bekommt ein eigenes Zustands-
-    // Array samt Haufen/Dreck — ohne das sah die meistbefahrene Piste des
-    // Spiels immer gleich aus, egal wie viele Gäste durch waren.
+    // Auch die STARTABFAHRT ist eine präparierte Piste: sie bekommt dasselbe Band wie jede
+    // gebaute (Zustand je Abschnitt, Raupenbahnen, Farbe der Schwierigkeit) samt Haufen und
+    // Dreck. Früher hatte sie gar kein Band und sah immer gleich aus, egal wie viele Gäste
+    // durch waren.
     for (const rt of guestRoutes) {
         if (rt.kind !== 'piste' || !rt.path || rt.bed) continue;
-        const bedRec = { geo: null, grid: null,
-            groom: new Float32Array(Math.max(4, rt.path.length)).fill(1) };
-        attachWearFx(bedRec, rt.path, 3.2);
+        const w = rt.snowW || PISTE_WIDTHS.wide;
+        if (!rt.diff) rt.diff = pisteDifficulty(rt.path);
+        const bedRec = buildPisteBand(rt.path, w, PISTE_RGB[rt.diff] || PISTE_RGB.blue);
+        attachWearFx(bedRec, rt.path, w);
+        bedRec.route = rt;
         rt.bed = bedRec;
         pisteBeds.push(bedRec);
     }
@@ -7757,105 +7832,21 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
 
         // Breite je nach gewählter Variante (Flutlicht = immer mittel)
         const snowW = PISTE_WIDTHS[pisteLit ? 'medium' : pisteWidth] || PISTE_WIDTHS.medium;
-        const tintW = snowW * 0.73;   // farbige Markierung schmaler als das Schneebett
         // Durchschnittsgefälle der GESAMTEN Piste bestimmt die Schwierigkeit (wie im 2D)
-        let sumRun = 0, sumDrop = 0;
-        for (let s2 = 0; s2 < pts.length - 1; s2++) {
-            const a2 = pts[s2], b2 = pts[s2 + 1];
-            sumDrop += Math.abs((yAtSmooth(a2.gx, a2.gy) - yAtSmooth(b2.gx, b2.gy)) / hScale);
-            sumRun += Math.hypot(a2.gx - b2.gx, a2.gy - b2.gy);
-        }
-        const avgGrad = (sumDrop / (sumRun || 1)) * 10 / 1.5;
-        const avgDiff = avgGrad >= 55 ? 'black' : avgGrad >= 35 ? 'red' : 'blue';
-        const snowPos = [], snowIdx = [], bedGrid = []; let sv = 0;
-        const tintPos = [], tintCol = [], tintIdx = []; let tv = 0;
+        const avgDiff = pisteDifficulty(pts);
         const diffLen = { blue: 0, red: 0, black: 0 }; let totalKm = 0;   // für Pisteninfo
         for (let seg = 0; seg < pts.length - 1; seg++) {
-            const a = pts[seg], b = pts[seg + 1];
-            const diff = avgDiff;                      // gesamte Piste hat EINE Schwierigkeit
-            const c = PISTE_RGB[diff];
-            const segDist = Math.hypot(b.gx - a.gx, b.gy - a.gy) || 1;
-            piste[diff] += segDist * 0.02; piste.total += segDist * 0.02;
-            diffLen[diff] += segDist; totalKm += segDist * 0.02;
-            const sub = Math.max(1, Math.round(segDist));
-            const dx = b.gx - a.gx, dy = b.gy - a.gy, len = Math.hypot(dx, dy) || 1;
-            const px = -dy / len, py = dx / len;
-            for (let k = 0; k <= sub; k++) {
-                const t = k / sub, cx = a.gx + dx * t, cy = a.gy + dy * t;
-                // Schneebett (deckend, verdeckt gerodeten Waldboden)
-                const sl = worldPosSmooth(cx + px * snowW, cy + py * snowW);
-                const sr = worldPosSmooth(cx - px * snowW, cy - py * snowW);
-                snowPos.push(sl.x, sl.y + 0.05, sl.z, sr.x, sr.y + 0.05, sr.z);
-                // Gitterkoordinaten je Stützpunkt merken -> Schneezustand abfragbar
-                bedGrid.push(cx + px * snowW, cy + py * snowW, cx - px * snowW, cy - py * snowW);
-                if (k > 0) { const bi = sv - 2; snowIdx.push(bi, bi + 1, bi + 2, bi + 1, bi + 3, bi + 2); }
-                sv += 2;
-                // farbige Schwierigkeitsmarkierung (schmaler, obenauf)
-                const tl = worldPosSmooth(cx + px * tintW, cy + py * tintW);
-                const tr = worldPosSmooth(cx - px * tintW, cy - py * tintW);
-                tintPos.push(tl.x, tl.y + 0.09, tl.z, tr.x, tr.y + 0.09, tr.z);
-                tintCol.push(c[0], c[1], c[2], c[0], c[1], c[2]);
-                if (k > 0) { const bi = tv - 2; tintIdx.push(bi, bi + 1, bi + 2, bi + 1, bi + 3, bi + 2); }
-                tv += 2;
-            }
+            const segDist = Math.hypot(pts[seg + 1].gx - pts[seg].gx, pts[seg + 1].gy - pts[seg].gy) || 1;
+            piste[avgDiff] += segDist * 0.02; piste.total += segDist * 0.02;
+            diffLen[avgDiff] += segDist; totalKm += segDist * 0.02;
         }
-        // 1. Schneebett. Die Vertexfarben folgen dem echten Schneezustand:
-        //    taut die Piste im Tal aus, wird das Band dort grün — sonst sähe
-        //    eine apere Piste weiß aus, obwohl man sie laufen muss.
-        const gs = new THREE.BufferGeometry();
-        gs.setAttribute('position', new THREE.Float32BufferAttribute(snowPos, 3));
-        const bedCol = new Float32Array((snowPos.length / 3) * 3).fill(1);
-        gs.setAttribute('color', new THREE.BufferAttribute(bedCol, 3));
-        gs.setIndex(snowIdx); gs.computeVertexNormals();
-        const ms = matchSnowLook(new THREE.MeshStandardMaterial({ color: 0xf2f6ff, roughness: 0.85, vertexColors: true }), snowU, 'snow-look-piste');
-        pisteSnowMats.push(ms);                        // Zustand färbt das Schneebett
-        const snowMesh = new THREE.Mesh(gs, ms); snowMesh.receiveShadow = true; scene.add(snowMesh);
-        // Zustand je Stützpunktpaar: 1 = frisch gewalzt, 0 = völlig verspurt.
-        // Dadurch verschleißt die Piste abschnittsweise und die Raupe kann
-        // gezielt einzelne Stücke wieder herrichten.
-        const nPairs = bedGrid.length / 2;
-        const bedRec = { geo: gs, grid: bedGrid, groom: new Float32Array(nPairs).fill(1) };
+        // Das Band: präparierter Schnee, Zustand je Abschnitt (1 = frisch gewalzt, 0 = völlig
+        // verspurt) – so verschleißt die Piste abschnittsweise und die Raupe richtet gezielt
+        // einzelne Stücke wieder her.
+        const bedRec = buildPisteBand(pts, snowW, PISTE_RGB[avgDiff]);
         pisteBeds.push(bedRec);
         bedRec.route = null;                            // wird gleich verknüpft
         attachWearFx(bedRec, pts, snowW);
-        // 2. Farbige Markierung (dezent, halbtransparent)
-        const g = new THREE.BufferGeometry();
-        g.setAttribute('position', new THREE.Float32BufferAttribute(tintPos, 3));
-        g.setAttribute('color', new THREE.Float32BufferAttribute(tintCol, 3));
-        g.setIndex(tintIdx); g.computeVertexNormals();
-        const m = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, opacity: 0.32, roughness: 0.7, depthWrite: false });
-        scene.add(new THREE.Mesh(g, m));
-        // Pistenbett auf verändertes Gelände nachsetzen (Funpark/Halfpipe
-        // graben sich später in die Piste ein): Schneeband und Markierung
-        // folgen den Kachelhöhen, die in `bedGrid` bzw. tintGrid stehen.
-        // Dauerhaft ausgeblendete Bandpunkte (über Anlagen): ein späteres
-        // reseat (z. B. für einen Kicker weiter unten) darf sie NICHT wieder
-        // hochholen — sonst liegt das Schneeband wieder über der Halfpipe.
-        bedRec.hidden = new Set();
-        bedRec.reseat = (cgx, cgy, rad, hideFn = null) => {
-            const pa = gs.attributes.position, ta = g.attributes.position;
-            for (let i = 0, gi = 0; i < pa.count; i++, gi += 2) {
-                const gx = bedGrid[gi], gy = bedGrid[gi + 1];
-                if (Math.hypot(gx - cgx, gy - cgy) > rad) continue;
-                // Im Bereich einer modellierten Anlage (Pipe-Mulde, Schanzen)
-                // würde das flache Band die Form zudecken — dort wird es unter
-                // das Gelände gelegt; der weiße Pistenboden selbst bleibt sichtbar.
-                if (hideFn && hideFn(gx, gy)) bedRec.hidden.add(i);
-                pa.setY(i, bedRec.hidden.has(i) ? yAtSmooth(gx, gy) - 8 : yAtSmooth(gx, gy) + 0.05);   // −8: sicher unter der 3-m-Mulde
-            }
-            // Markierung: gleiche Reihenfolge (links/rechts je Stützpunkt), auf
-            // 73 % der Breite — Höhe an ihrer eigenen Lage abgreifen
-            for (let i = 0, gi = 0; i < ta.count; i++, gi += 2) {
-                const gxo = bedGrid[gi], gyo = bedGrid[gi + 1];
-                // Achse = Mittel aus linkem und rechtem Bettpunkt des Paars
-                const pi = i - (i % 2), cx2 = (bedGrid[pi * 2] + bedGrid[pi * 2 + 2]) / 2, cy2 = (bedGrid[pi * 2 + 1] + bedGrid[pi * 2 + 3]) / 2;
-                const gx = cx2 + (gxo - cx2) * 0.73, gy = cy2 + (gyo - cy2) * 0.73;
-                if (Math.hypot(gx - cgx, gy - cgy) > rad) continue;
-                ta.setY(i, bedRec.hidden.has(i) ? yAtSmooth(gx, gy) - 8 : yAtSmooth(gx, gy) + 0.09);
-            }
-            pa.needsUpdate = true; ta.needsUpdate = true;
-            gs.computeVertexNormals(); g.computeVertexNormals();
-        };
         // Randstangen entlang der Piste — mit GLOBALEM Abstand über die ganze
         // Strecke. Vorher wurde pro Segment mindestens ein Paar gesetzt; seit
         // dem Kurvenrunden sind die Segmente viel kürzer und die Piste stand
