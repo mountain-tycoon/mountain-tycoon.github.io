@@ -22,9 +22,9 @@ läuft das Spiel ohne Anmeldung – so ist es beim Entwickeln mit `npm run dev`.
 ## Aktualisieren (nach Änderungen an `worker.js`)
 
 `cd webgl-3d/worker && npx wrangler deploy` – KV und Secrets bleiben erhalten. Die Seite fragt
-`/version` ab und zeigt auf dem Anmeldebildschirm einen Hinweis, solange ein zu alter Worker läuft
-(`SERVER_V` in `worker.js` und `src/auth/authClient.js` gemeinsam hochzählen, wenn sich die
-Schnittstelle ändert).
+`/version` ab (`SERVER_V` in `worker.js`). Was sie davon braucht, steht in `src/auth/authClient.js`:
+unter `SERVER_MIN` zeigt der Anmeldebildschirm einen Hinweis, unter `SERVER_SAVES` bleiben die
+Spielstände auf dem Gerät und gehen erst nach dem Aktualisieren des Workers zusätzlich ans Konto.
 
 ## Verwaltung
 

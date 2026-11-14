@@ -3,7 +3,7 @@
 // Der Stand liegt sofort auf dem Gerät (localStorage) und – wenn man angemeldet ist – zusätzlich am
 // Konto. So geht es auf jedem Gerät dort weiter, wo man aufgehört hat. Es gilt immer der jüngere Stand.
 // Was genau gespeichert wird, bestimmt die Szene (getSave / loadSave in webgl/Scene3D.js).
-import { api, authEnabled, getSession } from './auth/authClient';
+import { api, authEnabled, getSession, SERVER_SAVES } from './auth/authClient';
 
 const PREFIX = 'mt.save.';
 const MIN_UPLOAD_GAP = 90 * 1000;     // so oft höchstens ans Konto – schont das Schreibkontingent des Servers
@@ -43,9 +43,25 @@ export function localSaveIndex() {
 }
 
 // ---- am Konto --------------------------------------------------------------------------------
+/**
+ * Kann der Anmeldeserver Spielstände aufnehmen? Ein älterer Server kennt die Schnittstelle noch
+ * nicht – dann bleiben die Stände auf dem Gerät, ohne dass ständig vergeblich angefragt wird.
+ * Die Antwort gilt, bis die Seite neu geladen wird; ohne Netz wird später erneut gefragt.
+ */
+let cloudCheck = null;
+function cloudReady() {
+    if (!session()) return Promise.resolve(false);
+    if (!cloudCheck) {
+        cloudCheck = withTimeout(api.version(), 6000)
+            .then((j) => (j.v || 0) >= SERVER_SAVES)
+            .catch(() => { cloudCheck = null; return false; });
+    }
+    return cloudCheck;
+}
+
 /** Übersicht vom Konto: {levelId: {t, sum}} – leer ohne Anmeldung oder ohne Netz. */
 export async function remoteSaveIndex() {
-    if (!session()) return {};
+    if (!(await cloudReady())) return {};
     try { const r = await withTimeout(api.listSaves(), 6000); return (r && r.saves) || {}; } catch { return {}; }
 }
 
@@ -56,7 +72,7 @@ export async function remoteSaveIndex() {
 export async function loadBestSave(levelId) {
     let local = readLocalSave(levelId);
     const localEntry = readEntry(levelId);                     // kann auch ein Löschvermerk sein
-    if (!session()) return local;
+    if (!(await cloudReady())) return local;
     let remote = null;
     try { remote = await withTimeout(api.getSave(levelId), 6000); } catch { return local; }   // ohne Netz: der Stand vom Gerät
     if (remote && remote.deleted) {
@@ -74,12 +90,10 @@ export async function loadBestSave(levelId) {
 }
 
 function pushSave(levelId, save, keepalive = false) {
-    if (!session()) return Promise.resolve(false);
-    return api.putSave(levelId, save, keepalive).then((r) => !!(r && r.ok)).catch(() => false);
+    return cloudReady().then((ok) => (ok ? api.putSave(levelId, save, keepalive).then((r) => !!(r && r.ok)) : false)).catch(() => false);
 }
 function pushDeleted(levelId, t) {
-    if (!session()) return Promise.resolve(false);
-    return api.putSave(levelId, { deleted: true, t }).then(() => true).catch(() => false);
+    return cloudReady().then((ok) => (ok ? api.putSave(levelId, { deleted: true, t }).then(() => true) : false)).catch(() => false);
 }
 
 /** „Neu beginnen": den Stand eines Levels überall verwerfen. */

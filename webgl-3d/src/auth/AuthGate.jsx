@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-    api, storeSession, lastEmail, SERVER_V,
+    api, storeSession, lastEmail, SERVER_MIN,
     getPendingRegistration, setPendingRegistration
 } from './authClient';
 import { buildLabel } from '../buildInfo';
@@ -48,7 +48,7 @@ const AuthGate = ({ onSignedIn }) => {
     useEffect(() => {
         let alive = true;
         api.version()
-            .then((j) => { if (alive && (j.v || 0) < SERVER_V) setServerNote(`Anmeldeserver veraltet (Version ${j.v || 0}, die Seite braucht ${SERVER_V}) – bitte worker/worker.js neu deployen`); })
+            .then((j) => { if (alive && (j.v || 0) < SERVER_MIN) setServerNote(`Anmeldeserver veraltet (Version ${j.v || 0}, die Seite braucht ${SERVER_MIN}) – bitte worker/worker.js neu deployen`); })
             .catch(() => { if (alive) setServerNote('Der Anmeldeserver ist gerade nicht erreichbar.'); });
         return () => { alive = false; };
     }, []);

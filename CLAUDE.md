@@ -82,8 +82,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - Der **Anmeldeserver** wird nicht automatisch veröffentlicht. Nach Änderungen an `webgl-3d/worker/worker.js`:
   `cd webgl-3d/worker && npx wrangler deploy` – das geht nur auf dem Mac des Nutzers, dort ist Wrangler angemeldet.
   In einer Cloud-Sitzung: Änderung committen und dem Nutzer ausdrücklich sagen, dass der Worker neu deployt
-  werden muss. Ändert sich die Schnittstelle, `SERVER_V` in `worker/worker.js` und `src/auth/authClient.js`
-  gemeinsam erhöhen – die Seite warnt dann, solange der alte Worker läuft.
+  werden muss. Ändert sich die Schnittstelle, `SERVER_V` in `worker/worker.js` erhöhen. In
+  `src/auth/authClient.js` steht, was die Seite braucht: `SERVER_MIN` (darunter warnt der Anmeldebildschirm)
+  und `SERVER_SAVES` (darunter bleiben Spielstände nur auf dem Gerät). Neue Fähigkeiten so einbauen, dass die
+  Seite auch mit dem älteren Worker läuft – dann ist die Reihenfolge der beiden Veröffentlichungen egal.
 
 ## Regeln
 - Das Repo ist öffentlich: **keine Geheimnisse** (Passwörter, Tokens, `.dev.vars`) und **keine persönlichen

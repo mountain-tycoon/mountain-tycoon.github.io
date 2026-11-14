@@ -3,8 +3,15 @@
 // ohne Anmeldung.
 import { BUILD } from '../buildInfo';
 
-/** Schnittstellen-Stand, den diese Seite vom Server braucht (SERVER_V in worker/worker.js). */
-export const SERVER_V = 2;
+/**
+ * Schnittstellen-Stand des Servers (SERVER_V in worker/worker.js):
+ *   SERVER_MIN    ab hier läuft die Seite überhaupt (Registrierung, Anmeldung, Kampagnen-Fortschritt)
+ *   SERVER_SAVES  ab hier liegen Spielstände zusätzlich am Konto – mit einem älteren Server bleiben
+ *                 sie auf dem Gerät, alles andere funktioniert wie gewohnt
+ * So kann die Seite vor dem Server veröffentlicht werden und umgekehrt.
+ */
+export const SERVER_MIN = 1;
+export const SERVER_SAVES = 2;
 
 const RAW = String(import.meta.env.VITE_AUTH_ENDPOINT || '').trim().replace(/\/+$/, '');
 const IS_FILE = typeof location !== 'undefined' && location.protocol === 'file:';
