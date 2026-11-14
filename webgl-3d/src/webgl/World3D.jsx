@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { generateWorldData, upsampleWorld } from '../engine/utils';
+import { buildLevelWorld } from '../engine/utils';
 import { createScene3D } from './Scene3D.js';
 import { evaluateObjective, objectiveLabel, formatObjectiveValue, markLevelCompleted, CAMPAIGN_LEVELS, MASSIFS } from '../constants/campaign';
 import { canSave, createAutosave } from '../savegames';
@@ -642,16 +642,16 @@ const World3D = ({ level, onExit, initialSave = null }) => {
 
     useEffect(() => {
         if (!canvasRef.current) return;
-        // ===== 4x SPIELFLÄCHE =====
-        // Die Welt wird in der Basisgröße des Levels erzeugt und dann je Seite
-        // verdoppelt (Höhen mitskaliert, Hangneigung je Kachel bleibt gleich).
-        const baseSize = level?.gridSize || 192;
-        const AREA_F = 1.75;                       // ≈ 3x Fläche (25 % weniger als 4x)
-        const gridSize = Math.round(baseSize * AREA_F);
-        const world = upsampleWorld(generateWorldData(baseSize, { ...(level?.terrain || {}), theme: level?.theme,
-            // Gipfelgerüst nach dem echten Vorbild des Gebiets
-            massif: MASSIFS[level?.id] }), baseSize, AREA_F, { seed: level?.terrain?.seed || 7 });
+        // ===== SPIELFELD UND UMLAND =====
+        // Erzeugt wird ein größeres Stück Gebirge (Gipfelgerüst nach dem echten Vorbild des
+        // Gebiets); das Spielfeld ist dessen Mitte, je Seite um den Faktor 1,75 hochgerechnet.
+        // Das Umland drumherum (world.outer, world.far) zeichnet die Szene als Fortsetzung.
+        const t0 = performance.now();
+        const world = buildLevelWorld(level, MASSIFS[level?.id]);
+        const gridSize = world.gridSize;
+        const t1 = performance.now();
         const api = createScene3D(canvasRef.current, world, gridSize, level?.theme || {}, level || {});
+        if (import.meta.env.DEV) console.info(`[Welt] Landschaft ${Math.round(t1 - t0)} ms, Szene ${Math.round(performance.now() - t1)} ms`);
         apiRef.current = api;
         setMoney(api.getMoney());
         api.setOnMoney((m) => setMoney(m));

@@ -6,6 +6,7 @@
 // ============================================================
 import * as THREE from 'three';
 import { waterBedColor } from './Water3D.js';
+import { makeSnowMaterial, groundColor, groundNoise, groundPalette } from './SnowSurface.js';
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const mix = (a, b, t) => [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
@@ -29,49 +30,16 @@ export const FOREST_MIX_TABLE = {
     };
 
 /**
- * SCHNEELAGE — EINE Formel für Spielfeld UND Umland.
- * h = Höhe in Heightmap-Einheiten, limit = Schneegrenze (dito), gx/gy =
- * Rasterlage für das fleckige Rauschen. Liefert:
- *   nat  0..1  Anteil Naturschnee (0 = aper, 1 = geschlossen)
- *   gf   0..1  wie satt das Grün darunter wäre (tiefer = satter)
- * Beide Seiten rufen genau diese Funktion — damit taut alles identisch.
+ * Geländenetz des Spielfelds. Die Eckfarbe ist der UNTERGRUND (Wiese, Waldboden, Fels …); ob
+ * und wie Schnee darauf liegt, entscheidet das Schnee-Material je Bildpunkt (SnowSurface.js).
+ *   aSnow  liegender Neu-/Kunstschnee je Eckpunkt (die Szene schreibt ihn laufend fort)
+ *   aMark  x: Anlagen-Einfärbung · y: Kronendach (1 = Wald)
  */
-export function snowLayer(h, limit, gx, gy) {
-    const band = Math.max(1, limit * 0.30);
-    const fadeSpan = Math.max(1, limit * 0.60);
-    const patch = Math.sin(gx * 0.55 + Math.cos(gy * 0.31) * 2.3) * 0.5
-                + Math.sin(gy * 0.47 - Math.sin(gx * 0.23) * 1.9) * 0.34
-                + Math.sin((gx + gy) * 1.21) * 0.16;
-    const jitter = patch * band * 0.55;
-    const x = (h - (limit - band) + jitter) / band;
-    const t = x < 0 ? 0 : x > 1 ? 1 : x;
-    const nat = t * t * (3 - 2 * t);
-    const gf = Math.max(0, Math.min(1, (limit - h) / fadeSpan)) * 0.85;
-    return { nat, gf };
-}
-/** Bodenfarbe aus Grundfarbe + Schneelage — ebenfalls geteilt. */
-export function snowShade(base, h, limit, gx, gy) {
-    const { nat, gf } = snowLayer(h, limit, gx, gy);
-    const gr = base[0] + (0.30 - base[0]) * gf;
-    const gg = base[1] + (0.42 - base[1]) * gf;
-    const gb = base[2] + (0.22 - base[2]) * gf;
-    return [gr + (base[0] - gr) * nat, gg + (base[1] - gg) * nat, gb + (base[2] - gb) * nat, nat];
-}
-/** Grundfarbe von offenem Boden wie das Spielfeld (colorFor Typ 0). */
-export function openGroundColor(alt, snowWarmth = 0) {
-    const c = [0.92 + snowWarmth * 0.03, 0.94, 0.98 - snowWarmth * 0.04];
-    const k = Math.max(0, Math.min(1, alt)) * 0.35;
-    return [c[0] + (0.80 - c[0]) * k, c[1] + (0.86 - c[1]) * k, c[2] + (0.96 - c[2]) * k];
-}
-
 export function buildTerrainMesh(world, gridSize, theme = {}, opts = {}) {
     const { heightmap, landcover } = world;
     const hScale = opts.hScale ?? 0.09;
     const tile = opts.tileSize ?? 1;
-
-    const grassLight = (theme.grassLight || [140,176,96]).map(c => c/255);
-    const grassDark  = (theme.grassDark  || [96,132,70]).map(c => c/255);
-    const snowWarmth = theme.snowWarmth || 0;
+    const half = ((gridSize - 1) * tile) / 2;
 
     let minZ = Infinity, maxZ = -Infinity;
     for (let i = 0; i < heightmap.length; i++) {
@@ -86,87 +54,56 @@ export function buildTerrainMesh(world, gridSize, theme = {}, opts = {}) {
 
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
-
-    const colorFor = (type, alt) => {
-        if (type === 2) return [0.12,0.32,0.55];
-        // Gletscher: klarer, kühler Eiston. Unten kompaktes Blaueis, nach oben
-        // hin heller — die Facettierung kommt weiter unten als Rauschen dazu.
-        // GLETSCHER: kompaktes Blaueis. Unten dichtes Türkisblau (alte, stark
-        // verpresste Eisschichten), nach oben hin heller in Richtung Firn —
-        // aber immer mit deutlichem Blauanteil, nie grau.
-        if (type === 8) return mix([0.42,0.68,0.86],[0.76,0.90,0.99], clamp01(alt));
-        // FELS: leicht warmer Grauton mit bräunlichem Einschlag statt
-        // neutralem Beton — wirkt deutlich natürlicher.
-        if (type === 3) return mix([0.40,0.37,0.35],[0.56,0.54,0.53], clamp01(alt));
-        if (type === 4) return [0.22,0.24,0.28];
-        if (type === 1 || type === 6) return [0.05,0.28,0.18];
-        if (type === 5) return [0.20,0.40,0.16];
-        if (type === 7) return mix(grassDark, grassLight, 0.5);
-        let c = [0.92 + snowWarmth*0.03, 0.94, 0.98 - snowWarmth*0.04];
-        return mix(c, [0.80,0.86,0.96], clamp01(alt)*0.35);
+    const aSnow = new Float32Array(pos.count);
+    const aMark = new Float32Array(pos.count * 2);
+    const pal = groundPalette(theme, opts.rockCol || [0.42, 0.44, 0.48]);
+    /** Untergrundfarbe eines Rasterpunkts (auch zum Nachfärben, z. B. nach dem Roden). */
+    const groundAt = (idx, type = landcover[idx]) => {
+        const gx = idx % gridSize, gy = (idx - gx) / gridSize;
+        if (type === 2 && world.waterDepth) return waterBedColor(world.waterDepth[idx]);   // Bett: das Blau kommt von der Wasserfläche
+        const alt = ((heightmap[idx] || 0) - minZ) / range;
+        return groundColor(type, alt, groundNoise(gx * tile - half, gy * tile - half), pal);
     };
-
-    const rockCol = opts.rockCol || [0.42, 0.44, 0.48];
     for (let i = 0; i < pos.count; i++) {
-        const gx = i % gridSize, gy = Math.floor(i / gridSize);
-        const idx = gy * gridSize + gx;
-        const z = heightmap[idx] || 0;
-        pos.setY(i, z * hScale);
-        const alt = (z - minZ) / range;
-        // Unter Wasser liegt das Bett (hell am Ufer, dunkel in der Tiefe) – das Blau kommt von der Wasserfläche
-        let c = (landcover[idx] === 2 && world.waterDepth) ? waterBedColor(world.waterDepth[idx]) : colorFor(landcover[idx], alt);
-
-        // Hang-Gradient -> Felswand (wie im 2D-Renderer): steile Flächen
-        // werden grau, unabhängig vom Landcover.
-        const hl = gx > 0 ? heightmap[idx-1] : z, hr = gx < gridSize-1 ? heightmap[idx+1] : z;
-        const hu = gy > 0 ? heightmap[idx-gridSize] : z, hd = gy < gridSize-1 ? heightmap[idx+gridSize] : z;
-        const slope = Math.max(Math.abs(z-hl), Math.abs(z-hr), Math.abs(z-hu), Math.abs(z-hd));
-        // Wasser wird nie zu Fels. Gletscher liegen fast immer steil — ohne
-        // Ausnahme würde der Fels-Gradient den Eiston komplett grau übermalen,
-        // deshalb greift er dort nur stark abgeschwächt und erst später.
-        const isIce = landcover[idx] === 8;
-        const t = landcover[idx] === 2 ? 0
-            : isIce ? clamp01((slope - 9) / 9) * 0.35
-            : clamp01((slope - 4) / 5);        // ab slope 4 Fels, ab 9 volle Felswand
-        if (t > 0) {
-            // Gebänderte Felswand: die Schichtdicke folgt der Höhe, dadurch
-            // entstehen sichtbare Gesteinsbänke statt einer glatten Fläche.
-            const band = Math.sin(z * 0.55 + gx * 0.05) * 0.5 + 0.5;
-            const rc = mix(rockCol, [rockCol[0] * 1.22, rockCol[1] * 1.18, rockCol[2] * 1.12], band * 0.55);
-            c = mix(c, rc, t);
-        }
-
-        const grain = (((idx * 374761393) >>> 24 & 15) - 7.5) / 255;
-        let fr = 0, fg = 0, fb = 0;
-        if (landcover[idx] === 8) {
-            // FEINGRANULARE EISSTRUKTUR: zwei überlagerte Rauschebenen.
-            // Grob = einzelne Eisplatten, fein = Körnung darauf. Das Rauschen
-            // wirkt STÄRKER auf Rot als auf Blau, wodurch die hellen Stellen
-            // firnweiß und die dunklen tiefblau werden — genau das Wechselspiel,
-            // das einen Gletscher ausmacht.
-            const bx = gx >> 1, by = gy >> 1;
-            const coarse = ((((bx * 73856093) ^ (by * 19349663)) >>> 22) & 31) / 31 - 0.5;
-            const fine = ((((gx * 374761393) ^ (gy * 668265263)) >>> 24) & 15) / 15 - 0.5;
-            const n = coarse * 0.72 + fine * 0.28;
-            fr = n * 0.135; fg = n * 0.085; fb = n * 0.030;
-            // Spaltenzonen: schmale, dunkelblaue Bänder wie Gletscherspalten
-            const crev = Math.sin(gx * 0.42 + gy * 0.17) * Math.sin(gy * 0.31 - gx * 0.09);
-            if (crev > 0.82) { fr -= 0.14; fg -= 0.07; fb += 0.02; }
-        }
-        colors[i*3]   = clamp01(c[0] + grain + fr);
-        colors[i*3+1] = clamp01(c[1] + grain + fg);
-        colors[i*3+2] = clamp01(c[2] + grain + fb);
+        pos.setY(i, (heightmap[i] || 0) * hScale);
+        const t = landcover[i];
+        const c = groundAt(i, t);
+        colors[i*3] = c[0]; colors[i*3+1] = c[1]; colors[i*3+2] = c[2];
+        aMark[i*2+1] = (t === 1 || t === 5 || t === 6) ? 1 : 0;
     }
 
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('aSnow', new THREE.BufferAttribute(aSnow, 1));
+    geo.setAttribute('aMark', new THREE.BufferAttribute(aMark, 2));
     geo.computeVertexNormals();
 
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0.02 });
+    const mat = opts.snowUniforms
+        ? makeSnowMaterial(opts.snowUniforms)
+        : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0.02 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.receiveShadow = true;
     mesh.castShadow = true;
-    mesh.userData = { minZ, maxZ, hScale, gridSize, tile };
+    mesh.userData = { minZ, maxZ, hScale, gridSize, tile, groundAt };
     return mesh;
+}
+
+/**
+ * Steht in dieser Waldzelle ein Baum? Etwa jede zweite – gewürfelt. (Früher entschied die
+ * Parität von gx und gy: ein Schachbrett, das als schnurgerade Baumreihen zu sehen war.)
+ */
+export function treeCell(gx, gy) {
+    let n = (Math.imul(gx, 374761393) + Math.imul(gy, 668265263)) | 0;
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) & 1) === 0;
+}
+/** Versatz eines Baums innerhalb seiner Zelle (−0.42..0.42), damit kein Raster entsteht. */
+export function treeJitter(gx, gy, out) {
+    let n = (Math.imul(gx, 2246822519) + Math.imul(gy, 3266489917) + 374761393) | 0;
+    n = Math.imul(n ^ (n >>> 15), 2246822519);
+    n ^= n >>> 13;
+    out[0] = ((n & 1023) / 1023 - 0.5) * 0.84;
+    out[1] = (((n >>> 10) & 1023) / 1023 - 0.5) * 0.84;
+    return out;
 }
 
 export function buildForest(world, gridSize, opts = {}) {
@@ -181,7 +118,9 @@ export function buildForest(world, gridSize, opts = {}) {
             const idx = gy*gridSize+gx;
             const t = landcover[idx];
             if (t !== 1 && t !== 5 && t !== 6) continue;
-            if (((gx*73856093) ^ (gy*19349663)) & 1) continue;
+            if (!treeCell(gx, gy)) continue;
+            // opts.filter: nur ein Teil des Rasters bekommt Bäume (Waldgürtel hinter dem Kartenrand)
+            if (opts.filter && !opts.filter(gx, gy)) continue;
             spots.push({ gx, gy, idx, winter: t === 6 });
         }
     }
@@ -201,7 +140,7 @@ export function buildForest(world, gridSize, opts = {}) {
     // Geometrie verschmolzen — die Instanzierung bleibt erhalten, aber die
     // Silhouette bekommt gestaffelte Astkränze, Stamm und Wipfel.
     const mergeGeos = (geos) => {
-        const parts = geos.map(g2 => g2.toNonIndexed());
+        const parts = geos.map(g2 => (g2.index ? g2.toNonIndexed() : g2));
         let vCount = 0;
         for (const g2 of parts) vCount += g2.attributes.position.count;
         const pos2 = new Float32Array(vCount * 3);
@@ -217,30 +156,54 @@ export function buildForest(world, gridSize, opts = {}) {
         out.setAttribute('normal', new THREE.BufferAttribute(norm2, 3));
         return out;
     };
-    const cone = (r, h, y, seg = 6) => { const c = new THREE.ConeGeometry(r, h, seg); c.translate(0, y, 0); return c; };
-    const stem = (r1, r2, h, y) => { const c = new THREE.CylinderGeometry(r1, r2, h, 5); c.translate(0, y, 0); return c; };
+    // SPARSAME GEOMETRIE: Auf einer Karte stehen Zehntausende Bäume – jedes Dreieck zählt
+    // zigtausendfach. Stämme sind oben und unten offen (die Enden sieht man nie), die Kränze
+    // haben eine Kante weniger, die Laubkronen kommen mit gröberen Kugeln aus. Zusammen mit den
+    // Hauben sind das rund 70 statt 200 Dreiecke je Fichte, ohne dass man es dem Wald ansieht.
+    /**
+     * Kegel aus genau den Dreiecken, die man sieht: Mantel = `seg` Dreiecke, dazu wahlweise der
+     * Boden. (Die three.js-Fassung legt je Mantelfeld ein zweites, zur Spitze hin entartetes
+     * Dreieck an – bei Zehntausenden Bäumen ein Drittel verschenkte Eckpunkte.)
+     */
+    const coneGeo = (r, h, seg, base = true) => {
+        const pos = [], nor = [];
+        const len = Math.hypot(r, h), ny = r / len, nr = h / len;
+        for (let i = 0; i < seg; i++) {
+            const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2, am = (a0 + a1) / 2;
+            const x0 = Math.sin(a0) * r, z0 = Math.cos(a0) * r, x1 = Math.sin(a1) * r, z1 = Math.cos(a1) * r;
+            pos.push(0, h / 2, 0, x0, -h / 2, z0, x1, -h / 2, z1);
+            nor.push(Math.sin(am) * nr, ny, Math.cos(am) * nr, Math.sin(a0) * nr, ny, Math.cos(a0) * nr, Math.sin(a1) * nr, ny, Math.cos(a1) * nr);
+            if (base) { pos.push(0, -h / 2, 0, x1, -h / 2, z1, x0, -h / 2, z0); nor.push(0, -1, 0, 0, -1, 0, 0, -1, 0); }
+        }
+        const g2 = new THREE.BufferGeometry();
+        g2.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        g2.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+        return g2;
+    };
+    const cone = (r, h, y, seg = 6) => { const c = coneGeo(r, h, seg); c.translate(0, y, 0); return c; };
+    const stem = (r1, r2, h, y) => { const c = new THREE.CylinderGeometry(r1, r2, h, 4, 1, true); c.translate(0, y, 0); return c; };
     // Fichte: drei gestaffelte Kränze + Spitze + kurzer Stammansatz
     const spruceGeo = mergeGeos([
         stem(0.07, 0.1, 0.5, 0.25),
-        cone(0.62, 1.0, 0.85, 7),
-        cone(0.5, 0.95, 1.45, 7),
-        cone(0.36, 0.85, 2.0, 6),
-        cone(0.18, 0.55, 2.55, 5)
+        cone(0.62, 1.0, 0.85, 6),
+        cone(0.5, 0.95, 1.45, 6),
+        cone(0.36, 0.85, 2.0, 5),
+        cone(0.18, 0.55, 2.55, 4)
     ]);
     // Tanne: breiter, zwei Etagen + Stammansatz
     const firGeo = mergeGeos([
         stem(0.08, 0.12, 0.45, 0.22),
-        cone(0.95, 1.1, 0.85, 8),
-        cone(0.66, 0.95, 1.5, 7)
+        cone(0.95, 1.1, 0.85, 7),
+        cone(0.66, 0.95, 1.5, 6)
     ]);
     // Laubbaum: unregelmäßige Krone aus drei versetzten Kugeln
-    const blob = (r, x, y, z) => { const b = new THREE.SphereGeometry(r, 7, 6); b.scale(1, 0.85, 1); b.translate(x, y, z); return b; };
+    const blob = (r, x, y, z, ws = 6, hs = 4) => { const b = new THREE.SphereGeometry(r, ws, hs); b.scale(1, 0.85, 1); b.translate(x, y, z); return b; };
     const broadGeo = mergeGeos([
         blob(0.62, 0, 1.15, 0),
-        blob(0.42, 0.34, 1.42, 0.12),
-        blob(0.38, -0.3, 1.35, -0.14)
+        blob(0.42, 0.34, 1.42, 0.12, 5, 3),
+        blob(0.38, -0.3, 1.35, -0.14, 5, 3)
     ]);
-    const trunkGeo  = new THREE.CylinderGeometry(0.08, 0.11, 0.7, 5); trunkGeo.translate(0, 0.35, 0);
+    const trunkGeo  = new THREE.CylinderGeometry(0.08, 0.11, 0.7, 4, 1, true); trunkGeo.translate(0, 0.35, 0);
 
     // Damit die Bäume in Schatten und Dämmerung nicht ins Schwarze absaufen,
     // bekommen sie ein schwaches Eigenleuchten. WICHTIG: das muss ein GRÜNTON
@@ -285,10 +248,19 @@ export function buildForest(world, gridSize, opts = {}) {
 
     const dummy = new THREE.Object3D();
     const col = new THREE.Color();
+    /** Standort eines Baums: in seiner Zelle versetzt, auf der dort gezeichneten Geländehöhe. */
+    const _j = [0, 0], _p = [0, 0, 0];
+    const treePos = (gx, gy) => {
+        treeJitter(gx, gy, _j);
+        const fx = Math.max(0, Math.min(gridSize - 1.001, gx + _j[0])), fy = Math.max(0, Math.min(gridSize - 1.001, gy + _j[1]));
+        const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0, i = y0 * gridSize + x0;
+        const h = (heightmap[i] * (1 - tx) + heightmap[i + 1] * tx) * (1 - ty) + (heightmap[i + gridSize] * (1 - tx) + heightmap[i + gridSize + 1] * tx) * ty;
+        _p[0] = fx * tile - half; _p[1] = (h || 0) * hScale; _p[2] = fy * tile - half;
+        return _p;
+    };
     const place = (list, target, trunkTarget) => {
         list.forEach((s, i) => {
-            const wx = s.gx * tile - half, wz = s.gy * tile - half;
-            const wy = (heightmap[s.idx] || 0) * hScale;
+            const tp = treePos(s.gx, s.gy), wx = tp[0], wy = tp[1], wz = tp[2];
             const scl = 0.65 + ((s.idx * 2654435761 >>> 28) & 7) / 9;
             dummy.position.set(wx, wy, wz);
             // Kahle Bäume: schmale Krone, dafür etwas höher — wirkt wie Geäst
@@ -332,21 +304,23 @@ export function buildForest(world, gridSize, opts = {}) {
     // Je Baumform eine PASSENDE Haube — vorher lag auf allen Bäumen die
     // Fichten-Haube, und über Tannen und Laubbäumen schwebten die oberen
     // Kegel frei in der Luft.
-    const capCone = (r, h, y, seg = 7) => { const c2 = new THREE.ConeGeometry(r, h, seg); c2.translate(0, y, 0); return c2; };
+    // Die Hauben sind dünne Schalen ÜBER den Kränzen – ihre Unterseite steckt im Baum und
+    // braucht keine Fläche (offene Kegel); das Kügelchen auf der Spitze ist ein kleiner Kegel.
+    const capCone = (r, h, y, seg = 6) => { const c2 = coneGeo(r, h, seg, false); c2.translate(0, y, 0); return c2; };
     const capGeoSpruce = mergeGeos([
         capCone(0.66, 0.34, 1.02),
         capCone(0.52, 0.3, 1.62),
-        capCone(0.36, 0.28, 2.16, 6),
-        (() => { const c2 = new THREE.SphereGeometry(0.16, 6, 5); c2.translate(0, 2.62, 0); return c2; })()
+        capCone(0.36, 0.28, 2.16, 5),
+        capCone(0.17, 0.3, 2.66, 4)
     ]);
     const capGeoFir = mergeGeos([
-        capCone(0.98, 0.34, 1.42, 8),
+        capCone(0.98, 0.34, 1.42, 7),
         capCone(0.68, 0.3, 1.98)
     ]);
     // Laubbaum: kleinere Haube nur auf dem Scheitel – darunter bleibt ein grüner Rand
     // (vorher saß sie wie ein Helm über der ganzen Krone).
     const capGeoBroad = (() => {
-        const c2 = new THREE.SphereGeometry(0.5, 7, 5);
+        const c2 = new THREE.SphereGeometry(0.5, 6, 3, 0, Math.PI * 2, 0, Math.PI * 0.55);   // nur die obere Kappe
         c2.scale(1, 0.4, 1); c2.translate(0, 1.66, 0); return c2;
     })();
     // Weiche Hauben: kaum Eigenleuchten. Mit 0.35 lagen sie in der Sonne weit über
@@ -369,8 +343,7 @@ export function buildForest(world, gridSize, opts = {}) {
         const si = snowInsts[mi];
         list.forEach((s3, li) => {
             s3.snowMesh = mi; s3.snowIdx = li;
-            const wx = s3.gx * tile - half, wz = s3.gy * tile - half;
-            const wy = (heightmap[s3.idx] || 0) * hScale;
+            const tp = treePos(s3.gx, s3.gy), wx = tp[0], wy = tp[1], wz = tp[2];
             const scl = 0.65 + ((s3.idx * 2654435761 >>> 28) & 7) / 9;
             dummy.position.set(wx, wy, wz);
             const hidden = s3.bare;
@@ -401,8 +374,7 @@ export function buildForest(world, gridSize, opts = {}) {
             const dx = sp.gx - cgx, dy = sp.gy - cgy;
             if (dx * dx + dy * dy > r2) continue;
             const idx = sp.gy * gridSize + sp.gx;
-            const wx = sp.gx * tile - half, wz = sp.gy * tile - half;
-            const wy = (heightmap[idx] || 0) * hScale;
+            const tp = treePos(sp.gx, sp.gy), wx = tp[0], wy = tp[1], wz = tp[2];
             const scl = 0.65 + ((idx * 2654435761 >>> 28) & 7) / 9;
             const wsc = sp.bare ? scl * 0.42 : scl;
             dummy.position.set(wx, wy, wz);
@@ -977,7 +949,7 @@ export function buildGlacier(glacierTiles, heightmap, gridSize, opts = {}) {
     // Jede Gletscherkachel wird in SUB x SUB Felder unterteilt. Die Farbe
     // wird an den Eckpunkten ausgewertet und dazwischen interpoliert — so
     // entstehen weiche Verläufe statt einfarbiger Quadrate.
-    const SUB = 3, STEP = 1 / SUB;
+    const SUB = 2, STEP = 1 / SUB;
     for (const idx of glacierTiles) {
         const gx = idx % gridSize, gy = (idx / gridSize) | 0;
         for (let sy = 0; sy < SUB; sy++) for (let sx = 0; sx < SUB; sx++) {
@@ -1057,726 +1029,5 @@ export function buildGlacier(glacierTiles, heightmap, gridSize, opts = {}) {
  * in sanfte Vorberge aus und blendet zum Rand hin in den Horizontdunst.
  * Dadurch geht die Karte fließend in die Umgebung über.
  */
-/**
- * HÖHENFORMEL DER GELÄNDESCHÜRZE.
- *
- * Bewusst als eigene Funktion: die Schürze und der Wald darauf müssen exakt
- * dieselbe Höhe rechnen. Vorher war die Formel zweimal getippt, und beim
- * Ändern der einen standen die Bäume prompt in der Luft.
- *
- * @param edgeY  Geländehöhe am Kartenrand unter diesem Punkt
- * @param a      Winkel um die Karte
- * @param v      0 = Kartenrand, 1 = äußerster Rand der Schürze
- */
-/** Höhe des Talbodens im Umland (Weltmeter). Das Spielfeld liegt darüber am Hang. */
-export const APRON_FLOOR = -24;
-const sm01 = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
-/**
- * UMLAND-RELIEF: Das Spielfeld sitzt auf einer Hangschulter. Hinter der
- * Kante fällt das Gelände über Sporne, Runsen und Felsstufen in ein Tal
- * (APRON_FLOOR), dessen Boden sanft wellig ist und zu den Fernketten hin
- * wieder leicht ansteigt. So wirkt das Gebiet wie ein Skigebiet AM BERG,
- * nicht wie eine Platte in der Ebene.
- */
-export function apronHeight(edgeY, a, v) {
-    // Schulter: die ersten ~3 % bleiben auf Kartenhöhe (weicher Anschluss)
-    const s = sm01((v - 0.03) / 0.36);                     // 0 Kante .. 1 Talboden (steil)
-    // Sporne und Runsen quer zur Kante gliedern den Hang
-    const spur = Math.sin(a * 7.3 + 0.8) * 0.5 + Math.sin(a * 13.1 - 1.9) * 0.3 + Math.sin(a * 23.7) * 0.2;
-    const relief = Math.max(0, edgeY - APRON_FLOOR);
-    // Der Hang fällt zum Talboden; Sporne halten die Höhe länger, Runsen fallen schneller
-    const drop = relief * s * (1 - spur * 0.16 * (1 - s));
-    // Felsstufen/Terrassen im Steilbereich
-    const steps = Math.sin(v * 46 + a * 3.1) * 0.5 + Math.sin(v * 97 + a * 7.7) * 0.25;
-    const stepAmp = relief * 0.035 * 4 * s * (1 - s);
-    // Talboden: sanft wellig, mit Schuttkegeln am Hangfuß
-    const floorRoll = Math.sin(a * 4.1 + v * 9) * 0.9 + Math.sin(a * 11 + v * 21) * 0.35;
-    let y = edgeY - drop + steps * stepAmp + floorRoll * s;
-    // dahinter (ab 72 %) wieder leicht ansteigen — Vorberge der Fernketten
-    const rise = Math.max(0, (v - 0.72) / 0.28);
-    y += rise * rise * 14 + Math.sin(a * 6.3 + 2.2) * rise * 3;
-    return { y, ridge: spur };
-}
 
-export function buildTerrainApron(world, gridSize, theme = {}, opts = {}) {
-    const { heightmap, landcover } = world;
-    const hScale = opts.hScale ?? 0.09;
-    const tile = opts.tileSize ?? 1;
-    const span = (gridSize - 1) * tile;
-    const half = span / 2;
-    // ===== REICHWEITE =====
-    // Die Schürze endete bei 0.95 Spannen und war ab 0.5 schon halb
-    // durchsichtig — die erste Fernkette beginnt aber erst bei 1.30. Genau
-    // dazwischen klaffte die Lücke, die den Übergang unschön machte. Jetzt
-    // reicht sie bis 1.7 Spannen, also deutlich HINTER den Fuß der ersten
-    // Kette, und wird erst ganz aussen durchsichtig.
-    const REACH = opts.reach ?? span * 1.70;   // wie weit die Schürze hinausreicht
-    const PER = opts.perimeter ?? 300;         // Auflösung entlang des Randes
-    const RINGS = opts.rings ?? 26;            // Auflösung nach außen
-
-    const haze = new THREE.Color(opts.hazeColor ?? 0xcddff0);
-    const hazeArr = [haze.r, haze.g, haze.b];
-
-    // --- Höhe und Farbe am Kartenrand abgreifen ---
-    let minZ = Infinity, maxZ = -Infinity;
-    for (let i = 0; i < heightmap.length; i++) {
-        const h = heightmap[i];
-        if (h < minZ) minZ = h;
-        if (h > maxZ) maxZ = h;
-    }
-    const range = (maxZ - minZ) || 1;
-    const grassLight = (theme.grassLight || [140, 176, 96]).map(c => c / 255);
-    const grassDark = (theme.grassDark || [96, 132, 70]).map(c => c / 255);
-
-    const sampleEdge = (wx, wz) => {
-        const gx = Math.max(0, Math.min(gridSize - 1, Math.round((wx + half) / tile)));
-        const gy = Math.max(0, Math.min(gridSize - 1, Math.round((wz + half) / tile)));
-        const idx = gy * gridSize + gx;
-        const z = heightmap[idx] || 0;
-        const alt = (z - minZ) / range;
-        const t = landcover[idx];
-        let c;
-        if (t === 2) c = [0.12, 0.32, 0.55];
-        else if (t === 8) c = mix([0.68, 0.82, 0.94], [0.86, 0.93, 1.00], clamp01(alt));
-        else if (t === 3) c = [0.42, 0.44, 0.48];
-        else if (t === 1 || t === 6) c = [0.10, 0.30, 0.20];
-        else if (t === 5) c = [0.20, 0.40, 0.16];
-        else if (t === 7) c = mix(grassDark, grassLight, 0.5);
-        else c = [0.90, 0.93, 0.97];
-        return { y: z * hScale, col: c, alt };
-    };
-
-    // --- Gitter aufbauen: entlang des Randes (u) und nach außen (v) ---
-    const pos = [], col = [], meta = [];
-    const ptAt = (u, v) => {
-        // u: 0..1 einmal um das Quadrat, v: 0..1 nach außen
-        const s = u * 4;                     // welche Seite
-        const side = Math.floor(s) % 4, f = s - Math.floor(s);
-        let ex, ez;
-        if (side === 0)      { ex = -half + f * span; ez = -half; }
-        else if (side === 1) { ex = half;             ez = -half + f * span; }
-        else if (side === 2) { ex = half - f * span;  ez = half; }
-        else                 { ex = -half;            ez = half - f * span; }
-
-        const e = sampleEdge(ex, ez);
-        // Radial nach außen — an den Ecken diagonal, dadurch bleibt der Ring
-        // geschlossen und es entstehen keine Löcher.
-        const len = Math.hypot(ex, ez) || 1;
-        const dx = ex / len, dz = ez / len;
-        const d = v * REACH;
-        const x = ex + dx * d, z2 = ez + dz * d;
-
-        // ===== RELIEF NACH AUSSEN =====
-        // Vorher hing die Form NUR vom Winkel ab: dieselben drei Sinus-Terme
-        // über die ganze Tiefe. Dadurch zogen sich die Rücken als gerader
-        // Fächer vom Kartenrand nach draußen — der typische Sternmuster-Look.
-        // Jetzt kommt ein echtes zweidimensionales Feld zum Einsatz, das
-        // sowohl mit dem Winkel als auch mit der Entfernung variiert. So
-        // entstehen quer verlaufende Rücken, Sättel und Täler.
-        const a = Math.atan2(ez, ex);
-        const y = apronHeight(e.y, a, v).y;
-
-        // Deckkraft: erst ganz außen ausblenden. Bis dahin muss die Schürze
-        // decken, sonst sieht man wieder durch sie hindurch ins Leere.
-        const alpha = 1 - clamp01((v - 0.86) / 0.14);
-        // Die eigentliche Farbe kommt aus der HÖHE (siehe setSnowLine) — hier
-        // wird nur die Randfarbe als Ausgangspunkt und die Weltposition der
-        // Höhe mitgegeben, damit sich alles später neu einfärben lässt.
-        // `ei` = Rasterpunkt des Spielfelds, an dem dieser Strahl die Kante verlässt:
-        // dort holt sich die Schürze später die aktuelle Farbe des Spielfelds ab.
-        const egx = Math.max(0, Math.min(gridSize - 1, Math.round((ex + half) / tile)));
-        const egy = Math.max(0, Math.min(gridSize - 1, Math.round((ez + half) / tile)));
-        return { x, y, z: z2, c: e.col, alpha, v, ei: egy * gridSize + egx };
-    };
-
-    for (let i = 0; i < PER; i++) {
-        const u0 = i / PER, u1 = (i + 1) / PER;
-        for (let k = 0; k < RINGS; k++) {
-            const v0 = Math.pow(k / RINGS, 1.35);          // innen fein, außen grob
-            const v1 = Math.pow((k + 1) / RINGS, 1.35);
-            const A = ptAt(u0, v0), B = ptAt(u1, v0);
-            const C = ptAt(u1, v1), D = ptAt(u0, v1);
-            for (const [p, q, r] of [[A, B, C], [A, C, D]]) {
-                for (const t of [p, q, r]) {
-                    pos.push(t.x, t.y, t.z);
-                    col.push(t.c[0], t.c[1], t.c[2], t.alpha);
-                    meta.push(t.y, t.v, t.x, t.z, t.ei);   // Höhe, Randabstand, Lage, Kantenpunkt merken
-                }
-            }
-        }
-    }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
-    geo.computeVertexNormals();
-    // Materialwerte EXAKT wie das Spielfeld (roughness 0.92 / metalness 0.02),
-    // keine Materialtönung: vorher färbte setHaze die ganze Schürze mit dem
-    // Horizontton ein — an der Kante war das als Farbsprung zu sehen. Der
-    // Dunst steckt jetzt allein in den Vertexfarben (nach außen zunehmend).
-    const mat = new THREE.MeshStandardMaterial({
-        vertexColors: true, transparent: true, roughness: 0.92, metalness: 0.02,
-        depthWrite: false, side: THREE.DoubleSide
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.receiveShadow = true;
-    mesh.frustumCulled = false;
-    mesh.renderOrder = -800;
-    mesh.userData.setHaze = (c) => { hazeArr[0] = c.r * 0.45 + 0.55; hazeArr[1] = c.g * 0.45 + 0.55; hazeArr[2] = c.b * 0.45 + 0.55; };
-    /**
-     * Punkt AUF der vernetzten Schürze zu den Parametern u (0..1 einmal um die Karte)
-     * und v (0..1 nach außen) – also dort, wo die Fläche wirklich gezeichnet wird, nicht
-     * dort, wo die Höhenformel sie zwischen den Stützpunkten hätte. Für alles, was auf
-     * der Schürze stehen soll (Bäume).
-     */
-    mesh.userData.pointAt = (u, v) => {
-        u = ((u % 1) + 1) % 1; v = clamp01(v);
-        const fi = u * PER, i = Math.min(PER - 1, Math.floor(fi)), s = fi - i;
-        const k = Math.min(RINGS - 1, Math.floor(Math.pow(v, 1 / 1.35) * RINGS));   // Umkehrung von v = (k/RINGS)^1.35
-        const v0 = Math.pow(k / RINGS, 1.35), v1 = Math.pow((k + 1) / RINGS, 1.35);
-        const t = clamp01((v - v0) / Math.max(1e-9, v1 - v0));
-        const u0 = i / PER, u1 = (i + 1) / PER;
-        const A = ptAt(u0, v0), B = ptAt(u1, v0), C = ptAt(u1, v1), D = ptAt(u0, v1);
-        // dieselbe Aufteilung des Vierecks wie beim Vernetzen: [A,B,C] und [A,C,D]
-        return s >= t
-            ? { x: A.x + s * (B.x - A.x) + t * (C.x - B.x), y: A.y + s * (B.y - A.y) + t * (C.y - B.y), z: A.z + s * (B.z - A.z) + t * (C.z - B.z) }
-            : { x: A.x + t * (D.x - A.x) + s * (C.x - D.x), y: A.y + t * (D.y - A.y) + s * (C.y - D.y), z: A.z + t * (D.z - A.z) + s * (C.z - D.z) };
-    };
-
-    /**
-     * Färbt die Schürze nach HÖHENPROFIL und Schneelage neu ein — genau wie
-     * das Spielfeld: unter der Schneegrenze Wiese/Wald, darüber Schnee, dazwischen
-     * ein weicher Übergang. `snowLineY` ist die Schneegrenze in Weltkoordinaten.
-     */
-    const rockC = [0.44, 0.45, 0.48];
-    const snowC = [0.92, 0.94, 0.98];
-    const grassC = [0.30, 0.42, 0.22];              // exakt das Wiesengrün von repaintSnowCover
-    const forestC = [0.14, 0.29, 0.19];
-    const worldMaxY = maxZ * hScale;
-    // bandWorld = Übergangsband in Weltmetern — vom Spielfeld übernommen, damit
-    // die Schneegrenze auf Karte und Schürze exakt gleich verläuft.
-    // snowLineWorldY = Schneegrenze in Weltmetern; intern wird in
-    // Heightmap-Einheiten gerechnet — exakt wie repaintSnowCover.
-    const snowWarmth = theme.snowWarmth || 0;
-    /**
-     * Farbe des Spielfelds an einem Kantenpunkt: Mittel über ein paar Kacheln längs
-     * der Kante und ein Stück ins Feld hinein (einzelne Ausreißer fallen so nicht auf).
-     * `tc` sind die aktuellen Eckfarben des Spielfelds (3 Werte je Rasterpunkt).
-     */
-    const edgeColorAt = (ei, tc) => {
-        const gx = ei % gridSize, gy = (ei - gx) / gridSize;
-        let ix = 0, iy = 0;                                  // Richtung ins Feld hinein
-        if (gy === 0) iy = 1; else if (gy === gridSize - 1) iy = -1;
-        else if (gx === 0) ix = 1; else ix = -1;
-        const ax = iy !== 0 ? 1 : 0, ay = ix !== 0 ? 1 : 0;    // Richtung längs der Kante
-        let r = 0, g = 0, b = 0, n = 0, wood = 0;
-        // längs der Kante breiter mitteln als ein Schürzenstreifen breit ist – sonst wechseln
-        // benachbarte Streifen hart die Farbe (Kamm-Muster hinter bewaldeten Kanten)
-        for (let k = 0; k <= 2; k++) for (let j = -7; j <= 7; j++) {
-            const x = Math.max(0, Math.min(gridSize - 1, gx + ix * k + ax * j));
-            const y = Math.max(0, Math.min(gridSize - 1, gy + iy * k + ay * j));
-            const o = (y * gridSize + x) * 3;
-            r += tc[o]; g += tc[o + 1]; b += tc[o + 2]; n++;
-            const lt = landcover[y * gridSize + x];
-            if (lt === 1 || lt === 5 || lt === 6) wood++;
-        }
-        // vierter Wert: Waldanteil an dieser Stelle der Kante (0..1)
-        return [r / n, g / n, b / n, wood / n];
-    };
-    /**
-     * `edgeCols` (optional): die aktuellen Eckfarben des Spielfelds. Damit schließt die
-     * Schürze an der Kante FARBGLEICH an – egal ob dort Wiese, Waldboden, Schnee oder
-     * Wasser liegt – und geht erst ein Stück weiter draußen in ihre eigene Färbung über.
-     * Ohne diese Angabe sah man die Karte als Quadrat: innen grüne Wiese, direkt dahinter Weiß.
-     */
-    mesh.userData.setSnowLine = (snowLineWorldY, edgeCols = null) => {
-        const limit = snowLineWorldY / hScale;
-        const ca = geo.attributes.color, arr = ca.array;
-        const nor = geo.attributes.normal ? geo.attributes.normal.array : null;
-        const edgeCache = edgeCols ? new Map() : null;
-        for (let i = 0, m2 = 0; i < arr.length; i += 4, m2 += 5) {
-            const y = meta[m2], v = meta[m2 + 1], px = meta[m2 + 2], pz = meta[m2 + 3];
-            const h = y / hScale;
-            const gx = (px + half) / tile, gy = (pz + half) / tile;   // Rasterlage (auch außerhalb)
-            const alt = (h - minZ) / range;
-            // 1) exakt die Spielfeldformel: Grundfarbe -> Grün -> Naturschnee
-            //    Der Hang der Schürze fällt überall gleich ab – die Schneegrenze lief deshalb
-            //    als schnurgerader heller Streifen parallel zur Kartenkante durchs Tal. Ein
-            //    weiträumiges Wellenfeld hebt und senkt die wirksame Höhe: der Schnee greift
-            //    in Mulden zungenförmig hinab, auf Rücken weicht er zurück. Direkt an der
-            //    Kante bleibt es bei der echten Höhe (dort übernimmt ohnehin die Randfarbe).
-            const lobe = Math.sin(px * 0.021 + 0.6) * Math.sin(pz * 0.017 - 1.3) * 0.6
-                       + Math.sin((px + pz) * 0.011 + 2.1) * 0.25 + Math.sin(px * 0.047 - pz * 0.039) * 0.15;
-            const out01 = sm01(v / 0.05);
-            const hSnow = h + lobe * (7.5 / hScale) * out01;
-            const ground = openGroundColor(alt, snowWarmth);
-            let shade = snowShade(ground, hSnow, limit, gx, gy);
-            if (out01 > 0) {
-                // Die Schürze ist weit draußen grob vernetzt. Ein scharfer Schneerand würde dort
-                // als Treppenkante sichtbar – deshalb über einen Höhenbereich gemittelt (weicher Saum).
-                const spread = (4.5 / hScale) * out01;
-                const lo = snowShade(ground, hSnow - spread, limit, gx, gy), hi = snowShade(ground, hSnow + spread, limit, gx, gy);
-                shade = [(shade[0] + lo[0] + hi[0]) / 3, (shade[1] + lo[1] + hi[1]) / 3, (shade[2] + lo[2] + hi[2]) / 3, (shade[3] + lo[3] + hi[3]) / 3];
-            }
-            const nat = shade[3];
-            let c = [shade[0], shade[1], shade[2]];
-            // 2) weiter draußen: Wald-/Wiesen-Flickenteppich, Latschen, Fels —
-            //    nur auf dem aperen Anteil, der Schnee bleibt die Spielfeldfarbe
-            const far = sm01((v - 0.02) / 0.14);
-            if (far > 0 && nat < 1) {
-                const patch = Math.sin(px * 0.055 + 0.7) * Math.sin(pz * 0.047 - 1.1)
-                            + Math.sin((px + pz) * 0.031) * 0.6 + Math.sin(px * 0.13 - pz * 0.09) * 0.25;
-                const meadow = clamp01((patch - 0.25) / 0.9);
-                const altS = clamp01((h - limit) / Math.max(1, limit * 0.6) + 0.5);
-                let g2 = mix(forestC, grassC, meadow * (1 - clamp01(altS * 1.3)));
-                g2 = mix(g2, [0.24, 0.36, 0.25], clamp01((altS - 0.3) * 1.6) * 0.6);
-                const green = mix(c, g2, far * (1 - nat));
-                c = green;
-            }
-            // 3) Steilflanken: Fels, an dem auch Schnee schlecht hält
-            const ny = nor ? nor[(i / 4) * 3 + 1] : 1;
-            const steep = clamp01((0.86 - ny) / 0.22) * far;
-            c = mix(c, rockC, steep * 0.85);
-            // 3b) an der Kante die Farbe des Spielfelds übernehmen und nach außen auslaufen
-            //     lassen – unregelmäßig weit, damit kein gerader Saum parallel zur Kante entsteht
-            if (edgeCache && v < 0.13) {
-                const ei = meta[m2 + 4];
-                let ec = edgeCache.get(ei);
-                if (!ec) { ec = edgeColorAt(ei, edgeCols); edgeCache.set(ei, ec); }
-                const wob = Math.sin(px * 0.071 + 1.9) * Math.sin(pz * 0.063 - 0.4) + Math.sin((px - pz) * 0.037) * 0.5;
-                // Wiese und Schnee dürfen weit hinauslaufen. Waldboden nur kurz: ein Waldstück
-                // endet bald hinter der Kante – sonst zöge es sich als dunkler Streifen ins Umland.
-                const reach = (0.070 + wob * 0.028) * (1 - ec[3]) + (0.020 + wob * 0.007) * ec[3];
-                const keep = 1 - sm01((v - 0.004) / reach);
-                if (keep > 0) c = mix(c, ec, keep);
-            }
-            // 4) nach außen in den Dunst ausbleichen (erst im ferneren Teil)
-            c = mix(c, hazeArr, clamp01(Math.pow(clamp01((v - 0.18) / 0.82), 1.25)) * 0.88);
-            arr[i] = c[0]; arr[i + 1] = c[1]; arr[i + 2] = c[2];
-        }
-        ca.needsUpdate = true;
-    };
-    return mesh;
-}
-
-/**
- * KANTENSCHATTEN: ein weicher, dunkler Saum entlang der Spielfeldgrenze —
- * innen wie außen ausblendend. Er verdeckt den Farbversatz zwischen
- * Spielfeld und Schürze so, wie es eine Geländekante mit Eigenschatten
- * täte, und wirkt dabei unauffälliger als jede noch so gute Farbangleichung.
- */
-export function buildEdgeShade(world, gridSize, opts = {}) {
-    const { heightmap } = world;
-    const hScale = opts.hScale ?? 0.09;
-    const tile = opts.tileSize ?? 1;
-    const span = (gridSize - 1) * tile;
-    const half = span / 2;
-    const REACH = opts.reach ?? span * 1.70;
-    // Nur noch ein Hauch: seit die Schürze an der Kante die Farbe des Spielfelds übernimmt,
-    // gibt es keinen Farbversatz mehr zu verdecken – der frühere kräftige Saum (0.34)
-    // zeichnete die Karte von oben als dunkel umrandetes Quadrat nach.
-    const IN = opts.inner ?? 3.2, OUT = opts.outer ?? 2.4, A0 = opts.alpha ?? 0.08;
-    const hAt = (wx, wz) => {
-        const fx = Math.max(0, Math.min(gridSize - 1.001, (wx + half) / tile));
-        const fy = Math.max(0, Math.min(gridSize - 1.001, (wz + half) / tile));
-        const x0 = Math.floor(fx), y0 = Math.floor(fy), tx = fx - x0, ty = fy - y0;
-        const h = (x, y) => (heightmap[y * gridSize + x] || 0) * hScale;
-        return (h(x0, y0) * (1 - tx) + h(x0 + 1, y0) * tx) * (1 - ty) + (h(x0, y0 + 1) * (1 - tx) + h(x0 + 1, y0 + 1) * tx) * ty;
-    };
-    const PER = 360;
-    const pos = [], col = [];
-    const seam = (u) => {
-        const s4 = u * 4, side = Math.floor(s4) % 4, f = s4 - Math.floor(s4);
-        if (side === 0) return { x: -half + f * span, z: -half, nx: 0, nz: -1 };
-        if (side === 1) return { x: half, z: -half + f * span, nx: 1, nz: 0 };
-        if (side === 2) return { x: half - f * span, z: half, nx: 0, nz: 1 };
-        return { x: -half, z: half - f * span, nx: -1, nz: 0 };
-    };
-    const dark = [0.06, 0.08, 0.11];
-    const P = (u, k) => {                      // k: -1 innen .. 0 Kante .. +1 außen
-        const e = seam(u);
-        const d = k < 0 ? -k * IN : k * OUT;
-        const x = e.x + e.nx * (k < 0 ? -d : d), z = e.z + e.nz * (k < 0 ? -d : d);
-        let y;
-        if (k <= 0) y = hAt(x, z);
-        else {
-            const len = Math.hypot(e.x, e.z) || 1;
-            const v = d / REACH;
-            const a = Math.atan2(e.z, e.x);
-            // gleiche Höhenformel wie die Schürze (radial nach außen)
-            const ex = e.x, ez = e.z;
-            const yE = hAt(ex, ez);
-            y = apronHeight(yE, a, v).y;
-            // Position der Schürze ist radial, unsere ist senkrecht — Höhe
-            // ist nur eine Näherung, deshalb leicht anheben.
-            void len;
-        }
-        const alpha = A0 * (1 - Math.abs(k)) * (1 - Math.abs(k));
-        return { x, y: y + 0.08, z, a: alpha };
-    };
-    const KS = [-1, -0.5, 0, 0.5, 1];
-    for (let i = 0; i < PER; i++) {
-        const u0 = i / PER, u1 = (i + 1) / PER;
-        for (let j = 0; j + 1 < KS.length; j++) {
-            const A = P(u0, KS[j]), B = P(u1, KS[j]), C = P(u1, KS[j + 1]), D = P(u0, KS[j + 1]);
-            for (const t of [A, B, C, A, C, D]) { pos.push(t.x, t.y, t.z); col.push(dark[0], dark[1], dark[2], t.a); }
-        }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
-    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false,
-                                             polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, fog: false });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = -700;
-    return mesh;
-}
-
-/**
- * WALD AUF DER GELÄNDESCHÜRZE.
- *
- * Die Schürze allein wirkt wie eine glatte Rampe; erst Bewaldung lässt sie
- * wie echtes Umland aussehen. Die Bäume stehen dichter am Kartenrand und
- * lichten sich nach außen auf, damit der Übergang in den Dunst weich bleibt.
- * Alles instanziert — auch mehrere tausend Bäume kosten praktisch nichts.
- */
-export function buildApronForest(world, gridSize, opts = {}) {
-    const { heightmap, landcover } = world;
-    const hScale = opts.hScale ?? 0.09;
-    const tile = opts.tileSize ?? 1;
-    const span = (gridSize - 1) * tile;
-    const half = span / 2;
-    // MUSS zur Schürze passen — sonst stehen die Bäume in der Luft.
-    const REACH = opts.reach ?? span * 1.70;
-    const SCATTER = opts.count ?? 16000;           // locker verteilte Bäume im ganzen Umland
-    // WALDGÜRTEL: Wo auf dem Spielfeld Wald bis an die Kante reicht, läuft er dahinter
-    // dicht weiter und lichtet sich erst nach ein paar Dutzend Metern. Vorher brach
-    // jeder Wald an der Kartengrenze wie abgeschnitten ab.
-    const BELT_DEPTH = opts.beltDepth ?? 24;       // so weit reicht der dichte Gürtel (Weltmeter)
-    const BELT_MAX = opts.belt ?? 9000;            // Obergrenze; die echte Zahl folgt aus der bewaldeten Kantenlänge
-    const hue = opts.hue || [0.17, 0.45, 0.27];
-
-    // Höhenformel EXAKT wie in buildTerrainApron, damit die Bäume nicht
-    // schweben oder im Boden stecken.
-    let minZ = Infinity, maxZ = -Infinity;
-    for (let i = 0; i < heightmap.length; i++) {
-        const h = heightmap[i];
-        if (h < minZ) minZ = h;
-        if (h > maxZ) maxZ = h;
-    }
-    const edgeY = (ex, ez) => {
-        const gx = Math.max(0, Math.min(gridSize - 1, Math.round((ex + half) / tile)));
-        const gy = Math.max(0, Math.min(gridSize - 1, Math.round((ez + half) / tile)));
-        return (heightmap[gy * gridSize + gx] || 0) * hScale;
-    };
-    // Baumgrenze: etwa auf 58 % der Kartenhöhe (Level-Themen können sie verschieben)
-    const treeLine = opts.treeLine ?? (minZ + (maxZ - minZ) * (opts.treeLineFrac ?? 0.62)) * hScale;
-    const treeY = [];                                   // Höhe je Baum (für die Schneelage)
-
-    const trunkGeo = new THREE.CylinderGeometry(0.09, 0.13, 0.8, 5); trunkGeo.translate(0, 0.4, 0);
-    const crownGeo = (() => {
-        const parts = [
-            new THREE.ConeGeometry(0.62, 1.1, 6),
-            new THREE.ConeGeometry(0.46, 0.95, 6),
-            new THREE.ConeGeometry(0.28, 0.75, 5)
-        ];
-        parts[0].translate(0, 0.95, 0); parts[1].translate(0, 1.55, 0); parts[2].translate(0, 2.1, 0);
-        const nonIdx = parts.map(p => p.toNonIndexed());
-        let n = 0; for (const p of nonIdx) n += p.attributes.position.count;
-        const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
-        let o = 0;
-        for (const p of nonIdx) {
-            pos.set(p.attributes.position.array, o * 3);
-            nor.set(p.attributes.normal.array, o * 3);
-            o += p.attributes.position.count;
-        }
-        const gg = new THREE.BufferGeometry();
-        gg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        gg.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-        return gg;
-    })();
-
-    const crownMat = new THREE.MeshStandardMaterial({
-        vertexColors: true, roughness: 0.88,
-        emissive: 0x1c2a22, emissiveIntensity: 0.75,
-        transparent: true, opacity: 1
-    });
-    const trunkMat = new THREE.MeshStandardMaterial({
-        color: 0x5a4130, roughness: 0.95, emissive: 0x2a1c12, emissiveIntensity: 0.7,
-        transparent: true, opacity: 1
-    });
-
-    /** Steht an diesem Kantenpunkt (ein paar Kacheln ins Feld hinein) Wald? */
-    const forestAtEdge = (ex, ez) => {
-        const gx = Math.round((ex + half) / tile), gy = Math.round((ez + half) / tile);
-        // Richtung ins Feld: weg von der Seite, auf der der Punkt liegt
-        const ix = gx <= 0 ? 1 : gx >= gridSize - 1 ? -1 : 0, iy = gy <= 0 ? 1 : gy >= gridSize - 1 ? -1 : 0;
-        let hit = 0;
-        for (let k = 1; k <= 4; k++) {
-            const x = Math.max(0, Math.min(gridSize - 1, gx + ix * k)), y = Math.max(0, Math.min(gridSize - 1, gy + iy * k));
-            const t = landcover ? landcover[y * gridSize + x] : 0;
-            if (t === 1 || t === 5 || t === 6) hit++;
-        }
-        return hit >= 2;
-    };
-    // Wie viel der Kartenkante ist bewaldet? Daraus folgt die Baumzahl des Gürtels: an der
-    // Kante so dicht wie im Feld (ein Baum auf zwei Kacheln), nach außen linear auslaufend.
-    let woodedEdge = 0;
-    for (let q = 0; q < 4 * (gridSize - 1); q++) {
-        const sd = Math.floor(q / (gridSize - 1)), f = (q % (gridSize - 1)) / (gridSize - 1);
-        const ex = sd === 0 ? -half + f * span : sd === 1 ? half : sd === 2 ? half - f * span : -half;
-        const ez = sd === 0 ? -half : sd === 1 ? -half + f * span : sd === 2 ? half : half - f * span;
-        if (forestAtEdge(ex, ez)) woodedEdge += tile;
-    }
-    const BELT = Math.min(BELT_MAX, Math.round(woodedEdge * BELT_DEPTH * 0.5 * 0.5));
-    const COUNT = SCATTER + BELT;
-
-    const crowns = new THREE.InstancedMesh(crownGeo, crownMat, COUNT);
-    const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, COUNT);
-    // Schneehauben für den Gürtel – dieselbe Optik wie die Hauben der Bäume auf dem Spielfeld
-    const capGeo = (() => {
-        const parts = [
-            new THREE.ConeGeometry(0.66, 0.34, 7),
-            new THREE.ConeGeometry(0.49, 0.30, 7),
-            new THREE.ConeGeometry(0.30, 0.28, 6)
-        ];
-        parts[0].translate(0, 1.12, 0); parts[1].translate(0, 1.72, 0); parts[2].translate(0, 2.26, 0);
-        const nonIdx = parts.map(q => q.toNonIndexed());
-        let n = 0; for (const q of nonIdx) n += q.attributes.position.count;
-        const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3);
-        let o = 0;
-        for (const q of nonIdx) {
-            pos.set(q.attributes.position.array, o * 3);
-            nor.set(q.attributes.normal.array, o * 3);
-            o += q.attributes.position.count;
-        }
-        const gg = new THREE.BufferGeometry();
-        gg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        gg.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-        return gg;
-    })();
-    const capMat = new THREE.MeshStandardMaterial({
-        color: 0xeef3fa, roughness: 0.9, emissive: 0xdde6f0, emissiveIntensity: 0.08,
-        transparent: true, opacity: 0
-    });
-    const caps = new THREE.InstancedMesh(capGeo, capMat, Math.max(1, BELT));
-    caps.visible = false; caps.frustumCulled = false;
-    const dummy = new THREE.Object3D();
-    const colArr = new Float32Array(COUNT * 3);
-
-    let placed = 0, guard = 0, beltPlaced = 0;
-    while (placed < COUNT && guard < COUNT * 8) {
-        guard++;
-        const u = Math.random(), s4 = u * 4;
-        const side = Math.floor(s4) % 4, f = s4 - Math.floor(s4);
-        let ex, ez;
-        if (side === 0)      { ex = -half + f * span; ez = -half; }
-        else if (side === 1) { ex = half;             ez = -half + f * span; }
-        else if (side === 2) { ex = half - f * span;  ez = half; }
-        else                 { ex = -half;            ez = half - f * span; }
-
-        // Erst der Waldgürtel an bewaldeten Kanten (dicht, nach außen auslaufend),
-        // danach die lockere Verteilung über das ganze Umland.
-        const belt = beltPlaced < BELT && guard < COUNT * 4;
-        let v;
-        if (belt) {
-            if (!forestAtEdge(ex, ez)) continue;
-            // Dichte fällt linear nach außen ab: an der Kante wie im Feld, am Gürtelrand null
-            v = (0.9 + (BELT_DEPTH - 0.9) * (1 - Math.sqrt(Math.random()))) / REACH;
-        } else {
-            // Dichte fällt nach außen ab — quadratisch verteilt statt gleichmäßig
-            v = Math.pow(Math.random(), 1.35) * 0.78;
-            if (v < 0.012) continue;                // direkt an der Kante frei lassen
-        }
-        const len = Math.hypot(ex, ez) || 1;
-        const d = v * REACH;
-        let x = ex + (ex / len) * d, z = ez + (ez / len) * d;
-
-        // GENAU dieselbe Höhenformel wie die Schürze — gemeinsame Funktion,
-        // damit die Bäume nicht schweben, wenn das Relief geändert wird.
-        const a = Math.atan2(ez, ex);
-        const yFormula = apronHeight(edgeY(ex, ez), a, v).y;
-        let y = yFormula;
-        // Die Schürze ist grob vernetzt: zwischen ihren Stützpunkten weicht die Fläche von
-        // der Formel ab. Kennt man die vernetzte Fläche, steht der Baum genau darauf –
-        // wichtig vor allem im Waldgürtel direkt an der Kante, wo man es sonst sähe.
-        if (opts.surfacePoint) { const sp = opts.surfacePoint(u, v); x = sp.x; y = sp.y; z = sp.z; }
-        // ===== BAUMGRENZE & WALDINSELN =====
-        // Oberhalb der Baumgrenze wächst nichts; darunter stehen die Bäume
-        // nicht gleichmäßig, sondern in Waldstücken mit Lichtungen dazwischen,
-        // und an Steilflanken (Fels) dünnt der Bestand aus.
-        if (!belt) {
-            if (placed - beltPlaced >= SCATTER) break;                  // lockere Verteilung ist vollständig
-            if (y > treeLine) continue;
-            const cl = Math.sin(x * 0.085 + 1.3) * Math.sin(z * 0.071 - 0.7) + Math.sin((x - z) * 0.047) * 0.6;
-            if (cl < -0.35 && Math.random() > 0.10) continue;          // Lichtung
-            const sl = apronHeight(edgeY(ex + 0.6, ez), a, v).y - yFormula;   // grobe Steilheit
-            if (Math.abs(sl) > 1.1 && Math.random() > 0.3) continue;   // Felsflanke
-        } else beltPlaced++;
-        // Krüppelzone unter der Baumgrenze (der Gürtel setzt nur fort, was im Feld ohnehin steht)
-        const nearTop = belt ? 0 : clamp01((y - (treeLine - 2.5)) / 2.5);
-
-        const sc = (0.75 + Math.random() * 0.6) * (1 - nearTop * 0.45);
-        dummy.position.set(x, y, z);
-        dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-        dummy.scale.set(sc, sc * (0.85 + Math.random() * 0.35), sc);
-        dummy.updateMatrix();
-        crowns.setMatrixAt(placed, dummy.matrix);
-        trunks.setMatrixAt(placed, dummy.matrix);
-        if (belt) caps.setMatrixAt(placed, dummy.matrix);   // Gürtelbäume belegen die ersten Plätze
-
-        // Farbe: nach außen in den Dunst ausbleichen
-        const fade = clamp01(Math.pow(v / 0.72, 0.9)) * 0.8;
-        const jit = (Math.random() - 0.5) * 0.06;
-        const c = mix([hue[0] + jit, hue[1] + jit, hue[2] + jit], [0.80, 0.87, 0.94], fade);
-        colArr[placed * 3] = c[0]; colArr[placed * 3 + 1] = c[1]; colArr[placed * 3 + 2] = c[2];
-        treeY.push(y);
-        placed++;
-    }
-    crowns.count = placed; trunks.count = placed;
-    crowns.instanceMatrix.needsUpdate = true; trunks.instanceMatrix.needsUpdate = true;
-    caps.count = beltPlaced; caps.instanceMatrix.needsUpdate = true;
-    crownGeo.setAttribute('color', new THREE.InstancedBufferAttribute(colArr, 3));
-
-    const group = new THREE.Group();
-    group.add(crowns); group.add(trunks); group.add(caps);
-    group.renderOrder = -790;
-    crowns.frustumCulled = false; trunks.frustumCulled = false;
-    // Schnee auf den Kronen – aus zwei Quellen, es zählt die stärkere:
-    //   Schneelage: Kronen oberhalb der Schneegrenze sind weiß überzuckert (wie Schürze und Spielfeld)
-    //   Schneefall: frische Last auf allen Kronen. Die Bäume auf dem Spielfeld tragen dann
-    //               Hauben; hier draußen gibt es keine, also hellt die Krone selbst auf –
-    //               sonst stünde hinter der Kante ein dunkler Wald neben einem verschneiten.
-    const baseCol = Float32Array.from(colArr);
-    let lineY = Infinity, lineBand = 2.0, snowLoad = 0;
-    const recolor = () => {
-        const ca = crownGeo.getAttribute('color'), arr = ca.array;
-        const byLoad = Math.min(1, snowLoad) * 0.56;
-        for (let i = 0; i < placed; i++) {
-            const byLine = clamp01((treeY[i] - (lineY - lineBand)) / (lineBand * 2)) * 0.62;
-            // Gürtel direkt an der Kante: genau wie die Bäume auf dem Spielfeld – das Weiß
-            // tragen die Hauben, die Krone selbst hellt nur leicht auf.
-            const cov = i < beltPlaced ? Math.min(1, snowLoad) * 0.30 : Math.max(byLine, byLoad);
-            arr[i * 3]     = baseCol[i * 3]     + (0.90 - baseCol[i * 3])     * cov;
-            arr[i * 3 + 1] = baseCol[i * 3 + 1] + (0.93 - baseCol[i * 3 + 1]) * cov;
-            arr[i * 3 + 2] = baseCol[i * 3 + 2] + (0.97 - baseCol[i * 3 + 2]) * cov;
-        }
-        ca.needsUpdate = true;
-    };
-    group.userData.setSnow = (load) => {
-        load = Math.max(0, Math.min(1, load));
-        caps.visible = beltPlaced > 0 && load > 0.05;
-        capMat.opacity = Math.min(0.86, load * 1.15);       // wie die Hauben auf dem Spielfeld
-        if (Math.abs(load - snowLoad) < 0.08) return;      // nur bei deutlicher Änderung neu einfärben
-        snowLoad = load;
-        recolor();
-    };
-    group.userData.setSnowLine = (snowLineWorldY, band = 2.0) => {
-        lineY = snowLineWorldY; lineBand = band;
-        recolor();
-    };
-    return group;
-}
-
-/**
- * ORTSLICHTER IM UMLAND: nachts glimmen in den Tälern der Schürze ein paar
- * Dörfer und Höfe — warme Lichtpunkte in kleinen Haufen. Tagsüber unsichtbar.
- */
-export function buildApronLights(world, gridSize, opts = {}) {
-    const { heightmap } = world;
-    const hScale = opts.hScale ?? 0.09;
-    const tile = opts.tileSize ?? 1;
-    const span = (gridSize - 1) * tile;
-    const half = span / 2;
-    const REACH = opts.reach ?? span * 1.70;
-    let minZ = Infinity, maxZ = -Infinity;
-    for (let i = 0; i < heightmap.length; i++) { const h = heightmap[i]; if (h < minZ) minZ = h; if (h > maxZ) maxZ = h; }
-    const edgeY = (ex, ez) => {
-        const gx = Math.max(0, Math.min(gridSize - 1, Math.round((ex + half) / tile)));
-        const gy = Math.max(0, Math.min(gridSize - 1, Math.round((ez + half) / tile)));
-        return (heightmap[gy * gridSize + gx] || 0) * hScale;
-    };
-    const lowLimit = APRON_FLOOR + 9;                            // nur unten im Tal
-    const pos = [], col = [];
-    const villages = 4 + Math.floor(Math.random() * 3);
-    for (let v = 0; v < villages; v++) {
-        // Dorfmitte irgendwo im mittleren Schürzenbereich
-        const u = Math.random(), s4 = u * 4, side = Math.floor(s4) % 4, f = s4 - Math.floor(s4);
-        let ex, ez;
-        if (side === 0)      { ex = -half + f * span; ez = -half; }
-        else if (side === 1) { ex = half;             ez = -half + f * span; }
-        else if (side === 2) { ex = half - f * span;  ez = half; }
-        else                 { ex = -half;            ez = half - f * span; }
-        const vv = 0.12 + Math.random() * 0.4;
-        const len = Math.hypot(ex, ez) || 1, d = vv * REACH;
-        const cx = ex + (ex / len) * d, cz = ez + (ez / len) * d;
-        const a = Math.atan2(ez, ex);
-        const cy = apronHeight(edgeY(ex, ez), a, vv).y;
-        if (cy > lowLimit) { continue; }
-        const n = 10 + Math.floor(Math.random() * 26);
-        for (let k = 0; k < n; k++) {
-            const r = Math.pow(Math.random(), 0.6) * (3 + n * 0.22), ang = Math.random() * Math.PI * 2;
-            const x = cx + Math.cos(ang) * r, z = cz + Math.sin(ang) * r;
-            const y = apronHeight(edgeY(ex, ez), a, vv + (r / REACH) * (Math.random() - 0.5)).y + 0.6;
-            pos.push(x, y, z);
-            const warm = Math.random();
-            col.push(1.0, 0.72 + warm * 0.2, 0.42 + warm * 0.3);
-        }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-    const mat = new THREE.PointsMaterial({ size: 1.4, vertexColors: true, transparent: true, opacity: 0,
-                                          depthWrite: false, sizeAttenuation: true, fog: false });
-    const pts = new THREE.Points(geo, mat);
-    pts.frustumCulled = false;
-    pts.renderOrder = -780;
-    pts.userData.setNight = (n) => { mat.opacity = Math.max(0, Math.min(1, (n - 0.15) / 0.5)) * 0.95; pts.visible = mat.opacity > 0.01; };
-    pts.userData.count = pos.length / 3;
-    return pts;
-}
-
-/**
- * TALNEBEL: ein flacher, weicher Dunstring in den Senken des Umlands. Wo die
- * Schürze höher liegt, verschwindet er dahinter — es bleibt der Eindruck
- * von Nebelfeldern in den Tälern und Luftperspektive zur Fernkette hin.
- */
-export function buildValleyHaze(world, gridSize, opts = {}) {
-    const { heightmap } = world;
-    const hScale = opts.hScale ?? 0.09;
-    const tile = opts.tileSize ?? 1;
-    const span = (gridSize - 1) * tile;
-    const REACH = opts.reach ?? span * 1.70;
-    let minZ = Infinity;
-    for (let i = 0; i < heightmap.length; i++) if (heightmap[i] < minZ) minZ = heightmap[i];
-    const baseY = APRON_FLOOR + (opts.lift ?? 1.4);
-    const SEG = 160, RINGS = 14;
-    const rIn = span * 0.52, rOut = span * 0.5 + REACH * 0.98;
-    const pos = [], col = [];
-    const haze = new THREE.Color(opts.hazeColor ?? 0xdde9f5);
-    for (let i = 0; i < SEG; i++) {
-        const a0 = (i / SEG) * Math.PI * 2, a1 = ((i + 1) / SEG) * Math.PI * 2;
-        for (let k = 0; k < RINGS; k++) {
-            const v0 = k / RINGS, v1 = (k + 1) / RINGS;
-            const P = (a, v) => {
-                const r = rIn + (rOut - rIn) * v;
-                // sanft wellig, damit die Nebelkante nicht wie ein Kreis wirkt
-                const y = baseY + Math.sin(a * 5 + v * 9) * 0.35 + v * 1.2;
-                const alpha = Math.sin(Math.min(1, v * 1.6) * Math.PI * 0.5) * (0.42 - v * 0.18);
-                return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, al: Math.max(0, alpha) };
-            };
-            const A = P(a0, v0), B = P(a1, v0), C = P(a1, v1), D = P(a0, v1);
-            for (const t of [A, B, C, A, C, D]) { pos.push(t.x, t.y, t.z); col.push(haze.r, haze.g, haze.b, t.al); }
-        }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
-    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.frustumCulled = false;
-    mesh.renderOrder = -785;
-    mesh.userData.setHaze = (c) => { mat.color.copy(c).lerp(new THREE.Color(0xffffff), 0.7); };
-    return mesh;
-}
+// (Das Umland – Gelände, Wald und Dunst hinter dem Kartenrand – baut Surround3D.js.)

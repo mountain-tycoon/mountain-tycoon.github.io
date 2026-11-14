@@ -18,8 +18,17 @@ Der 3D-Modus läuft auch auf dem Handy und dem Tablet:
 ## Spielstand
 
 Das Spiel sichert von selbst: nach jedem Bauen, regelmäßig zwischendurch und beim Verlassen. Der Stand
-gehört zum Konto – wer sich auf einem anderen Gerät anmeldet, findet sein Skigebiet im Menü unter
-„Fortsetzen" wieder. „Neu beginnen" verwirft den Stand eines Levels (mit Rückfrage).
+liegt auf dem Gerät und zusätzlich am Konto – wer sich auf einem anderen Gerät anmeldet, findet sein
+Skigebiet im Menü unter „Fortsetzen" wieder. (Fürs Konto muss der Anmeldeserver auf dem Stand dieses Repos
+laufen, siehe `webgl-3d/worker/README.md`; sonst bleibt der Stand auf dem Gerät.) „Neu beginnen" verwirft den
+Stand eines Levels (mit Rückfrage). Ändert sich die Landschaft eines Levels durch ein Update, beginnt das
+Level neu.
+
+## Landschaft
+
+Jedes Level ist ein Ausschnitt aus einem größeren Gebirge: Hinter dem Rand des Baugebiets geht dieselbe
+Landschaft weiter – Hänge, Täler, Wald, Seen, an der Küste das Meer – bis sie im Dunst verschwindet. Die
+Schneegrenze wandert mit dem Wetter; Sonnenhänge apern früher aus, an Steilflanken schaut der Fels heraus.
 
 ## Was wo liegt
 

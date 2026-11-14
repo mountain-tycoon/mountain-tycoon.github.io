@@ -186,7 +186,8 @@ const MainMenu = ({ onStartLevel }) => {
 
     const updateSandbox = (key, value) => setSandbox(prev => ({ ...prev, [key]: value }));
 
-    const startSandbox = () => {
+    // mode: '2d' oder '3d' – der 3D-Knopf startete bisher ebenfalls das 2D-Spiel, weil die Angabe verloren ging
+    const startSandbox = (mode = '2d') => {
         onStartLevel({
             id: 'sandbox',
             name: 'Sandbox',
@@ -214,7 +215,7 @@ const MainMenu = ({ onStartLevel }) => {
             },
             theme: SANDBOX_DEFAULTS.theme,
             objectives: []
-        });
+        }, mode);
     };
 
     const slider = (label, key, min, max, step = 1, format = (v) => v) => (

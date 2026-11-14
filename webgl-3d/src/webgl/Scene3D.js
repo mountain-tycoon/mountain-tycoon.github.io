@@ -4,7 +4,9 @@
 // mit gelände-folgender Gondelbahn, animierte Details.
 // ============================================================
 import * as THREE from 'three';
-import { buildTerrainMesh, buildForest, buildRocks, buildGlacier, buildTerrainApron, buildApronForest, buildValleyHaze, buildApronLights, buildEdgeShade, FOREST_MIX_TABLE, snowLayer, apronHeight } from './TerrainMesh.js';
+import { buildTerrainMesh, buildForest, buildRocks, buildGlacier, FOREST_MIX_TABLE } from './TerrainMesh.js';
+import { createSnowUniforms, matchSnowLook, FRESH_BINS } from './SnowSurface.js';
+import { buildSurround } from './Surround3D.js';
 import { prepareWater, buildWater } from './Water3D.js';
 import { MATS, makeChalet, makeHotel, makeRestaurant, makeTicketOffice, makeLift, makeChairlift, makeChairlift2, makeChairlift6, makePlatterLift, makeMagicCarpet, makeSurfaceLift, makeAerialTram, makeAerialTramXL, makeGondola8, makeGondola4, makeMegaGondola, makeVillage, makeParking, makeParkingGarage, makeSnowCannon, makeFunpark, makeSummitCross, makeBench, makeSignpost, makeTextSprite, makeFloodlight, findTopPeaks, makeSkiSchool, makeSkiRental, makeShop, makeImbiss, makeBusStop, makeSnowcatGarage, makeToilet, makeRunDressing, makeHalfpipeShell,
     makeHotelClass, HOTEL_BEDS, makeChaletClass, makeGastro, makeMedicalStation, makeHospital, makeWorkshop,
@@ -12,7 +14,7 @@ import { MATS, makeChalet, makeHotel, makeRestaurant, makeTicketOffice, makeLift
     setLevelCountry, setWindGust } from './Buildings3D.js';
 import { PEAK_NAMES } from './PeakNames.js';
 import { M0 as VMATS, makeCar, makeBus, makeSnowcat, makeSkier, makeSkiInstructor, makePisteMarker, makeWalker, makeAlertMark, makeSadMark, makeRescueSled, makeRescueHeli, makeCargoHeli } from './Vehicles3D.js';
-import { makeClouds, makeSkyDome, makeDistantRanges, makeMoon } from './Sky3D.js';
+import { makeClouds, makeSkyDome, makeMoon } from './Sky3D.js';
 import { planVillageAccess, findPath, smoothPath } from './AccessPlanner.js';
 // ===== POSTPROCESSING =====
 // Hebt die Bildqualität deutlich: weiches Glühen an hellen Kanten (Schnee,
@@ -473,8 +475,37 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const worldSpan = (gridSize-1)*tile;
     const half = worldSpan/2;
     const heightmap = world.heightmap;
-    // Seebecken und Bachbetten eingraben – als Erstes, bevor irgendetwas die Höhen liest
-    const waterInfo = prepareWater(world, gridSize, { hScale });
+    // Stellgrößen der Schneedecke – Spielfeld und Umland teilen sie sich (SnowSurface.js)
+    const snowU = createSnowUniforms();
+    // ===== UMLAND =====
+    // world.outer ist das ganze erzeugte Gebiet (dieselbe Landschaft, über das Spielfeld hinaus);
+    // das Spielfeld liegt darin bei [OFF, OFF + gridSize). Ohne Umland (ältere Aufrufer) ist das
+    // Spielfeld selbst das „äußere" Gebiet.
+    const outer = world.outer || { heightmap: world.heightmap, landcover: world.landcover, gridSize, offset: 0 };
+    const OG = outer.gridSize, OFF = outer.offset;
+    const hasOuter = outer.heightmap !== world.heightmap;
+    const outerWorld = { heightmap: outer.heightmap, landcover: outer.landcover };
+    /** Spielfeld (oder einen Ausschnitt davon) ins äußere Gebiet zurückschreiben. */
+    const syncOuter = (x0 = 0, y0 = 0, x1 = gridSize - 1, y1 = gridSize - 1) => {
+        if (!hasOuter) return;
+        x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+        x1 = Math.min(gridSize - 1, Math.ceil(x1)); y1 = Math.min(gridSize - 1, Math.ceil(y1));
+        for (let y = y0; y <= y1; y++) {
+            const a = y * gridSize, b = (y + OFF) * OG + OFF;
+            for (let x = x0; x <= x1; x++) { outer.heightmap[b + x] = heightmap[a + x]; outer.landcover[b + x] = world.landcover[a + x]; }
+        }
+    };
+    // Seebecken und Bachbetten eingraben – als Erstes, bevor irgendetwas die Höhen liest, und im
+    // GANZEN Gebiet: Bäche und Seen laufen über den Kartenrand hinaus weiter.
+    const waterInfo = prepareWater(outerWorld, OG, { hScale });
+    if (hasOuter) {
+        const depth = new Float32Array(gridSize * gridSize);
+        for (let y = 0; y < gridSize; y++) {
+            const a = y * gridSize, b = (y + OFF) * OG + OFF;
+            for (let x = 0; x < gridSize; x++) { heightmap[a + x] = outer.heightmap[b + x]; depth[a + x] = outerWorld.waterDepth[b + x]; }
+        }
+        world.waterDepth = depth;
+    } else world.waterDepth = outerWorld.waterDepth;
     // Bodenfreiheit für alle Figuren: die Sohle liegt knapp ÜBER dem Gelände.
     // Ohne diesen Abstand versinken Gäste je nach Hangneigung im Schnee.
     const GROUND_CLEAR = 0.1;
@@ -1976,12 +2007,18 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const consider = (x, y) => { const i = y * G + x; if (lc[i] === 2 || slopeAt(x, y) > 8) return; const h = hm[i]; if (h < minZ) { minZ = h; EDGE_X = x; EDGE_Y = y; } };
         for (let x = M; x < G - M; x++) { consider(x, M); consider(x, G - 1 - M); }
         for (let y = M; y < G - M; y++) { consider(M, y); consider(G - 1 - M, y); }
-        // Basis-ZENTRUM ~14 Kacheln vom Rand in die Karte hinein (Richtung Gipfel),
-        // damit Lift/Parkplatz nicht halb am Kartenrand liegen. Die Straße führt
-        // vom Zentrum zurück zum Rand (Einfahrt von außerhalb).
+        // Basis-ZENTRUM ein gutes Stück in die Karte hinein (Richtung Gipfel): Talstation, Ort
+        // und Parkplatz brauchen Platz, und die Zufahrt muss zwischen Ort und Kartenrand
+        // durchpassen. Früher lag es fest 17 Kacheln hinter der Randkachel – lief die Linie zum
+        // Gipfel schräg zum Rand, klebte alles an der Kante, der Ort landete auf einem Notplatz
+        // und die Straße kam nur noch außen um den ganzen Berg herum zum Rand.
         let ux = RSX - EDGE_X, uy = RSY - EDGE_Y; const ul0 = Math.hypot(ux, uy) || 1; ux /= ul0; uy /= ul0;
-        RVX = Math.max(M + 2, Math.min(G - M - 2, Math.round(EDGE_X + ux * 17)));
-        RVY = Math.max(M + 2, Math.min(G - M - 2, Math.round(EDGE_Y + uy * 17)));
+        const BASE_IN = 44;                                   // Mindestabstand der Talstation zu jeder Kartenkante
+        let tIn = 17;
+        const edgeGap = (t) => { const x = EDGE_X + ux * t, y = EDGE_Y + uy * t; return Math.min(x, y, G - 1 - x, G - 1 - y); };
+        while (tIn < Math.min(90, ul0 * 0.4) && edgeGap(tIn) < BASE_IN) tIn += 1;
+        RVX = Math.max(M + 2, Math.min(G - M - 2, Math.round(EDGE_X + ux * tIn)));
+        RVY = Math.max(M + 2, Math.min(G - M - 2, Math.round(EDGE_Y + uy * tIn)));
         EDGE_GX = EDGE_X; EDGE_GY = EDGE_Y; // Einfahrtspunkt merken
         const BASE_GX = RVX, BASE_GY = RVY;
 
@@ -2033,7 +2070,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     // Terrain + Wald + Fels (Fels-Farbe der Steilflächen je Level getönt).
     // Das Gelände (auch Flussbetten) bleibt unverändert — kein Abflachen.
     const rockStyle = ROCK_STYLES[level?.id] || ROCK_STYLES._default;
-    const terrain = buildTerrainMesh(world, gridSize, theme, { hScale, tile, rockCol: rockStyle.base });
+    snowU.uRockCol.value.setRGB(rockStyle.base[0], rockStyle.base[1], rockStyle.base[2]);
+    const terrain = buildTerrainMesh(world, gridSize, theme, { hScale, tileSize: tile, rockCol: rockStyle.base, snowUniforms: snowU });
     scene.add(terrain);
     const forest = buildForest(world, gridSize, { hScale, tile, levelId: level?.id });
     // Schneelast sofort anwenden — sonst stehen die Bäume die erste Sekunde
@@ -2043,6 +2081,23 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         scene.add(forest);
         // weitere Baumarten (Tannen, Laubbäume, Stämme) mit einhängen
         for (const m of (forest.userData.extraMeshes || [])) scene.add(m);
+    }
+    // ===== WALDGÜRTEL HINTER DER KANTE =====
+    // Dieselben Bäume wie auf dem Spielfeld stehen noch ein Stück ins Umland hinein und werden
+    // dort nach außen ausgedünnt; im selben Maß setzen die einfacheren Bäume des Umlands ein
+    // (Surround3D.js fragt dafür inForestBelt). So gibt es im Wald keine Linie an der Kartenkante.
+    const BELT_FULL = 10, BELT_END = smallTouch ? 26 : 36;
+    const beltHash = (ox, oy) => { let n = (ox * 374761393 + oy * 668265263 + 97) | 0; n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+    const inForestBelt = (ox, oy, dEdge) => dEdge >= 1 && dEdge <= BELT_END
+        && (dEdge <= BELT_FULL || beltHash(ox, oy) < 1 - (dEdge - BELT_FULL) / (BELT_END - BELT_FULL));
+    const forestBelt = hasOuter ? buildForest(outerWorld, OG, { hScale, tile, levelId: level?.id,
+        filter: (ox, oy) => { const gx = ox - OFF, gy = oy - OFF; return inForestBelt(ox, oy, Math.max(-gx, -gy, gx - (gridSize - 1), gy - (gridSize - 1))); } }) : null;
+    if (forestBelt) {
+        if (forestBelt.userData.setSnowLoad) forestBelt.userData.setSnowLoad(weather.treeLoad);
+        // außerhalb des Schattenbereichs der Sonne: kein Schattenwurf (spart einen ganzen Zeichendurchgang)
+        forestBelt.castShadow = false;
+        scene.add(forestBelt);
+        for (const m of (forestBelt.userData.extraMeshes || [])) { m.castShadow = false; scene.add(m); }
     }
     // Felsen um mehrere Gipfel konzentrieren (nicht flächendeckend)
     const rockPeaks = findTopPeaks(heightmap, gridSize, 7, gridSize * 0.09);
@@ -2097,10 +2152,22 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const glacierTiles = [];
     for (let i = 0; i < world.landcover.length; i++) if (world.landcover[i] === 8) glacierTiles.push(i);
     const glacier = buildGlacier(glacierTiles, heightmap, gridSize, { hScale, tile });
-    if (glacier) scene.add(glacier);
+    if (glacier) {
+        // Das Eis bekommt denselben Schattenton und Dunst wie der Schnee ringsum
+        glacier.traverse(o => { if (o.isMesh && o.material) { o.material.roughness = 0.6; matchSnowLook(o.material, snowU, 'snow-look-ice'); } });
+        scene.add(glacier);
+    }
 
     // Wasser: Seen und Bäche als eine glatte Fläche mit Tiefe, Wellen und Strömung (Water3D.js)
-    const water = buildWater(world, gridSize, waterInfo, { tileSize: tile });
+    syncOuter();          // Basisplatz und gerodete Trasse stehen damit auch im äußeren Gebiet
+    // Küstenlevel: hinter dem erzeugten Gebiet läuft das Meer bis zum Horizont weiter
+    const farInfo = world.far || null;
+    const seaOpts = farInfo?.ocean ? {
+        reach: half + worldSpan * 2.1,
+        zMax: -half + (farInfo.oceanDepth || 0) * (world.upsampled || 1) * tile * 1.1
+    } : null;
+    const water = buildWater(outerWorld, OG, waterInfo, { tileSize: tile, sea: seaOpts,
+        rim: [(half + worldSpan * 2.1) * 0.68, (half + worldSpan * 2.1) * 0.97] });
     if (water) scene.add(water);
     let firstLake = null;
     for (const lk of findLakes(world.landcover, heightmap, gridSize)) {
@@ -2179,48 +2246,42 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     })();
 
     // Wolken am Himmel
-    // ===== ALPENKULISSE =====
-    // Verlaufshimmel statt flacher Hintergrundfarbe, dahinter drei gestaffelte
-    // Bergketten mit Luftperspektive. Beides folgt dem Tageslicht.
+    // ===== HIMMEL =====
+    // Verlaufshimmel statt flacher Hintergrundfarbe; er folgt dem Tageslicht. (Die Berge am
+    // Horizont sind echtes Gelände – siehe UMLAND weiter unten.)
     const skyDome = makeSkyDome(Math.min(4200, worldSpan * 4.2));
     scene.add(skyDome);
-    // Charakter der Fernkulisse je Level: Mittelgebirge weich und bewaldet,
-    // Hochgebirge schroff mit Gletschern, Küstenlevel dazwischen.
-    const RANGE_STYLE = {
-        mittelgebirge: { rugged: 0.10, forest: 0.95, glacier: 0.00 },
-        alpen:         { rugged: 0.72, forest: 0.55, glacier: 0.55 },
-        schweiz:       { rugged: 0.85, forest: 0.42, glacier: 0.75 },
-        frankreich:    { rugged: 0.68, forest: 0.50, glacier: 0.45 },
-        italien:       { rugged: 0.90, forest: 0.34, glacier: 0.40 },  // Dolomiten: sehr schroff
-        norwegen:      { rugged: 0.48, forest: 0.62, glacier: 0.60 },  // rund geschliffen
-        rockies:       { rugged: 0.76, forest: 0.58, glacier: 0.35 },
-        kanada:        { rugged: 0.62, forest: 0.85, glacier: 0.45 },
-        anden:         { rugged: 0.88, forest: 0.28, glacier: 0.70 },
-        japan:         { rugged: 0.55, forest: 0.70, glacier: 0.25 }
+    // ===== UMLAND =====
+    // Hinter dem Kartenrand geht dieselbe Landschaft weiter (Surround3D.js): erst das mit erzeugte
+    // Gebiet, dahinter die Landschaftsformel bis in den Horizontdunst. Früher standen hier eine
+    // Schürze, die rundum gleich abfiel, und Bergketten als Ringe um die Karte.
+    const surround = hasOuter ? buildSurround(world, gridSize, {
+        hScale, tileSize: tile, theme, rockCol: rockStyle.base, snowUniforms: snowU, terrain,
+        waterDepth: outerWorld.waterDepth,
+        forest: FOREST_MIX_TABLE[level?.id] || FOREST_MIX_TABLE.alpen,
+        inBelt: forestBelt ? inForestBelt : null, beltEnd: BELT_END,
+        treeBudget: smallTouch ? 18000 : 28000
+    }) : null;
+    if (surround) {
+        scene.add(surround);
+        snowU.uRim.value.set(surround.userData.reach * 0.68, surround.userData.reach * 0.97);
+        surround.userData.setSnowLoad(weather.treeLoad);
+    }
+    /**
+     * Normalen des Spielfelds neu rechnen. Am Rand kennt das Netz nur seine eigene Seite – dort
+     * kommt die Normale aus dem Gelände beiderseits der Kante, genau wie beim Umland. Sonst
+     * zeichnete sich die Kartenkante als feine Lichtlinie ab.
+     */
+    const _en = [0, 1, 0];
+    const recomputeTerrainNormals = () => {
+        terrain.geometry.computeVertexNormals();
+        if (!surround) return;
+        const nrm = terrain.geometry.attributes.normal, arr = nrm.array, G = gridSize;
+        const fix = (vi) => { surround.userData.edgeNormal(vi, _en); arr[vi * 3] = _en[0]; arr[vi * 3 + 1] = _en[1]; arr[vi * 3 + 2] = _en[2]; };
+        for (let k = 0; k < G; k++) { fix(k); fix((G - 1) * G + k); fix(k * G); fix(k * G + G - 1); }
+        nrm.needsUpdate = true;
     };
-    const ranges = makeDistantRanges(worldSpan,
-        RANGE_STYLE[level?.id] || { rugged: 0.55, forest: 0.6, glacier: 0.35 });
-    scene.add(ranges);
-    // Geländeschürze: setzt die Karte nach außen fort und lässt sie in den
-    // Horizontdunst übergehen — sonst endet das Spielfeld an einer Kante.
-    const apron = buildTerrainApron(world, gridSize, theme, {
-        hScale, tileSize: tile, hazeColor: 0xcddff0
-    });
-    // Die Schürze färbt sich nach HÖHE und Schneelage — sie wird deshalb bei
-    // jedem Wetterwechsel neu eingefärbt (siehe repaintSnowCover).
-    scene.add(apron);
-    // Umland-Wald und Talnebel: die Schürze allein wirkt wie eine Rampe.
-    const apronForest = buildApronForest(world, gridSize, {
-        hScale, tileSize: tile, count: 16000,
-        hue: (FOREST_MIX_TABLE[level?.id] || FOREST_MIX_TABLE.alpen || {}).hue || undefined,
-        surfacePoint: apron.userData.pointAt        // Bäume stehen genau auf der vernetzten Schürze
-    });
-    scene.add(apronForest);
-    const valleyHaze = buildValleyHaze(world, gridSize, { hScale, tileSize: tile });
-    scene.add(valleyHaze);
-    const apronLights = buildApronLights(world, gridSize, { hScale, tileSize: tile });
-    scene.add(apronLights);
-    scene.add(buildEdgeShade(world, gridSize, { hScale, tileSize: tile }));
+    recomputeTerrainNormals();
     // ===== ORTSCHAFTEN =====
     // Rein dekorativ, aber Ausgangspunkt des Skigebiets: ab Level 2 gibt es
     // mehrere Orte (bis zu drei), die der Spieler mit Liften und Pisten
@@ -3683,6 +3744,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const q = QUALITY[qTier];
         if (bloomPass) bloomPass.enabled = q.bloom;
         if (smaaPass) smaaPass.enabled = q.smaa;
+        snowU.uDetail.value = qTier === 0 ? 0 : 1;          // Windrippen und Glitzern: auf der kleinsten Stufe aus
         if (sun.shadow.mapSize.x !== q.shadow) {
             sun.shadow.mapSize.set(q.shadow, q.shadow);
             if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }   // wird in neuer Größe neu angelegt
@@ -3717,20 +3779,17 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     // Startblick UNTEN am Basisplatz (Talpunkt), leicht Richtung Berg versetzt
     const camG = worldPos(BASE_GX + (RSX - BASE_GX) * 0.22, BASE_GY + (RSY - BASE_GY) * 0.22);
     const target = new THREE.Vector3(camG.x, camG.y + worldSpan * 0.03, camG.z);
-    // Oberfläche an einem beliebigen Weltpunkt: auf der Karte die Schneedecke,
-    // außerhalb das Umland (dieselbe Formel wie die Geländeschürze). Daran
-    // richtet sich die Kamera aus – sie kann nirgends in den Boden eintauchen.
-    const APRON_REACH = worldSpan * 1.70;          // Vorgabe von buildTerrainApron
+    // Oberfläche an einem beliebigen Weltpunkt: auf der Karte die Schneedecke, außerhalb das
+    // Umland – genau die gezeichnete Fläche. Daran richtet sich die Kamera aus: sie kann
+    // nirgends in den Boden eintauchen.
     const surfaceAt = (wx, wz) => {
         const ax = Math.abs(wx), az = Math.abs(wz);
         if (ax <= half && az <= half) return yAtSmooth((wx + half) / tile, (wz + half) / tile);
-        // außerhalb: Randpunkt auf dem Strahl vom Kartenmittelpunkt, von dort nach außen
+        const y = surround ? surround.userData.heightAt(wx, wz) : null;
+        if (y != null) return y + 0.4;
+        // ohne Umland: Höhe des nächsten Randpunkts
         const k = half / Math.max(ax, az);
-        const ex = wx * k, ez = wz * k;
-        const edgeY = yAtSmooth((ex + half) / tile, (ez + half) / tile);
-        const v = Math.min(1, (Math.hypot(wx, wz) - Math.hypot(ex, ez)) / APRON_REACH);
-        // Die Schürze ist grob vernetzt und weicht von der Formel ab – etwas Luft lassen.
-        return apronHeight(edgeY, Math.atan2(ez, ex), v).y + 2.5;
+        return yAtSmooth((wx * k + half) / tile, (wz * k + half) / tile);
     };
     // Für die Kamera selbst zählt zusätzlich alles Feste, das aus dem Schnee ragt (Felsblöcke).
     const solidAt = (wx, wz) => Math.max(surfaceAt(wx, wz), rockTopAt(wx, wz));
@@ -3750,7 +3809,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         scene.fog.near = near; scene.fog.far = near + FOG_DEPTH;
     };
     updateFog();
-    if (import.meta.env.DEV) window.__mtCam = { orbit, camera, surfaceAt, solidAt, terrain, apron, rocks, forest, scene, sun, renderer, THREE, half, world, heightmap, hScale, gridSize };   // nur beim Entwickeln: Kamera und Szene prüfen
+    if (import.meta.env.DEV) window.__mtCam = { orbit, camera, surfaceAt, solidAt, terrain, surround, snowU, rocks, forest, scene, sun, renderer, THREE, half, world, heightmap, hScale, gridSize, weather };   // nur beim Entwickeln: Kamera und Szene prüfen
 
     // Schnee-Partikel
     const snow = (() => {
@@ -6056,12 +6115,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const _skyA = new THREE.Color(), _skyB = new THREE.Color(), _skyC = new THREE.Color();
     const _skyD = new THREE.Color(), _skyE = new THREE.Color(), _skyF = new THREE.Color();
     const _skyG = new THREE.Color(), _skyH = new THREE.Color(), _skyI = new THREE.Color();
-    /** Dunstfarbe am Fuß der Bergketten — folgt Tageszeit und Abendrot. */
-    const horizonTint = (day, glow) => {
-        _skyI.set(0x3d5a7d).lerp(_skyF.set(0xdce9f2), day);
-        if (glow > 0) _skyI.lerp(_skyG.set(0xffb789), glow * 0.7);
-        return _skyI;
-    };
     let lastCycle = -1, sunsetStrength = 0;
     const applyDaylight = (t) => {
         // 1 = heller Tag, 0 = tiefe Dämmerung (nie ganz Nacht)
@@ -6118,6 +6171,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 horiz.lerp(_skyH.set(0xffcb95), glow * 0.7);
             }
             skyDome.userData.setColors(zenith, middle, horiz);
+            snowU.uHorizon.value.copy(horiz);            // ganz außen geht das Umland in diese Farbe über
             // Der Himmel spiegelt sich im Wasser
             if (water) water.userData.setEnv({ day, sunDir: sun.position, sunColor: sun.color, zenith: middle, horizon: horiz });
         } else if (water) {
@@ -6137,16 +6191,11 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             //  nightVehicles ein — siehe syncFleet)
             for (const v3 of nightVehicles) v3.userData.setNight(dark);
         }
-        if (apron && apron.userData.setHaze) apron.userData.setHaze(horizonTint(day, glow));
-        if (valleyHaze?.userData?.setHaze) valleyHaze.userData.setHaze(horizonTint(day, glow));
-        if (ranges && ranges.userData.setLight) {
-            ranges.userData.setLight({
-                tint: horizonTint(day, glow),
-                sunAz: Math.atan2(sun.position.x, sun.position.z),
-                day, glow,
-                warm: _skyG.set(glow > 0.35 ? 0xff9d63 : 0xffc79a)
-            });
-        }
+        // Schneedecke: Sonnenstand und Lichtfarbe für Glitzern, Ausaperung der Sonnenhänge und den
+        // Schattenton (tags kräftig blau, nachts kaum – das Mondlicht ist ohnehin kühl)
+        snowU.uSunDirW.value.copy(sun.position).normalize();
+        snowU.uSunCol.value.copy(sun.color).multiplyScalar(0.35 + 0.65 * day);
+        snowU.uShade.value.setRGB(1 - 0.22 * day, 1 - 0.11 * day, 1 + 0.10 * day);
         // ===== MOND =====
         // Gegenüber der Sonne, also gespiegelt an der Weltmitte, und etwas
         // höher, damit er nicht im Gelände klebt. `cyc` zählt die Spieltage:
@@ -6154,8 +6203,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         {
             const night = 1 - day;
             const sd = sun.position.clone().normalize();
-            // Weiter draussen als die FERNSTE Bergkette (2.85 x worldSpan),
-            // sonst könnte deren Tiefenmaske ihn gar nicht verdecken.
+            // Weiter draußen als das Umland (reicht bis 2,6 Kartenbreiten von der Mitte),
+            // damit er hinter dessen Bergen untergehen kann.
             _moonPos.set(-sd.x, Math.abs(sd.y) * 0.42 + 0.40, -sd.z)
                     .normalize().multiplyScalar(worldSpan * 3.3);
             moon.setPhase((cyc % 8) / 8 + 0.06);
@@ -6215,7 +6264,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         MATS.winGlow.emissiveIntensity = 0.4 + (1 - day) * 1.4;
         // Flutlicht an den Pisten: ab Dämmerung an, tagsüber aus
         const night = Math.max(0, 1 - day * 1.4); // 0 am hellen Tag, ~1 in der Dämmerung
-        if (apronLights?.userData?.setNight) apronLights.userData.setNight(night);
         for (const f of floodlights) {
             f.lampMat.emissiveIntensity = 0.2 + night * 2.2;
             if (f.glow) {
@@ -6229,7 +6277,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
 
     let raf=0; const clock=new THREE.Clock(); let lastT=0;
     if (import.meta.env.DEV && window.__mtCam) {   // nur beim Entwickeln: Tageszeit und Qualitätsstufe stellen
-        Object.assign(window.__mtCam, { clock, CYCLE, raycastTerrain: (x, y) => raycastTerrain(x, y),
+        Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             quality: { get: () => qTier, set: (n) => { qTier = Math.max(0, Math.min(Q_MAX, n | 0)); applyQuality(); } } });
     }
     const animate=()=>{
@@ -6678,10 +6726,11 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             }
         }
         pos.needsUpdate = true;
+        syncOuter(gx0, gy0, gx1, gy1);                       // das äußere Gebiet kennt die neue Höhe ebenfalls
         // Bäume im veränderten Bereich mitziehen — sonst schweben sie.
         if (forest?.userData?.reseat) forest.userData.reseat(cgx, cgy, outer + 2);
         if (glacier?.userData?.reseat) glacier.userData.reseat(cgx, cgy, outer + 2);
-        terrain.geometry.computeVertexNormals();
+        recomputeTerrainNormals();
     };
     /**
      * Steilste Abwärtsrichtung (Falllinie) an einer Stelle. Danach richten
@@ -6903,7 +6952,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             const dh = sculpt(Math.max(-1, Math.min(1, along / halfLen)), across);
             const vi = gy * gridSize + gx;
             // Einfärbung: Mulde/Tisch eisig (nach Tiefe/Höhe), Deckkante als blaue Linie
-            if (sculpt.tint) { const tv = sculpt.tint(along / halfLen, across, dh); if (tv > RUN_TINT[vi]) RUN_TINT[vi] = tv; }
+            if (sculpt.tint) { const tv = sculpt.tint(along / halfLen, across, dh); if (tv > RUN_TINT[vi]) { RUN_TINT[vi] = tv; markDirty = true; } }
             const h = heightmap[vi];
             let nh;
             if (sculpt.plane) {
@@ -6931,7 +6980,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             pos.setY(vi, nh * hScale);
         }
         pos.needsUpdate = true;
-        terrain.geometry.computeVertexNormals();
+        recomputeTerrainNormals();
         // auch hier die Bäume auf die neue Geländehöhe nachsetzen
         if (forest?.userData?.reseat) forest.userData.reseat(cgx, cgy, Math.max(len, width) + 4);
         // Gletschereis liegt als eigenes Mesh auf dem Gelände — mitziehen, sonst
@@ -6946,10 +6995,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const pos = terrain.geometry.attributes.position;
         for (let k = 0; k < strip.changed.length; k += 2) {
             const vi = strip.changed[k], h = strip.changed[k + 1];
-            heightmap[vi] = h; pos.setY(vi, h * hScale); RUN_TINT[vi] = 0;
+            heightmap[vi] = h; pos.setY(vi, h * hScale); if (RUN_TINT[vi]) { RUN_TINT[vi] = 0; markDirty = true; }
         }
         pos.needsUpdate = true;
-        terrain.geometry.computeVertexNormals();
+        recomputeTerrainNormals();
         const r = (strip.rad || 16) + 4;
         if (forest?.userData?.reseat) forest.userData.reseat(cgx, cgy, r);
         if (glacier?.userData?.reseat) glacier.userData.reseat(cgx, cgy, r);
@@ -7003,11 +7052,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const loadTarget = smooth01((weather.snowfall - 0.05) / 0.75);
         weather.treeLoad += (loadTarget - weather.treeLoad) * Math.min(1, dt * (loadTarget > weather.treeLoad ? 0.22 : 0.05));
         if (forest?.userData?.setSnowLoad) forest.userData.setSnowLoad(weather.treeLoad);
+        if (forestBelt?.userData?.setSnowLoad) forestBelt.userData.setSnowLoad(weather.treeLoad);
         // Der Wald im Umland zieht mit, sonst stünde hinter der Kante ein dunkler Wald neben einem verschneiten.
-        if (apronForest?.userData?.setSnow) apronForest.userData.setSnow(weather.treeLoad);
+        if (surround) surround.userData.setSnowLoad(weather.treeLoad);
+        snowU.uFreshLoad.value = weather.treeLoad;
         // Felsen bekommen nur einen Hauch Schnee — halb so viel wie die Bäume.
         if (rocks?.userData?.setSnow) rocks.userData.setSnow(weather.treeLoad * 0.5);
         _snowLine = snowLineY();
+        updateSnowLine();                              // die Schneegrenze wandert stufenlos (Stellgröße des Materials)
         return Math.abs(weather.snowLine - _lastPaintedLine) > 0.003;
     }
     /**
@@ -7039,17 +7091,25 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             }
             SNOW_BASE[vi] = s;
         }
+        // Dieselbe Rechnung je Höhenstufe: das Umland hat kein Raster zum Mitschreiben, dort liest
+        // das Schnee-Material den Neuschnee aus dieser Tabelle (gleiche Höhe = gleicher Stand).
+        const bins = snowU.uFresh.value;
+        for (let b = 0; b < FRESH_BINS; b++) {
+            let s = bins[b];
+            if (add > 0 && s < 1) s = Math.min(1, s + add);
+            if (s > 0) {
+                const h = (b / (FRESH_BINS - 1)) * FRESH_TOP;
+                if (h < limit) s = Math.max(0, s - rate * (0.25 + Math.min(1, (limit - h) / warmSpan)));
+            }
+            bins[b] = s;
+        }
     }
     // Beschneiung anwenden: alle Kanonen mit Wasser machen ihren Sektor weiß
     function applySnowmaking() {
         if (!cannons.length) return;
-        const col = terrain?.geometry?.attributes?.color;
-        if (!col) return;
         // Ohne Stausee läuft die Kanone nur im Notbetrieb (kurze Reichweite),
         // mit genug Wasser erreicht sie ihre volle Wurfweite.
         const power = cannonPower();
-        const snow = [0.93, 0.95, 0.98];
-        let changed = false;
         for (const c of cannons) {
             // Die Kanone bläst entlang ihrer lokalen +X-Achse (so steht das Modell).
             // Bei rotation.y = rot zeigt +X im Weltraum auf (cos rot, -sin rot).
@@ -7074,110 +7134,46 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 const cover = Math.min(1, fRad * fArc);
                 if (cover <= 0.02) continue;
                 if (cover > SNOW_BASE[vi]) SNOW_BASE[vi] = cover;
-                const grain = (((vi * 374761393) >>> 24 & 15) - 7.5) / 255;
-                col.setXYZ(vi, snow[0] + grain, snow[1] + grain, snow[2] + grain);
-                changed = true;
             }
         }
-        if (changed) col.needsUpdate = true;
     }
-    // Originalfarben des Terrains sichern. Nur so lässt sich der Boden beim
-    // Wetterwechsel wieder korrekt aufhellen — sonst würde das Grün mit jedem
-    // Durchgang nachdunkeln, weil man auf schon eingefärbte Werte rechnet.
-    const COL0 = terrain.geometry.attributes.color.array.slice();
     // Einfärbung modellierter Anlagen (0..1): Pipe-Mulde eisig-blau, Deckkante blau —
     // sonst ist eine weiße Mulde im weißen Schnee praktisch unsichtbar.
     const RUN_TINT = new Float32Array(gridSize * gridSize);
+    let markDirty = false;        // Anlagen-Einfärbung bzw. Kronendach geändert -> aMark neu hochladen
+    let groundDirty = false;      // Untergrundfarbe geändert (gerodet, planiert) -> color neu hochladen
+    // Höhe der obersten Neuschnee-Stufe fürs Umland (dort können Berge etwas über die Karte hinausragen)
+    const FRESH_TOP = _maxH * 1.5;
+    snowU.uFreshTop.value = FRESH_TOP * hScale;
+    /** Schneegrenze ans Material geben: darüber liegt Naturschnee, im Band darunter läuft er aus. */
+    function updateSnowLine() {
+        const limit = snowLineY();
+        snowU.uSnowLine.value = limit * hScale;
+        snowU.uSnowBand.value = Math.max(1, limit * 0.30) * hScale;
+    }
     /**
-     * Malt die komplette Schneedecke neu: oberhalb der aktuellen Schneegrenze
-     * (und überall mit Kunstschnee) Originalfarbe/Weiß, darunter Wiesengrün.
-     * Läuft nur alle paar Sekunden, weil sie über das ganze Gitter geht.
+     * Schneedecke neu zeichnen. Wie der Schnee aussieht, rechnet das Schnee-Material für jeden
+     * Bildpunkt (SnowSurface.js); hier werden nur seine Eingaben nachgeführt: die Schneegrenze,
+     * der liegende Neu-/Kunstschnee je Rasterpunkt und – wenn sich etwas geändert hat – die
+     * Einfärbung der Anlagen und der Untergrund. Läuft alle paar Sekunden.
      */
     function repaintSnowCover() {
-        const col = terrain?.geometry?.attributes?.color;
-        if (!col) return;
-        const arr = col.array;
-        const limit = snowLineY();
+        const geo = terrain?.geometry;
+        if (!geo?.attributes?.aSnow) return;
         _lastPaintedLine = weather.snowLine;
-        // Umland mitziehen: dieselbe Schneegrenze, damit Karte und Schürze
-        // immer denselben Winterstand zeigen.
-        // Übergangsband um die Schneegrenze: kein harter Schnitt, sondern ein
-        // Streifen, in dem der Boden von grün nach weiß überblendet.
-        const band = Math.max(1, limit * 0.30);
-        if (apronForest?.userData?.setSnowLine) apronForest.userData.setSnowLine(limit * hScale, band * hScale);
-        for (let vi = 0; vi < gridSize * gridSize; vi++) {
-            const lc = world.landcover[vi];
-            if (lc === 2 || lc === 3) continue;            // Wasser/Fels bleiben, wie sie sind
-            const i3 = vi * 3;
-            const h = heightmap[vi] || 0;
-            // 1) Naturschnee: weich über die Schneegrenze eingeblendet.
-            //
-            // FEINGRANULARER ÜBERGANG: Ein reiner Höhenverlauf lässt das Grün
-            // als geschlossene Front zurückweichen. In Wirklichkeit bleibt
-            // Schnee fleckig liegen — in Mulden und Schattenlagen länger, auf
-            // Rippen und Südhängen kürzer. Ein feines Rauschfeld verschiebt
-            // deshalb die wirksame Grenze je Punkt um ein Stück.
-            const gx0 = vi % gridSize, gy0 = (vi / gridSize) | 0;
-            // GETEILTE Formel (TerrainMesh.snowLayer) — die Schürze rechnet
-            // mit exakt derselben, deshalb taut das Umland identisch.
-            const sl = snowLayer(h, limit, gx0, gy0);
-            const nat = lc === 8 ? 1 : sl.nat;
-            // 2) Wie grün wäre es hier ohne Schnee? (tiefer = satter)
-            const gf = sl.gf;
-            const gr = COL0[i3]     + (0.30 - COL0[i3])     * gf;
-            const gg = COL0[i3 + 1] + (0.42 - COL0[i3 + 1]) * gf;
-            const gb = COL0[i3 + 2] + (0.22 - COL0[i3 + 2]) * gf;
-            // 3) grün -> Naturschnee überblenden
-            let r = gr + (COL0[i3]     - gr) * nat;
-            let g = gg + (COL0[i3 + 1] - gg) * nat;
-            let b = gb + (COL0[i3 + 2] - gb) * nat;
-            // 3b) WIE der Schnee liegt: Verwehungen und Hangschattierung.
-            // Wo viel Schnee liegt, zeichnet ein weiches Wellenfeld flache
-            // Wächten und Windrippen; Nordhänge bleiben eine Spur kühler,
-            // Sonnenhänge heller. Das gibt der weißen Fläche Struktur,
-            // statt sie als gleichförmiges Weiß stehen zu lassen.
-            if (nat > 0.15) {
-                const drift = Math.sin(gx0 * 0.19 + Math.cos(gy0 * 0.13) * 1.7) * 0.5
-                            + Math.sin(gy0 * 0.26 + Math.sin(gx0 * 0.11) * 1.3) * 0.5;
-                const dv = drift * 0.030 * nat;
-                // Hangrichtung: Gefälle nach Süden = heller, nach Norden = kühler
-                const hN = heightmap[Math.max(0, vi - gridSize)] || h;
-                const hS = heightmap[Math.min(gridSize * gridSize - 1, vi + gridSize)] || h;
-                const aspect = Math.max(-1, Math.min(1, (hN - hS) / 12));
-                const av = aspect * 0.022 * nat;
-                r += dv + av * 1.0;
-                g += dv + av * 0.85;
-                b += dv * 0.7 + av * 0.55;
-            }
-            // 4) Kunstschnee obendrauf, ebenfalls weich (weicher Kegelrand)
-            const art = SNOW_BASE[vi];
-            if (art > 0.01) {
-                const grain = (((vi * 374761393) >>> 24 & 15) - 7.5) / 255;
-                const a = smooth01(art);
-                r += (0.93 + grain - r) * a;
-                g += (0.95 + grain - g) * a;
-                b += (0.98 + grain - b) * a;
-            }
-            // 5) Anlagen-Einfärbung: Pipe/Schanzen eisig, Deckkante blau
-            const rtn = RUN_TINT[vi];
-            if (rtn > 0.01) {
-                if (rtn >= 2) {                                   // Kantenlinie (Marker 2+)
-                    const k = Math.min(1, rtn - 2);
-                    r += (0.18 - r) * k; g += (0.45 - g) * k; b += (0.92 - b) * k;
-                } else {
-                    r += (0.80 - r) * rtn; g += (0.89 - g) * rtn; b += (0.97 - b) * rtn;
-                }
-            }
-            // Drift- und Hangschattierung können knapp über 1 laufen — hier
-            // sauber begrenzen, sonst kippen die Farben.
-            arr[i3]     = r < 0 ? 0 : r > 1 ? 1 : r;
-            arr[i3 + 1] = g < 0 ? 0 : g > 1 ? 1 : g;
-            arr[i3 + 2] = b < 0 ? 0 : b > 1 ? 1 : b;
+        updateSnowLine();
+        const sn = geo.attributes.aSnow, arr = sn.array, lcs = world.landcover;
+        for (let vi = 0; vi < arr.length; vi++) {
+            const lc = lcs[vi];
+            arr[vi] = lc === 8 ? 1 : lc === 2 ? 0 : SNOW_BASE[vi];    // Gletscher immer weiß, Wasser nie
         }
-        col.needsUpdate = true;
-        // Umland mitziehen – NACH dem Spielfeld, denn die Schürze übernimmt an der Kante
-        // dessen frisch gemalte Farben (nahtloser Übergang statt sichtbarem Kartenrand).
-        if (apron?.userData?.setSnowLine) apron.userData.setSnowLine(limit * hScale, arr);
+        sn.needsUpdate = true;
+        if (markDirty) {
+            const mk = geo.attributes.aMark, ma = mk.array;
+            for (let vi = 0; vi < RUN_TINT.length; vi++) ma[vi * 2] = RUN_TINT[vi];
+            mk.needsUpdate = true; markDirty = false;
+        }
+        if (groundDirty) { geo.attributes.color.needsUpdate = true; geo.attributes.aMark.needsUpdate = true; groundDirty = false; }
         repaintPisteBeds();
         repaintBuildingPads();
     }
@@ -7287,9 +7283,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 const wr = 0.60 + 0.40 * q;                 // Rot fällt am stärksten
                 const wg = 0.65 + 0.35 * q;
                 const wb = 0.76 + 0.24 * q;                 // Blau bleibt -> kühler Schatten
-                arr[i]     = (0.34 + (1 - 0.34) * cov) * wr;
-                arr[i + 1] = (0.46 + (1 - 0.46) * cov) * wg;
-                arr[i + 2] = (0.24 + (1 - 0.24) * cov) * wb;
+                // ausgeapert: fahles Wintergras wie die Wiese ringsum
+                arr[i]     = (0.40 + (1 - 0.40) * cov) * wr;
+                arr[i + 1] = (0.42 + (1 - 0.42) * cov) * wg;
+                arr[i + 2] = (0.27 + (1 - 0.27) * cov) * wb;
             }
             ca.needsUpdate = true;
             }
@@ -7413,7 +7410,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 }
                 if (main) break;
             }
-            spots.push(main || { gx: RVX, gy: Math.min(gridSize - M, RVY + 18) });
+            // Notplatz, falls nichts Passendes frei ist: neben der Talstation, aber mit Abstand zum Kartenrand
+            spots.push(main || { gx: Math.max(M, Math.min(gridSize - 1 - M, RVX)), gy: Math.max(M, Math.min(gridSize - 1 - M, RVY + (RVY > gridSize / 2 ? -18 : 18))) });
         }
 
         // --- NEBENORTE: in den ENTFERNTESTEN Ecken, weit weg vom Hauptort ---
@@ -7624,9 +7622,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     }
     pendingFlatten.length = 0;
 
-    // Schürze einmal initial einfärben und danach bei jedem Wetterwechsel
-    if (apronForest?.userData?.setSnowLine) apronForest.userData.setSnowLine(snowLineY() * hScale, Math.max(1, snowLineY() * 0.30) * hScale);
-    repaintSnowCover();   // Ausgangszustand: Tieflagen sind aper (färbt am Ende auch die Schürze)
+    repaintSnowCover();   // Ausgangszustand der Schneedecke
     /**
      * Schneedecke an einer Gitterzelle als Wert 0..1. Das ist die EINE Quelle
      * der Wahrheit — sie bestimmt sowohl die Einfärbung des Bodens als auch,
@@ -7653,19 +7649,20 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         return snowCoverAt(vi) > 0.35;                  // erst ab echter Decke fahrbar
     }
     /**
-     * Grundfarbe einer Kachel auf "Schnee" setzen. Nötig überall dort, wo
-     * gerodet oder planiert wurde: der ursprüngliche Waldboden ist dunkelgrün,
-     * und ohne diese Korrektur bliebe eine verschneite Pistenschneise dunkel.
+     * Untergrund einer Kachel auf „offenes Land" setzen. Nötig überall dort, wo gerodet oder
+     * planiert wurde: der Waldboden ist dunkel und zählt als Kronendach – ohne diese Korrektur
+     * bliebe eine verschneite Pistenschneise schmutzig-dunkel.
      */
     function setBaseToSnow(vi) {
-        const i3 = vi * 3;
-        const grain = (((vi * 374761393) >>> 24 & 15) - 7.5) / 255;
-        COL0[i3] = 0.93 + grain; COL0[i3 + 1] = 0.95 + grain; COL0[i3 + 2] = 0.98 + grain;
+        const geo = terrain.geometry;
+        const c = terrain.userData.groundAt(vi, 0);
+        geo.attributes.color.setXYZ(vi, c[0], c[1], c[2]);
+        geo.attributes.aMark.array[vi * 2 + 1] = 0;
+        groundDirty = true;
     }
     const snowifyGroundAlongPath = (pts, radius = 3.4) => {
-        const col = terrain?.geometry?.attributes?.color;
-        if (!col) return;
-        const snow = [0.93, 0.95, 0.98];
+        const sn = terrain?.geometry?.attributes?.aSnow;
+        if (!sn) return;
         // Bounding-Box des Pfads bestimmen (nur diesen Bereich scannen)
         let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
         for (const p of pts) { minX = Math.min(minX, p.gx); maxX = Math.max(maxX, p.gx); minY = Math.min(minY, p.gy); maxY = Math.max(maxY, p.gy); }
@@ -7687,13 +7684,17 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                 if (!near) continue;
                 const vi = gy * gridSize + gx;
                 SNOW_BASE[vi] = 1;      // Piste ist präpariert -> hier liegt Schnee
-                setBaseToSnow(vi);      // Waldboden darunter zählt ab jetzt als Schneegrund
-                const grain = (((vi * 374761393) >>> 24 & 15) - 7.5) / 255;
-                col.setXYZ(vi, snow[0] + grain, snow[1] + grain, snow[2] + grain);
+                setBaseToSnow(vi);      // Waldboden darunter zählt ab jetzt als offener Grund
+                sn.array[vi] = 1;
                 changed = true;
             }
         }
-        if (changed) col.needsUpdate = true;
+        if (changed) {
+            sn.needsUpdate = true;
+            terrain.geometry.attributes.color.needsUpdate = true;
+            terrain.geometry.attributes.aMark.needsUpdate = true;
+            groundDirty = false;
+        }
     };
     const pisteCostForPts = (pts) => {
         let d = 0; for (let i = 1; i < pts.length; i++) d += Math.hypot(pts[i].gx - pts[i-1].gx, pts[i].gy - pts[i-1].gy);
@@ -7806,7 +7807,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const bedCol = new Float32Array((snowPos.length / 3) * 3).fill(1);
         gs.setAttribute('color', new THREE.BufferAttribute(bedCol, 3));
         gs.setIndex(snowIdx); gs.computeVertexNormals();
-        const ms = new THREE.MeshStandardMaterial({ color: 0xf2f6ff, roughness: 0.85, vertexColors: true });
+        const ms = matchSnowLook(new THREE.MeshStandardMaterial({ color: 0xf2f6ff, roughness: 0.85, vertexColors: true }), snowU, 'snow-look-piste');
         pisteSnowMats.push(ms);                        // Zustand färbt das Schneebett
         const snowMesh = new THREE.Mesh(gs, ms); snowMesh.receiveShadow = true; scene.add(snowMesh);
         // Zustand je Stützpunktpaar: 1 = frisch gewalzt, 0 = völlig verspurt.
@@ -9008,7 +9009,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const simOut = {};
         for (const k of SIM_KEYS) if (Number.isFinite(sim[k])) simOut[k] = +sim[k].toFixed(3);
         return {
-            v: 1, level: level?.id || '', t: Date.now(),
+            v: 1, gen: world.gen || 1, level: level?.id || '', t: Date.now(),
             money: Math.round(money), played: Math.round(playSeconds),
             sim: simOut,
             eco: { skiPass: eco.skiPass, ad: { id: eco.ad.id, daysLeft: eco.ad.daysLeft } },
@@ -9017,7 +9018,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             sum: {
                 lifts: saveLog.filter(a => a.a === 'l').length,
                 buildings: Math.max(0, saveLog.filter(a => a.a === 'b').length - saveLog.filter(a => a.a === 'd').length),
-                km: +piste.total.toFixed(1), revenue: Math.round(sim.revenue)
+                km: +piste.total.toFixed(1), revenue: Math.round(sim.revenue),
+                gen: world.gen || 1            // Version der Landschaft – das Menü blendet unpassende Stände aus
             },
             log: saveLog.slice()
         };

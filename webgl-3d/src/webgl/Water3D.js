@@ -11,6 +11,7 @@
 //                    Himmelsspiegelung, Sonnenglanz, Ufersaum und – im Bach – Strömung
 //                    mit Schaum an den Stromschnellen.
 import * as THREE from 'three';
+import { SOFT_FOG } from './SnowSurface.js';
 
 const sm01 = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
 const WATER = 2;                 // landcover-Kennung für Wasser
@@ -138,6 +139,8 @@ const FRAG = /* glsl */`
     uniform vec3 uHorizon;
     uniform vec3 uDeep;
     uniform vec3 uShallow;
+    uniform vec3 uHorizonCol;    // Himmelsfarbe am Horizont (für das offene Meer ganz draußen)
+    uniform vec2 uRim;           // Randdunst: von/bis Abstand zur Kartenmitte
     varying vec3 vWorld;
     varying float vDepth;
     varying float vEdge;
@@ -200,7 +203,11 @@ const FRAG = /* glsl */`
         float alpha = smoothstep(-0.03, 0.15, depth) * smoothstep(0.0, 0.5, vEdge) * mix(0.80, 0.97, deep);
         alpha = max(alpha, foam * inWater * smoothstep(0.0, 0.5, vEdge));
         gl_FragColor = vec4(col, alpha);
-        #include <fog_fragment>
+        // derselbe weiche Dunst wie auf dem Gelände (SnowSurface.js) – sonst hebt sich das Wasser in der Ferne ab
+        ${SOFT_FOG}
+        #ifdef USE_FOG
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, uHorizonCol, smoothstep(uRim.x, uRim.y, length(vWorld.xz)));
+        #endif
     }`;
 
 /**
@@ -297,7 +304,9 @@ export function buildWater(world, gridSize, info, opts = {}) {
         uZenith: { value: new THREE.Color(0.30, 0.50, 0.74) },
         uHorizon: { value: new THREE.Color(0.74, 0.84, 0.92) },
         uDeep: { value: new THREE.Color(0.05, 0.19, 0.33) },
-        uShallow: { value: new THREE.Color(0.24, 0.50, 0.58) }
+        uShallow: { value: new THREE.Color(0.24, 0.50, 0.58) },
+        uHorizonCol: { value: new THREE.Color(0.86, 0.91, 0.95) },
+        uRim: { value: new THREE.Vector2(opts.rim ? opts.rim[0] : 1e8, opts.rim ? opts.rim[1] : 2e8) }
     }]);
     const mat = new THREE.ShaderMaterial({
         uniforms, vertexShader: VERT, fragmentShader: FRAG,
@@ -310,6 +319,38 @@ export function buildWater(world, gridSize, info, opts = {}) {
 
     const group = new THREE.Group();
     group.add(mesh);
+    // Offenes Meer (Küstenlevel): hinter dem erzeugten Gebiet läuft der Spiegel als ruhige Fläche bis
+    // zum Horizont weiter. opts.sea = { zMax: bis zu dieser Welt-Z-Lage reicht das Meer, reach: Halbmesser }
+    if (opts.sea) {
+        let big = null;
+        for (const g of groups) if (g.lake && (!big || g.pts.length > big.pts.length)) big = g;
+        if (big && Number.isFinite(big.level)) {
+            const y = big.level, hO = half, R = opts.sea.reach, zMax = Math.min(opts.sea.zMax, R);
+            const quads = [[-R, -R, -hO, zMax], [hO, -R, R, zMax], [-hO, -R, hO, -hO]];       // links, rechts, davor
+            const sp = [], si = [];
+            for (const [x0, z0, x1, z1] of quads) {
+                if (x1 <= x0 || z1 <= z0) continue;
+                const b = sp.length / 3;
+                sp.push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1);
+                si.push(b, b + 2, b + 1, b, b + 3, b + 2);
+            }
+            const n = sp.length / 3;
+            if (n) {
+                const sg = new THREE.BufferGeometry();
+                sg.setAttribute('position', new THREE.Float32BufferAttribute(sp, 3));
+                sg.setAttribute('aDepth', new THREE.Float32BufferAttribute(new Float32Array(n).fill(2), 1));
+                sg.setAttribute('aEdge', new THREE.Float32BufferAttribute(new Float32Array(n).fill(1), 1));
+                sg.setAttribute('aFoam', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+                sg.setAttribute('aKind', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+                sg.setAttribute('aFlow', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
+                sg.setIndex(si);
+                const sea = new THREE.Mesh(sg, mat);
+                sea.frustumCulled = false; sea.renderOrder = 2;
+                group.add(sea);
+                group.userData.seaLevel = y;
+            }
+        }
+    }
     group.userData.update = (dt) => { uniforms.uTime.value = (uniforms.uTime.value + dt) % 3600; };
     /** Tageslicht nachführen (Himmel spiegelt sich im Wasser). */
     group.userData.setEnv = (env) => {
@@ -317,7 +358,7 @@ export function buildWater(world, gridSize, info, opts = {}) {
         if (env.sunDir) uniforms.uSunDir.value.copy(env.sunDir).normalize();
         if (env.sunColor) uniforms.uSunCol.value.copy(env.sunColor);
         if (env.zenith) uniforms.uZenith.value.copy(env.zenith);
-        if (env.horizon) uniforms.uHorizon.value.copy(env.horizon);
+        if (env.horizon) { uniforms.uHorizon.value.copy(env.horizon); uniforms.uHorizonCol.value.copy(env.horizon); }
     };
     return group;
 }

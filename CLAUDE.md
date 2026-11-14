@@ -7,14 +7,19 @@ Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
 - `webgl-3d/` – **das aktuelle Spiel** (enthält den 2D- und den 3D-Modus). Hier wird entwickelt.
   - `src/App.jsx` – App-Wurzel (Anmeldung → Hauptmenü ↔ Spiel), das 2D-Spiel (`Game`) und sein HUD
   - `src/engine/SkiResortManager.js` – Simulation: Gäste-KI, Lifte, Pisten, Fahrzeuge, Wirtschaft
+  - `src/engine/terrainGen.js` – Landschaftserzeugung (Spielfeld samt Umland), siehe „Landschaft" unten
   - `src/components/game/` – 2D-Renderer (`WorldCanvas.jsx`, `DrawingUtils.js`)
-  - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`)
+  - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `SnowSurface.js`, `Surround3D.js`,
+    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`)
   - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
   - `src/components/menu/` – Hauptmenü und Ladebildschirm
   - `src/constants/` – Gebäude, Gäste, Lifte, Pisten, Kampagne (`campaign.js`: Level, Aufgaben, Fortschritt)
   - `src/auth/` – Anmeldung: Anmeldeseite, Konto-Leiste, Verwaltung, Fortschritts-Abgleich
   - `worker/` – Anmeldeserver (Cloudflare Worker + KV), siehe `worker/README.md`
-  - `tools/` – Prüf- und Simulationsskripte für Node, u. a. `authtest.mjs` für den Anmeldeserver
+  - `tools/` – Prüfskripte für Node: `authtest.mjs` (Anmeldeserver), `relief.mjs` (Landschaft als Bild +
+    Kennzahlen), `terrainstat.mjs`, `baseslope.mjs`, `accesstest.mjs`, `gridtest.mjs`. Die Szenen-Attrappen
+    `runtest.mjs` und `sim/` laufen seit dem Umbau von Wasser, Gondeln und Gelände nicht mehr durch (sie
+    ersetzen three.js durch Platzhalter, denen die neuen Bausteine fehlen) – vor Gebrauch nachziehen.
   - `public/` – Bilder: Menü-Fotos (`bg/`), Level-Grafiken (`levels/`), Ladebilder (`loading/`), Icons
 - Projektwurzel (`src/`, `package.json`, …) – **ältere 2D-Fassung** (Stand August 2026), nur noch Archiv.
   Nicht weiterentwickeln, außer es wird ausdrücklich gewünscht.
@@ -53,13 +58,43 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   abgestimmt. Nicht nebenbei auf den direkten Renderpfad oder eine Ausgabestufe umstellen.
 - **Fallstrick:** `vertexColors: true` nur setzen, wenn die Geometrie ein Farbattribut hat – sonst wird das
   Material schwarz. Farben je Instanz (`setColorAt`) brauchen den Schalter nicht.
-- **Kartenrand:** Das Umland (Schürze) übernimmt an der Kante die Farbe des Spielfelds
-  (`apron.userData.setSnowLine(…, farben)` am Ende von `repaintSnowCover`); der Wald läuft als Gürtel über die
-  Kante weiter (`buildApronForest`).
+- **Bäume** stehen zu Zehntausenden: Geometrie sparsam halten (`coneGeo` in `TerrainMesh.js`, offene Stämme,
+  Hauben ohne Unterseite). Standorte sind gewürfelt und in der Zelle versetzt (`treeCell`, `treeJitter`) –
+  kein Raster, keine Reihen.
 - **Ausprobieren:** nur bei `npm run dev` gibt es `window.__mtCam` (Kamera stellen: `orbit.setState`,
-  Tageszeit: `clock`/`CYCLE`, Qualitätsstufe: `quality.set`, Geländepunkt unter einem Bildpunkt: `raycastTerrain`).
+  Tageszeit: `clock`/`CYCLE`, Qualitätsstufe: `quality.set`, Wetter: `weather`, Geländepunkt unter einem
+  Bildpunkt: `raycastTerrain`) und den Direktstart `http://localhost:5180/?level=<id>` (z. B. `schweiz`).
   Die Uhr dabei nur vorwärts stellen.
 - App-Symbole neu erzeugen: `python3 tools/make-app-icons.py public/bg/logo.png public/pwa` (in `webgl-3d/`).
+
+## Landschaft, Umland, Schnee
+- **Erzeugung** (`engine/terrainGen.js`): kein Aufaddieren breiter Kuppeln mehr (das ergab in jedem Level einen
+  runden Klumpen in der Kartenmitte), sondern ein **Gratnetz**: Gipfel aus der Vorlage des Levels (`MASSIFS`),
+  Kämme mit Sätteln dazwischen, Seitengrate, ein Haupttal vom Kartenrand Richtung höchstem Gipfel, Nachbarberge
+  rings um das Spielfeld. Alles wird weich vereinigt und durch ein Rauschfeld verzogen. Danach Glätten,
+  Wald (zusammenhängende Bestände über einen Rang, Anteil je Level), Meer, Bäche, Seen, Startlinie.
+  `TERRAIN_GEN` hochzählen, sobald sich das Ergebnis ändert – Spielstände hängen an der Landschaft.
+- **Umland:** `buildLevelWorld()` erzeugt ein größeres Stück Gebirge (`OUTER_MARGIN` Kacheln je Seite); das
+  Spielfeld ist dessen Mitte. `world.outer` = ganzes Gebiet (das Spielfeld liegt bei `offset`), `world.far` =
+  dieselbe Landschaft als Formel für die Ferne. Die Szene gräbt Gewässer im ganzen Gebiet ein und schreibt
+  Änderungen am Spielfeld zurück (`syncOuter`).
+- **Zeichnen des Umlands** (`Surround3D.js`): ein Ringnetz von der Spielfeldkante bis in den Horizontdunst,
+  an der Kante Punkt für Punkt deckungsgleich (Höhe, Farbe, Normale – `recomputeTerrainNormals` in der Szene
+  gibt den Randpunkten des Spielfelds dieselbe Normale). Wald: bis `BELT_END` hinter der Kante dieselben Bäume
+  wie innen (`forestBelt`), dahinter einfachere, weiter draußen zeichnet das Material die Kronen in den Boden.
+  `surround.userData.heightAt` ist die gezeichnete Höhe (Kamera, Bäume). Es gibt keine Schürze und keine
+  Ringkulisse mehr – nichts davon wieder einführen.
+- **Schnee** (`SnowSurface.js`): Die Eckfarbe des Geländes ist nur der **Untergrund** (`groundColor`); ob Schnee
+  liegt und wie er aussieht, rechnet das Material je Bildpunkt (fleckige Schneegrenze, Sonnenhänge apern
+  früher, Fels an Steilflanken, blaue Schatten, Windrippen, Glitzern). Eingaben: `snowU` (Schneegrenze,
+  Sonne …), je Rasterpunkt `aSnow` (Neu-/Kunstschnee aus `SNOW_BASE`) und `aMark` (Anlagen-Einfärbung,
+  Kronendach). `repaintSnowCover` lädt nur noch diese Werte hoch; das Umland liest den Neuschnee aus einer
+  Tabelle je Höhenstufe (`uFresh`). Wer etwas Weißes neben den Schnee stellt, gibt ihm mit `matchSnowLook`
+  denselben Schattenton und Dunst (`SOFT_FOG`).
+- **Startpunkt:** Talstation = tiefste Randkachel, von dort mindestens `BASE_IN` Kacheln ins Gebiet (sonst
+  klemmt das Dorf am Rand und die Zufahrt findet keinen Weg). Bäche und Seen meiden die Linie Dorf–Gipfel.
+- **Prüfen ohne Spiel:** `node tools/relief.mjs <ordner> [level …]` zeichnet die Landschaft als Reliefbild
+  (mit Umland, Spielfeld als Rahmen) und druckt Hangneigung, Wald-, Wasser- und Eisanteil.
 
 ## Spielstände (3D)
 - Gespeichert wird nicht die Szene, sondern **was der Spieler getan hat**: jede Bauaktion der Reihe nach
@@ -67,7 +102,8 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `loadSave()` baut die Aktionen auf dem frisch erzeugten Gelände nach – ohne Bauzeit und Kosten.
   **Wer eine neue Bauaktion ergänzt, muss sie vormerken und in `loadSave` nachspielen**, sonst fehlt sie nach
   dem Laden. Das Gelände eines Levels muss dafür bei jedem Start gleich entstehen (kein `Math.random()` für
-  Dinge, die das Bauen beeinflussen).
+  Dinge, die das Bauen beeinflussen). Ein Stand gilt nur für die Fassung der Landschaft, auf der er entstand
+  (`gen` im Stand = `TERRAIN_GEN`); ältere werden ignoriert und beim nächsten Sichern überschrieben.
 - `src/savegames.js`: Stand sofort aufs Gerät (`localStorage`, je Spieler und Level), zusätzlich ans Konto
   (`GET/PUT /save`, Übersicht `GET /saves`). Es gilt der jüngere Stand; „Neu beginnen" hinterlässt einen
   Löschvermerk. Hochgeladen wird höchstens alle 90 s und beim Verlassen – das schont das Schreibkontingent.

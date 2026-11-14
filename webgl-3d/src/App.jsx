@@ -3442,6 +3442,13 @@ const App = () => {
 
   // Beim Seitenstart: neue Fassung online? Dann einmal frisch laden.
   useEffect(() => { checkForNewBuild(); }, []);
+  // Nur beim Entwickeln: ?level=<id> startet ein Kampagnen-Level direkt in 3D (ohne Menü und Ladebildschirm).
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const id = new URLSearchParams(window.location.search).get('level');
+    const lv = id && CAMPAIGN_LEVELS.find(l => l.id === id);
+    if (lv) { setViewMode('3d'); setActiveLevel(lv); }
+  }, []);
   // Jeden neuen Kampagnen-Fortschritt ans Konto melden.
   useEffect(() => installProgressSync(), []);
   // Anmeldung prüfen und den Fortschritt mit dem Konto abgleichen.

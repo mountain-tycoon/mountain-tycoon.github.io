@@ -4,6 +4,7 @@
 // Konto. So geht es auf jedem Gerät dort weiter, wo man aufgehört hat. Es gilt immer der jüngere Stand.
 // Was genau gespeichert wird, bestimmt die Szene (getSave / loadSave in webgl/Scene3D.js).
 import { api, authEnabled, getSession, SERVER_SAVES } from './auth/authClient';
+import { TERRAIN_GEN } from './engine/terrainGen';
 
 const PREFIX = 'mt.save.';
 const MIN_UPLOAD_GAP = 90 * 1000;     // so oft höchstens ans Konto – schont das Schreibkontingent des Servers
@@ -13,7 +14,10 @@ const session = () => (authEnabled() ? getSession() : null);
 /** Wem die Spielstände auf diesem Gerät gehören (ohne Anmeldung: „lokal"). */
 const owner = () => { const s = session(); return s ? `${s.role}:${s.email || s.name}`.toLowerCase() : 'lokal'; };
 const keyFor = (levelId) => `${PREFIX}${owner()}.${levelId}`;
-const isSave = (s) => !!s && s.v === 1 && Array.isArray(s.log) && Number.isFinite(s.t);
+// Ein Spielstand ist eine Bauliste für EINE bestimmte Landschaft. Wurde die Geländeerzeugung
+// seither geändert (TERRAIN_GEN), stünden die Bauten an Stellen, die es so nicht mehr gibt –
+// ein solcher Stand zählt nicht mehr und wird beim nächsten Sichern überschrieben.
+const isSave = (s) => !!s && s.v === 1 && Array.isArray(s.log) && Number.isFinite(s.t) && (s.gen || 1) === TERRAIN_GEN;
 const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, no) => setTimeout(() => no(new Error('Zeit abgelaufen')), ms))]);
 
 /** Levels mit eigenem Spielstand: die Kampagne. Die Sandbox würfelt ihr Gelände jedes Mal neu. */
@@ -62,7 +66,13 @@ function cloudReady() {
 /** Übersicht vom Konto: {levelId: {t, sum}} – leer ohne Anmeldung oder ohne Netz. */
 export async function remoteSaveIndex() {
     if (!(await cloudReady())) return {};
-    try { const r = await withTimeout(api.listSaves(), 6000); return (r && r.saves) || {}; } catch { return {}; }
+    try {
+        const r = await withTimeout(api.listSaves(), 6000);
+        const out = {};
+        // Stände für eine frühere Fassung der Landschaft zählen nicht mehr (siehe isSave)
+        for (const [id, e] of Object.entries((r && r.saves) || {})) if (((e && e.sum && e.sum.gen) || 1) === TERRAIN_GEN) out[id] = e;
+        return out;
+    } catch { return {}; }
 }
 
 /**
