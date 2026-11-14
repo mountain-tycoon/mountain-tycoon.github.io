@@ -17,10 +17,11 @@ Der 3D-Modus läuft auch auf dem Handy und dem Tablet:
 
 ## Selbst fahren
 
-Im 3D-Modus kann man das eigene Skigebiet abfahren: „Fahren" in der Werkzeugleiste setzt einen Skifahrer oben
-an die Piste, die dem Blick am nächsten liegt. Am Rechner lenken A/D oder die Pfeiltasten, W ist Schuss und
-Anschieben, S bremst; am Handy gibt es dafür Knöpfe. Unten an einer Talstation geht es per Knopf mit dem Lift
-wieder hinauf. „Beenden" (oder Esc) führt zurück zum Bauen.
+Im 3D-Modus kann man das eigene Skigebiet abfahren: „Fahren" in der Werkzeugleiste wählen und die Stelle
+anklicken oder antippen, an der es losgehen soll. Am Rechner lenken A/D oder die Pfeiltasten, W ist Schuss
+(im Stand und bergauf: gehen), S bremst. Am Handy lenken zwei große Tasten links und rechts, beide zugleich
+bremsen, und wer das Bild gedrückt hält, fährt Schuss oder geht. Unten an einer Talstation steigt man per Knopf
+in die nächste Kabine und kann sich während der Bergfahrt umsehen. „Beenden" (oder Esc) führt zurück zum Bauen.
 
 ## Spielstand
 

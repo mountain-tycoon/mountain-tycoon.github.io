@@ -608,73 +608,85 @@ const ConfirmBar = ({ p, fmt, onOk, onCancel, onRotate, onUndo }) => {
     );
 };
 
-/** Gehaltener Knopf der Fahrsteuerung (Finger): wirkt, solange er gedrückt ist. */
-const HoldBtn = ({ label, wide, onHold, children }) => {
+/** Große, zurückhaltende Lenktaste (Finger): wirkt, solange sie gedrückt ist. */
+const SteerPad = ({ side, onHold }) => {
+    const [down, setDown] = useState(false);
     const set = (v) => (e) => {
         e.preventDefault(); e.stopPropagation();
         if (v) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ältere Browser */ } }
-        onHold(v);
+        setDown(v); onHold(v);
     };
+    const left = side === 'left';
     return (
-        <button aria-label={label} title={label} onPointerDown={set(true)} onPointerUp={set(false)} onPointerCancel={set(false)}
-                onLostPointerCapture={() => onHold(false)} onContextMenu={e => e.preventDefault()}
-                style={{ ...glass, width: wide ? 92 : 66, height: 62, borderRadius: 16, padding: 0, cursor: 'pointer', color: '#e8eaed',
-                         display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none',
-                         fontSize: 10.5, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-            {children}
+        <button aria-label={left ? 'Links' : 'Rechts'} onPointerDown={set(true)} onPointerUp={set(false)} onPointerCancel={set(false)}
+                onLostPointerCapture={() => { setDown(false); onHold(false); }} onContextMenu={e => e.preventDefault()}
+                style={{ position: 'fixed', zIndex: 20, bottom: `calc(14px + ${SAFE_B})`,
+                         ...(left ? { left: `calc(12px + ${SAFE_L})` } : { right: `calc(12px + ${SAFE_R})` }),
+                         width: 'min(31vw, 190px)', height: 'min(42vh, 190px)', borderRadius: 26, padding: 0, cursor: 'pointer', touchAction: 'none',
+                         background: down ? 'rgba(255,255,255,0.13)' : 'rgba(255,255,255,0.045)',
+                         border: '1px solid ' + (down ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.11)'),
+                         color: down ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)',
+                         display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background .12s, color .12s' }}>
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                 style={left ? undefined : { transform: 'scaleX(-1)' }}><path d="M15 5l-7 7 7 7" /></svg>
         </button>
     );
 };
-const Chevron = ({ flip }) => (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
-         style={flip ? { transform: 'scaleX(-1)' } : undefined}><path d="M15 5l-7 7 7 7" /></svg>
-);
 
 /** Anzeige und Steuerung beim Selbstfahren. */
-const SkiHud = ({ ski, touch, compact, onStop, onLift, onInput }) => (
-    <>
-        <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: `calc(${compact ? 8 : 14}px + ${SAFE_L})` }}>
-            <button onClick={onStop} style={{ ...btn, display: 'flex', alignItems: 'center', gap: 6 }} title="Zurück zum Bauen (Esc)">
-                <Ico name="back" size={12} /> Beenden
-            </button>
-        </div>
-        <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: 0, right: 0,
-                      display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
-            <div style={{ ...chip, color: '#e8eef6', display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                <span style={{ fontSize: 19, fontWeight: 700, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{ski.kmh}</span>
-                <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>km/h</span>
-            </div>
-        </div>
-        <div style={{ position: 'fixed', zIndex: 20, left: 0, right: 0, bottom: `calc(${touch ? 96 : 20}px + ${SAFE_B})`, boxSizing: 'border-box',
-                      padding: `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`,
-                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
-            {ski.hint && <div style={{ ...chip, color: '#fcd34d', fontSize: 12 }}>{ski.hint}</div>}
-            {ski.riding && <div style={{ ...chip, color: '#e8eef6', fontSize: 12 }}>Bergfahrt · {ski.riding}</div>}
-            {ski.lift && (
-                <button onClick={onLift} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
-                    {ski.lift} nach oben{touch ? '' : ' (L)'}
+const SkiHud = ({ ski, touch, compact, onStop, onLift, onInput }) => {
+    // Zwei Lenktasten: eine = lenken, beide zugleich = bremsen
+    const held = useRef({ l: false, r: false });
+    const hold = (k, v) => {
+        held.current[k] = v;
+        const { l, r } = held.current;
+        onInput({ left: l && !r, right: r && !l, brake: l && r });
+    };
+    const steering = touch && !ski.riding;
+    return (
+        <>
+            <div style={{ position: 'fixed', zIndex: 21, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: `calc(${compact ? 8 : 14}px + ${SAFE_L})` }}>
+                <button onClick={onStop} style={{ ...btn, display: 'flex', alignItems: 'center', gap: 6 }} title="Zurück zum Bauen (Esc)">
+                    <Ico name="back" size={12} /> Beenden
                 </button>
-            )}
-            {!touch && !ski.riding && (
-                <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5 }}>
-                    A / D oder ← / → lenken · W Schuss und anschieben · S bremsen · Esc beenden
+            </div>
+            {!ski.cabin && (
+                <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: 0, right: 0,
+                              display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+                    <div style={{ ...chip, color: '#e8eef6', display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                        <span style={{ fontSize: 19, fontWeight: 700, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{ski.kmh}</span>
+                        <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>km/h</span>
+                    </div>
                 </div>
             )}
-        </div>
-        {touch && !ski.riding && (
-            <>
-                <div style={{ position: 'fixed', zIndex: 20, left: `calc(12px + ${SAFE_L})`, bottom: `calc(18px + ${SAFE_B})`, display: 'flex', gap: 10 }}>
-                    <HoldBtn label="Links" onHold={(v) => onInput({ left: v })}><Chevron /></HoldBtn>
-                    <HoldBtn label="Rechts" onHold={(v) => onInput({ right: v })}><Chevron flip /></HoldBtn>
-                </div>
-                <div style={{ position: 'fixed', zIndex: 20, right: `calc(12px + ${SAFE_R})`, bottom: `calc(18px + ${SAFE_B})`, display: 'flex', gap: 10 }}>
-                    <HoldBtn label="Bremsen" wide onHold={(v) => onInput({ brake: v })}>Bremsen</HoldBtn>
-                    <HoldBtn label="Schuss" wide onHold={(v) => onInput({ tuck: v })}>Schuss</HoldBtn>
-                </div>
-            </>
-        )}
-    </>
-);
+            <div style={{ position: 'fixed', zIndex: 21, left: 0, right: 0, bottom: `calc(20px + ${SAFE_B})`, boxSizing: 'border-box',
+                          padding: steering ? '0 calc(min(31vw, 190px) + 24px)' : `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`,
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none', textAlign: 'center' }}>
+                {ski.hint && <div style={{ ...chip, color: '#fcd34d', fontSize: 12 }}>{ski.hint}</div>}
+                {ski.riding && (
+                    <div style={{ ...chip, color: '#e8eef6', fontSize: 12 }}>
+                        {ski.waiting ? `${ski.riding} · die nächste Kabine kommt gleich`
+                            : ski.cabin ? `${ski.riding} · ${touch ? 'wischen' : 'mit der Maus ziehen'} zum Umsehen`
+                            : `Bergfahrt · ${ski.riding}`}
+                    </div>
+                )}
+                {ski.lift && (
+                    <button onClick={onLift} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
+                        {ski.lift} nach oben{touch ? '' : ' (L)'}
+                    </button>
+                )}
+                {!ski.riding && !ski.hint && (touch ? ski.kmh < 4 : true) && (
+                    <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5, lineHeight: 1.45 }}>
+                        {touch ? 'Seitentasten lenken · beide zugleich bremsen · Bild gedrückt halten: Schuss und gehen'
+                               : 'A / D oder ← / → lenken · W Schuss und gehen · S bremsen · Esc beenden'}
+                    </div>
+                )}
+            </div>
+            {steering && <SteerPad side="left" onHold={(v) => hold('l', v)} />}
+            {steering && <SteerPad side="right" onHold={(v) => hold('r', v)} />}
+        </>
+    );
+};
 
 const World3D = ({ level, onExit, initialSave = null }) => {
     const canvasRef = useRef(null);
@@ -762,23 +774,25 @@ const World3D = ({ level, onExit, initialSave = null }) => {
     // ===== SELBST FAHREN =====
     const startSki = () => {
         setActive(null); setOpenCat(null); setSelInfo(null); setLiftSetup(null); setGoalsOpen(false);
-        apiRef.current?.startSki?.();
+        apiRef.current?.pickSki?.(true);
     };
     const stopSki = () => apiRef.current?.stopSki?.();
-    const skiing = !!ski;
+    const skiing = !!ski && !ski.picking;
+    const picking = !!ski?.picking;
     useEffect(() => {
-        if (!skiing) return undefined;
+        if (!skiing && !picking) return undefined;
         const onKey = (e) => {
-            if (e.key === 'Escape') apiRef.current?.stopSki?.();
+            if (e.key === 'Escape') { if (picking) apiRef.current?.pickSki?.(false); else apiRef.current?.stopSki?.(); }
             else if (e.key.toLowerCase() === 'l') apiRef.current?.skiTakeLift?.();
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [skiing]);
+    }, [skiing, picking]);
 
     const applyTool = (item) => {
         const api = apiRef.current; if (!api) return;
         setBuildHint('');
+        api.pickSki?.(false);
         // alles zurücksetzen
         api.setBuild(null); api.setDemolish(false); api.setLift(false); api.setPiste(false); api.setRoad?.(false);
         if (item.tool === 'build') api.setBuild(item.key);
@@ -810,6 +824,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
     const toggleDemolish = () => {
         const on = active !== 'demolish';
         setActive(on ? 'demolish' : null);
+        apiRef.current?.pickSki?.(false);
         apiRef.current?.setBuild(null); apiRef.current?.setLift(false); apiRef.current?.setPiste(false); apiRef.current?.setRoad?.(false);
         apiRef.current?.setDemolish(on);
         if (compact) setOpenCat(null);
@@ -855,7 +870,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                       // Die Seite selbst soll weder zoomen noch scrollen noch Text markieren – nur das Spiel reagiert.
                       touchAction: 'none', overscrollBehavior: 'none', userSelect: 'none', WebkitUserSelect: 'none',
                       WebkitTouchCallout: 'none', WebkitTapHighlightColor: 'transparent' }}>
-            <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: active ? 'crosshair' : 'grab' }} />
+            <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: active || picking ? 'crosshair' : 'grab' }} />
 
             {/* Kopfzeile: nur der Rückweg ins Menü; alle Zahlen sitzen zentriert oben */}
             {skiing ? (
@@ -1284,7 +1299,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
 
             {/* Unterer Stapel: Meldung, Werkzeug-Hinweis und (Finger) die Bestätigen-Leiste.
                 Der Stapel selbst fängt keine Berührungen ab – das Gelände dahinter bleibt bedienbar. */}
-            <div style={{ position: 'fixed', left: 0, right: 0, bottom: skiing ? (touch ? `calc(150px + ${SAFE_B})` : 62) : compact ? aboveBar : 20, zIndex: 13, boxSizing: 'border-box',
+            <div style={{ position: 'fixed', left: 0, right: 0, bottom: skiing ? `calc(96px + ${SAFE_B})` : compact ? aboveBar : 20, zIndex: 13, boxSizing: 'border-box',
                           padding: `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`,
                           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
                 {toast && (
@@ -1295,7 +1310,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                     </div>
                 )}
                 {/* Einmaliger Hinweis auf die Gesten, solange kein Werkzeug aktiv ist */}
-                {touch && gestureHelp && !skiing && !hintText && !pendingAct && !selInfo && !openCat && (
+                {touch && gestureHelp && !skiing && !picking && !hintText && !pendingAct && !selInfo && !openCat && (
                     <div style={{ ...chip, pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%',
                                   boxSizing: 'border-box', color: '#e8eaed', fontSize: 11.5, lineHeight: 1.4, padding: '8px 6px 8px 13px' }}>
                         <span>1 Finger: verschieben · 2 Finger: zoomen und drehen · 2 Finger hoch/runter: neigen</span>
@@ -1303,6 +1318,17 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                                 style={{ flex: 'none', width: 34, height: 34, borderRadius: 10, padding: 0, cursor: 'pointer',
                                          display: 'flex', alignItems: 'center', justifyContent: 'center',
                                          background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed' }}><Ico name="close" size={15} /></button>
+                    </div>
+                )}
+                {picking && (
+                    <div style={{ ...chip, pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%',
+                                  boxSizing: 'border-box', color: '#fcd34d', fontSize: 12, lineHeight: 1.4,
+                                  ...(compact ? { padding: '7px 6px 7px 12px', fontSize: 11.5 } : { padding: '5px 6px 5px 14px' }) }}>
+                        <span>{ski.hint ? ski.hint + ' · ' : ''}{touch ? 'Tippe auf die Stelle, an der du losfahren willst' : 'Klicke auf die Stelle, an der du losfahren willst'}</span>
+                        <button onClick={() => apiRef.current?.pickSki?.(false)} title="Abbrechen"
+                                style={{ flex: 'none', width: compact ? 34 : 26, height: compact ? 34 : 26, borderRadius: 9, padding: 0, cursor: 'pointer',
+                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                         background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed' }}><Ico name="close" size={compact ? 15 : 12} /></button>
                     </div>
                 )}
                 {hintText && !(compact && openCat) && (

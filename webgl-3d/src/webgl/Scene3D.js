@@ -3803,6 +3803,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const solidAt = (wx, wz) => Math.max(surfaceAt(wx, wz), rockTopAt(wx, wz));
     // Die erste Kulissenkette steht bei 1.30 Kartenbreiten – die Kamera bleibt davor.
     let skiRun = null;        // „Selbst fahren“ (SkiRun.js) – übernimmt dann die Kamera
+    let skiPick = false;      // Startpunkt wird gerade gewählt: der nächste Klick setzt die Figur ab
+    let dropSki = null;
     const viewDistNow = () => (skiRun && skiRun.active()) ? skiRun.viewDist() : orbit.viewDist();
     const orbit = attachOrbit(camera, canvas, target, worldSpan, { groundAt: surfaceAt, solidAt, bound: half, maxRadius: worldSpan * 1.15 });
     orbit.setDist(worldSpan * 0.62);
@@ -8344,7 +8346,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     };
     const onUp = (e) => {
         if (skiRun && skiRun.active()) return;   // beim Selbstfahren wird nicht gebaut
-        if (!isTap(e)) return; // war Kamera-Drag oder Zwei-Finger-Geste
+        if (!isTap(e)) return;
+        if (skiPick) { const pt = pickPoint(e); if (pt) dropSki(pt); return; }   // Startpunkt fürs Selbstfahren // war Kamera-Drag oder Zwei-Finger-Geste
         const needConfirm = isTouchEvent(e) && !e.__confirmed;
         // --- STRASSEN-BAU (zwei Klicks: Start, dann Ende; danach weiter ab Endpunkt) ---
         if (roadMode) {
@@ -8741,7 +8744,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     let onBuildHint = null;      // Grund, warum gerade nicht gebaut werden kann (HUD)
     let onToast = null;          // kurze Meldung im HUD (Diagnose)
     const onDemolish = (e) => {
-        if (!demolishMode || (skiRun && skiRun.active())) return;
+        if (!demolishMode || skiPick || (skiRun && skiRun.active())) return;
         if (!isTap(e)) return;
         const pt = pickPoint(e);
         if (!pt) return;
@@ -8816,7 +8819,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     };
     // ===== INFO-AUSWAHL: Gebäude/Parkplatz anklicken -> Infofeld =====
     const onPick = (e) => {
-        if (skiRun && skiRun.active()) return;
+        if (skiPick || (skiRun && skiRun.active())) return;
         if (currentBuild || demolishMode || liftMode || pisteMode || roadMode) return;
         if (!isTap(e)) return;  // war Kamera-Drag oder Zwei-Finger-Geste
         const pt = pickPoint(e);
@@ -9012,20 +9015,29 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     // ===== SELBST FAHREN =====
     let onSki = null;
     skiRun = createSkiRun({
-        scene, camera, surfaceAt, solidAt, half, tile, lcAt, hasSnowAt,
+        scene, camera, dom: canvas, surfaceAt, solidAt, half, tile, lcAt, hasSnowAt,
         isBuilt: (gx, gy) => occAt(gx, gy) === OCC_BUILD,
         routes: () => guestRoutes,
         touch: () => lastPointerType !== 'mouse',
         onState: (info) => { if (onSki) onSki(info); }
     });
-    const startSki = () => {
-        if (skiRun.active()) return true;
+    const clearTools = () => {
         deselect(); currentBuild = null; demolishMode = false; endLift(); endPiste(); endRoad();
         showParcelGrid(false); hideSnowRange(); hideDirArrow();
         if (ghost) { scene.remove(ghost); ghost = null; }
-        const st = orbit.getState();
+    };
+    /** Startpunkt wählen: der nächste Klick (bzw. das nächste Antippen) setzt die Figur dort ab. */
+    const pickSki = (want) => {
+        if (skiRun.active()) return;
+        skiPick = !!want;
+        if (skiPick) clearTools();
+        if (onSki) onSki(skiPick ? { picking: true, hint: '' } : null);
+    };
+    dropSki = (pt) => {
+        const why = skiRun.start(pt.x, pt.z);
+        if (why) { if (onSki) onSki({ picking: true, hint: why }); return; }
+        skiPick = false;
         orbit.setEnabled(false);
-        return skiRun.start(st.x, st.z);
     };
     const stopSki = () => {
         const at = skiRun.stop();
@@ -9131,7 +9143,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         loadSave(data){ return loadSave(data); },
         setOnSaveChange(cb){ onSaveChange = cb; },
         // ----- Selbst fahren -----
-        startSki(){ return startSki(); },
+        pickSki(on){ pickSki(on); },
         stopSki(){ stopSki(); },
         skiInput(part){ skiRun.setInput(part); },
         skiTakeLift(){ return skiRun.takeLift(); },

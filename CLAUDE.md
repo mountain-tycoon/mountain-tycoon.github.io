@@ -68,18 +68,26 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - App-Symbole neu erzeugen: `python3 tools/make-app-icons.py public/bg/logo.png public/pwa` (in `webgl-3d/`).
 
 ## Selbst fahren (3D)
-- `src/webgl/SkiRun.js`: der Spieler steuert einen eigenen Skifahrer (Knopf „Fahren" in der Werkzeugleiste).
-  Start ist oben an der Piste, die dem Blickpunkt am nächsten liegt – so weit unterhalb der Bergstation, dass
-  Figur und Kamera frei stehen. Die Simulation läuft weiter; gespeichert wird davon nichts.
+- `src/webgl/SkiRun.js`: der Spieler steuert einen eigenen Skifahrer. „Fahren" in der Werkzeugleiste schaltet
+  auf Startpunkt-Wahl (`pickSki`), der nächste Klick bzw. das nächste Antippen setzt die Figur dort ab (sie
+  fällt aus kurzer Höhe; auf Wasser und Gebäuden geht es nicht). Die Simulation läuft weiter; gespeichert wird
+  davon nichts.
 - Die Szene schaltet dafür die Kamerasteuerung ab (`orbit.setEnabled`) und ruft im Bildtakt `skiRun.step`
-  statt `orbit.step`; Bau-Eingaben sind solange gesperrt. Schnittstelle der Szene: `startSki`, `stopSki`,
-  `skiInput` (gehaltene Knöpfe am Handy), `skiTakeLift`, `setOnSki` (Tempo, Lift-Angebot, Hinweis fürs HUD).
-- Fahrmodell: Hangabtrieb entlang der Fahrtrichtung, Reibung je Untergrund (Piste, Tiefschnee, Wald), auf
-  aperer Wiese geht die Figur zu Fuß. Es blockieren Kartenrand, Gebäude sowie – nur abseits der Piste –
-  Wasser und Felsblöcke (die Felsen sind bloß grob gerastert bekannt). Nahe einer Talstation bietet das HUD
-  die Bergfahrt an; sie endet am Beginn der nächsten Abfahrt.
-- Prüfen ohne flüssiges Bild: `window.__mtCam.ski()` liefert das Modul; `setInput` + `step(1/60, t)` in einer
-  Schleife spult die Fahrt vor, `__state()` zeigt Ort und Tempo.
+  statt `orbit.step`; Bau-Eingaben sind solange gesperrt. Schnittstelle der Szene: `pickSki`, `stopSki`,
+  `skiInput`, `skiTakeLift`, `setOnSki` (meldet dem HUD `{picking}` bzw. Tempo, Lift-Angebot, Hinweis).
+- Bedienung: Tasten A/D/W/S; am Handy zwei große, zurückhaltende Lenktasten (`SteerPad` in `World3D.jsx`,
+  beide zugleich = bremsen), das Bild gedrückt halten = Schuss bzw. gehen. Weitere Knöpfe sind nicht gewollt.
+- Fahrmodell: Hangabtrieb entlang der Fahrtrichtung, Reibung je Untergrund (Piste, Tiefschnee, Wald). Wer steht
+  oder bergauf will, geht mit „vorwärts" Schritt für Schritt weiter; auf aperer Wiese werden die Ski geschultert.
+  Es blockieren Kartenrand, Gebäude sowie – nur abseits der Piste – Wasser und Felsblöcke (die Felsen sind bloß
+  grob gerastert bekannt). Schneestaub: kleiner Punkte-Vorrat (`stepDust`), mehr in Kurve und beim Bremsen.
+- Lift: nahe einer Talstation bietet das HUD die Bergfahrt an. Die Figur wartet auf das nächste Fahrzeug der
+  Anlage (`model.carriers`, Platz über `model.seatPos` wie bei den Gästen) und fährt wirklich darin mit; in
+  Kabinen und Sesseln sitzt die Kamera auf dem Platz (Nahebene dafür auf 0.05, Blick durch Ziehen drehbar),
+  an Bodenliften bleibt die Verfolgerkamera. Anlagen ohne Fahrzeuge oder im Bau: Ersatzfahrt am Hang entlang.
+  Ausstieg am Beginn der nächsten Abfahrt.
+- Prüfen ohne flüssiges Bild: `window.__mtCam.ski()` liefert das Modul; `start(x, z)`, `setInput` und
+  `step(1/60, t)` in einer Schleife spulen die Fahrt vor, `__state()` zeigt Ort und Tempo.
 
 ## Landschaft, Umland, Schnee
 - **Erzeugung** (`engine/terrainGen.js`): kein Aufaddieren breiter Kuppeln mehr (das ergab in jedem Level einen
