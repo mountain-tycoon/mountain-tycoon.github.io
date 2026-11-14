@@ -16,6 +16,7 @@ import { PEAK_NAMES } from './PeakNames.js';
 import { M0 as VMATS, makeCar, makeBus, makeSnowcat, makeSkier, makeSkiInstructor, makePisteMarker, makeWalker, makeAlertMark, makeSadMark, makeRescueSled, makeRescueHeli, makeCargoHeli } from './Vehicles3D.js';
 import { makeClouds, makeSkyDome, makeMoon } from './Sky3D.js';
 import { planVillageAccess, findPath, smoothPath } from './AccessPlanner.js';
+import { createSkiRun } from './SkiRun.js';
 // ===== POSTPROCESSING =====
 // Hebt die Bildqualität deutlich: weiches Glühen an hellen Kanten (Schnee,
 // Sonne, Lichter), Kantenglättung und ein abschließendes Color-Grading.
@@ -129,7 +130,14 @@ function attachOrbit(camera, dom, target, span = 300, opts = {}) {
     //                         gemeinsam hoch/runter = kippen (wie in einer Karten-App)
     // Alle Lauscher hängen an einem Signal und verschwinden mit dispose() wieder.
     const ac = new AbortController();
-    const on = (el, type, fn, o = {}) => el.addEventListener(type, fn, { ...o, signal: ac.signal });
+    // Abgeschaltet (der Spieler fährt selbst Ski) bewegt keine Eingabe die Kamera; nur die
+    // Sperren gegen Browser-Gesten und das Kontextmenü bleiben wirksam.
+    let enabled = true;
+    const ALWAYS = ['contextmenu', 'gesturestart', 'gesturechange'];
+    const on = (el, type, fn, o = {}) => el.addEventListener(type, (e) => {
+        if (!enabled && !ALWAYS.includes(type)) { if (type === 'wheel') e.preventDefault(); return; }
+        fn(e);
+    }, { ...o, signal: ac.signal });
     dom.style.touchAction = 'none';                  // der Browser soll hier nicht selbst zoomen oder scrollen
     // Zoomen geht immer vom wirksamen Abstand aus – sonst müsste man an der Kulisse erst „leer" zurückdrehen.
     const zoomBy = (f) => { dist = clamp(Math.min(dist, eff) * f, minDist, maxDist); };
@@ -298,6 +306,7 @@ function attachOrbit(camera, dom, target, span = 300, opts = {}) {
     // mehrere Frames herangezogen, statt hart umzuspringen.
     let glide = null;
     const step = () => {
+        if (!enabled) return;
         keyStep();
         if (glide) {
             glide.t = Math.min(1, glide.t + 0.045);
@@ -323,6 +332,8 @@ function attachOrbit(camera, dom, target, span = 300, opts = {}) {
         setDist: (d)=>{ dist=d; if (groundAt) target.y = pivotY(); apply(); },
         /** Alle Lauscher entfernen (beim Verlassen des Levels). */
         dispose: () => ac.abort(),
+        /** Kamerasteuerung aus- und wieder einschalten (Selbst fahren). */
+        setEnabled: (v) => { enabled = !!v; keys.clear(); fingers.clear(); pinch = null; dragging = false; panning = false; glide = null; if (enabled) apply(); },
         /** Abstand Kamera–Drehpunkt, wie er gerade wirklich gilt (für den Dunst). */
         viewDist: () => Math.min(dist, eff),
         // Zustand lesen/setzen – für Prüfungen und spätere Kamerafahrten
@@ -3791,6 +3802,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     // Für die Kamera selbst zählt zusätzlich alles Feste, das aus dem Schnee ragt (Felsblöcke).
     const solidAt = (wx, wz) => Math.max(surfaceAt(wx, wz), rockTopAt(wx, wz));
     // Die erste Kulissenkette steht bei 1.30 Kartenbreiten – die Kamera bleibt davor.
+    let skiRun = null;        // „Selbst fahren“ (SkiRun.js) – übernimmt dann die Kamera
+    const viewDistNow = () => (skiRun && skiRun.active()) ? skiRun.viewDist() : orbit.viewDist();
     const orbit = attachOrbit(camera, canvas, target, worldSpan, { groundAt: surfaceAt, solidAt, bound: half, maxRadius: worldSpan * 1.15 });
     orbit.setDist(worldSpan * 0.62);
     // ===== DUNST WANDERT MIT =====
@@ -3802,7 +3815,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     const FOG_NEAR = worldSpan * (95 / 291), FOG_DEPTH = worldSpan * (465 / 291), FOG_LEAD = worldSpan * 0.29;
     const updateFog = () => {
         if (!scene.fog) return;
-        const near = Math.max(FOG_NEAR, orbit.viewDist() - FOG_LEAD);
+        const near = Math.max(FOG_NEAR, viewDistNow() - FOG_LEAD);
         scene.fog.near = near; scene.fog.far = near + FOG_DEPTH;
     };
     updateFog();
@@ -6275,6 +6288,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     let raf=0; const clock=new THREE.Clock(); let lastT=0;
     if (import.meta.env.DEV && window.__mtCam) {   // nur beim Entwickeln: Tageszeit und Qualitätsstufe stellen
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
+            ski: () => skiRun,
             quality: { get: () => qTier, set: (n) => { qTier = Math.max(0, Math.min(Q_MAX, n | 0)); applyQuality(); } } });
     }
     const animate=()=>{
@@ -6300,7 +6314,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         if (sim.timeAcc >= 1) { simTick(sim.timeAcc); sim.timeAcc = 0; emitStats(); if (selectedSel && onSelect) onSelect(infoFor(selectedSel)); }
         updateGuests(t, dt);
         updateRescues(t, dt);
-        orbit.step();          // laufender Kameraflug
+        if (skiRun && skiRun.active()) skiRun.step(dt, t);   // der Spieler fährt selbst: Kamera hängt an der Figur
+        else orbit.step();     // laufender Kameraflug
         updateFog();           // Dunst an Kartengröße und Zoom anpassen
         updateConstructions(dt);
         updateQueue(t);
@@ -6335,7 +6350,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             if (bloomPass && bloomPass.enabled) {
                 // Nah am Gelände strahlten Schneekappen und Dächer als weiße Höfe aus. Das
                 // Glühen nimmt deshalb mit der Nähe ab und ist erst im Überblick voll da.
-                const far = Math.max(0, Math.min(1, (orbit.viewDist() - 26) / Math.max(1, worldSpan * 0.42 - 26)));
+                const far = Math.max(0, Math.min(1, (viewDistNow() - 26) / Math.max(1, worldSpan * 0.42 - 26)));
                 bloomPass.strength = 0.09 + 0.25 * far;        // im Überblick 0.34 wie bisher
                 bloomPass.radius = 0.46 + 0.26 * far;
                 bloomPass.threshold = 0.96 - 0.10 * far;
@@ -8328,6 +8343,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         if (touchIds.size === 0) gestureSeen = false;
     };
     const onUp = (e) => {
+        if (skiRun && skiRun.active()) return;   // beim Selbstfahren wird nicht gebaut
         if (!isTap(e)) return; // war Kamera-Drag oder Zwei-Finger-Geste
         const needConfirm = isTouchEvent(e) && !e.__confirmed;
         // --- STRASSEN-BAU (zwei Klicks: Start, dann Ende; danach weiter ab Endpunkt) ---
@@ -8725,7 +8741,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     let onBuildHint = null;      // Grund, warum gerade nicht gebaut werden kann (HUD)
     let onToast = null;          // kurze Meldung im HUD (Diagnose)
     const onDemolish = (e) => {
-        if (!demolishMode) return;
+        if (!demolishMode || (skiRun && skiRun.active())) return;
         if (!isTap(e)) return;
         const pt = pickPoint(e);
         if (!pt) return;
@@ -8800,6 +8816,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     };
     // ===== INFO-AUSWAHL: Gebäude/Parkplatz anklicken -> Infofeld =====
     const onPick = (e) => {
+        if (skiRun && skiRun.active()) return;
         if (currentBuild || demolishMode || liftMode || pisteMode || roadMode) return;
         if (!isTap(e)) return;  // war Kamera-Drag oder Zwei-Finger-Geste
         const pt = pickPoint(e);
@@ -8982,7 +8999,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         if (pending && pending.kind === 'build') buildPending(pending.pt);
     };
     // Vorschau beim Darüberfahren gibt es nur mit der Maus; der Finger setzt sie durch Antippen.
-    const onHover = (e) => { if (!isTouchEvent(e)) onMove(e); };
+    const onHover = (e) => { if (!isTouchEvent(e) && !(skiRun && skiRun.active())) onMove(e); };
     canvas.addEventListener('pointermove', onHover);
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('pointerup', onUp);
@@ -8991,6 +9008,30 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     canvas.addEventListener('pointerup', onTouchEnd);
     canvas.addEventListener('pointercancel', onTouchEnd);
     canvas.addEventListener('dblclick', onDblClick);
+
+    // ===== SELBST FAHREN =====
+    let onSki = null;
+    skiRun = createSkiRun({
+        scene, camera, surfaceAt, solidAt, half, tile, lcAt, hasSnowAt,
+        isBuilt: (gx, gy) => occAt(gx, gy) === OCC_BUILD,
+        routes: () => guestRoutes,
+        touch: () => lastPointerType !== 'mouse',
+        onState: (info) => { if (onSki) onSki(info); }
+    });
+    const startSki = () => {
+        if (skiRun.active()) return true;
+        deselect(); currentBuild = null; demolishMode = false; endLift(); endPiste(); endRoad();
+        showParcelGrid(false); hideSnowRange(); hideDirArrow();
+        if (ghost) { scene.remove(ghost); ghost = null; }
+        const st = orbit.getState();
+        orbit.setEnabled(false);
+        return skiRun.start(st.x, st.z);
+    };
+    const stopSki = () => {
+        const at = skiRun.stop();
+        orbit.setEnabled(true);
+        if (at) orbit.setState({ x: at.x, z: at.z, dist: worldSpan * 0.2 });
+    };
 
     // ===== SPIELSTAND: SICHERN UND LADEN =====
     const SIM_KEYS = ['served', 'revenue', 'satisfaction', 'dayProfit', 'bestDayProfit', 'dayAcc', 'dayRevenue',
@@ -9089,7 +9130,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         getSave(){ return getSave(); },
         loadSave(data){ return loadSave(data); },
         setOnSaveChange(cb){ onSaveChange = cb; },
-        dispose(){ cancelAnimationFrame(raf); orbit.dispose(); window.removeEventListener('resize',onResize); window.visualViewport?.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onHover); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('pointerup',onTouchEnd); canvas.removeEventListener('pointercancel',onTouchEnd); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
+        // ----- Selbst fahren -----
+        startSki(){ return startSki(); },
+        stopSki(){ stopSki(); },
+        skiInput(part){ skiRun.setInput(part); },
+        skiTakeLift(){ return skiRun.takeLift(); },
+        setOnSki(cb){ onSki = cb; },
+        dispose(){ cancelAnimationFrame(raf); skiRun.dispose(); orbit.dispose(); window.removeEventListener('resize',onResize); window.visualViewport?.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onHover); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('pointerup',onTouchEnd); canvas.removeEventListener('pointercancel',onTouchEnd); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
         // ----- Bedienung per Finger: vorgemerkte Aktion bestätigen oder verwerfen -----
         setOnPending(cb){ onPending = cb; },
         confirmPending(){ confirmPending(); },

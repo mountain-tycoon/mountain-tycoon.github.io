@@ -1,0 +1,368 @@
+// ============================================================
+// SELBST FAHREN: der Spieler steuert einen eigenen Skifahrer durch
+// sein Skigebiet. Die Kamera hängt hinter der Figur; die Simulation
+// (Gäste, Lifte, Wetter) läuft dabei weiter.
+//
+// Maße: eine Kachel ist eine Welt-Einheit, die Figur gut eine Einheit
+// hoch. Die Gäste fahren höchstens 12 Einheiten je Sekunde – daran sind
+// Tempo, Kurvenradius und Bremsweg hier ausgerichtet.
+// ============================================================
+import * as THREE from 'three';
+import { makeSkier } from './Vehicles3D.js';
+
+const G = 7.2;              // Hangabtrieb
+const FALL = 15;            // Fallbeschleunigung im Sprung
+const V_MAX = 21;
+const KMH = 6;              // Anzeige: Einheiten je Sekunde -> km/h
+const GROUND_LIFTS = ['tbar', 'platter', 'carpet'];
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const ease = (rate, dt) => 1 - Math.exp(-rate * dt);
+
+/**
+ * deps:
+ *   scene, camera
+ *   surfaceAt(wx, wz)   Höhe der Schneedecke        solidAt(wx, wz)  dazu Felsblöcke
+ *   half, tile          halbe Kartenbreite, Kachelgröße
+ *   lcAt(gx, gy)        Bodenart (1/5/6 Wald, 2 Wasser, 3 Fels)
+ *   hasSnowAt(gx, gy)   liegt eine fahrbare Decke?
+ *   isBuilt(gx, gy)     steht hier ein Gebäude?
+ *   routes()            Lifte und Pisten des Gebiets
+ *   touch()             Bedienung mit dem Finger? (für die Hinweistexte)
+ *   onState(info)       Meldung ans HUD (mehrmals je Sekunde), null = beendet
+ */
+export function createSkiRun(deps) {
+    const { scene, camera, surfaceAt, solidAt, half, tile, lcAt, hasSnowAt, isBuilt, routes } = deps;
+    let onState = deps.onState || null;
+
+    let on = false;
+    let mesh = null;
+    const pos = new THREE.Vector3();
+    let th = 0;                 // Fahrtrichtung: (sin th, cos th) in der Ebene
+    let v = 0;                  // Tempo entlang der Fahrtrichtung
+    let vy = 0, air = false;    // Sprung
+    let walking = false;        // kein Schnee: zu Fuß, Ski auf der Schulter
+    let lastGround = 0;
+    let steerS = 0, tuckS = 0, brakeS = 0;
+    let camTh = 0;
+    const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
+    let ride = null;            // laufende Liftfahrt
+    let offer = null;           // Lift, in den man gerade einsteigen könnte
+    let emitT = 0, bumpT = 0, hintT = 0, hint = '';
+    const input = { left: false, right: false, brake: false, tuck: false };
+    const keys = new Set();
+    let ac = null;
+
+    const toG = (w) => (w + half) / tile;
+    const toW = (g) => g * tile - half;
+    const isForest = (x, z) => { const lc = lcAt(toG(x), toG(z)); return lc === 1 || lc === 5 || lc === 6; };
+    /** Hier geht es nicht weiter: Kartenrand, Wasser, Felsblock, Gebäude. */
+    const blockedAt = (x, z) => {
+        if (Math.abs(x) > half - 1.2 || Math.abs(z) > half - 1.2) return 'edge';
+        const gx = toG(x), gy = toG(z);
+        if (isBuilt(Math.round(gx), Math.round(gy))) return 'building';
+        // Auf der Piste ist der Weg frei: sie überbrückt Bäche, und Felsblöcke (nur grob
+        // gerastert bekannt) sind dort geräumt.
+        const water = lcAt(gx, gy) === 2, rock = solidAt(x, z) > surfaceAt(x, z) + 0.7;
+        if ((water || rock) && !onPisteAt(x, z)) return water ? 'water' : 'rock';
+        return null;
+    };
+    const pistes = () => routes().filter(r => r.kind === 'piste' && r.path && r.path.length >= 2);
+    const lifts = () => routes().filter(r => r.kind === 'lift' && r.top && r.bottom);
+    /** Abstand zur nächsten Pistenachse (in Einheiten), grob über die Wegpunkte. */
+    const onPisteAt = (x, z) => {
+        const gx = toG(x), gy = toG(z);
+        for (const r of pistes()) {
+            const w = (r.snowW || 3) + 1;
+            const p = r.path;
+            for (let i = 0; i < p.length - 1; i++) {
+                const ax = p[i].gx, ay = p[i].gy, bx = p[i + 1].gx - ax, by = p[i + 1].gy - ay;
+                const l2 = bx * bx + by * by || 1;
+                const u = clamp(((gx - ax) * bx + (gy - ay) * by) / l2, 0, 1);
+                if (Math.hypot(gx - ax - bx * u, gy - ay - by * u) < w) return true;
+            }
+        }
+        return false;
+    };
+    /** Richtung des steilsten Gefälles. */
+    const fallLine = (x, z) => {
+        const e = 1.5;
+        const dx = surfaceAt(x - e, z) - surfaceAt(x + e, z), dz = surfaceAt(x, z - e) - surfaceAt(x, z + e);
+        return Math.hypot(dx, dz) > 1e-4 ? Math.atan2(dx, dz) : th;
+    };
+    /** Punkt auf einer Piste, `dist` Kacheln nach dem obersten Wegpunkt, samt Laufrichtung dort. */
+    const alongPiste = (p, dist) => {
+        let left = dist;
+        for (let i = 0; i < p.length - 1; i++) {
+            const bx = p[i + 1].gx - p[i].gx, by = p[i + 1].gy - p[i].gy, l = Math.hypot(bx, by);
+            if (l < 1e-6) continue;
+            if (left <= l || i === p.length - 2) {
+                const u = Math.min(1, left / l);
+                return { x: toW(p[i].gx + bx * u), z: toW(p[i].gy + by * u), th: Math.atan2(bx, by) };
+            }
+            left -= l;
+        }
+        return { x: toW(p[0].gx), z: toW(p[0].gy), th: 0 };
+    };
+    /** Rund um den Punkt steht nichts (Station, Hütte) – auch nicht dort, wo die Kamera hängt. */
+    const clearSpot = (q) => {
+        for (const back of [0, 3, 6]) {
+            const x = q.x - Math.sin(q.th) * back, z = q.z - Math.cos(q.th) * back;
+            for (let i = 0; i < 8; i++) {
+                const a = i * Math.PI / 4, r = i % 2 ? 2.2 : 1.2;
+                if (blockedAt(x + Math.cos(a) * r, z + Math.sin(a) * r)) return false;
+            }
+        }
+        return true;
+    };
+    /** Start einer Piste: so weit unterhalb der Bergstation, dass Figur und Kamera frei stehen. */
+    const pisteStart = (r) => {
+        let q = alongPiste(r.path, 4);
+        for (let d = 4; d <= 22 && !clearSpot(q); d += 2) q = alongPiste(r.path, d + 2);
+        return q;
+    };
+    const nearestStart = (x, z) => {
+        let best = null, bd = Infinity;
+        for (const r of pistes()) {
+            const s = pisteStart(r), d = Math.hypot(s.x - x, s.z - z);
+            if (d < bd) { bd = d; best = s; }
+        }
+        return best && { ...best, d: bd };
+    };
+    const liftLabel = (r) => r.name || 'Lift';
+
+    const say = (text) => { hint = text; hintT = 2.6; emitT = 0; };
+    const emit = () => {
+        if (!onState) return;
+        onState(on ? {
+            kmh: Math.round(v * KMH),
+            riding: ride ? liftLabel(ride.route) : null,
+            lift: !ride && offer ? liftLabel(offer) : null,
+            hint: hintT > 0 ? hint : ''
+        } : null);
+    };
+
+    const resetPose = () => {
+        const ud = mesh.userData;
+        ud.setCarry?.(false); ud.setSnowboard?.(false);
+        for (const part of [ud.legL, ud.legR, ud.armL, ud.armR, ud.torso]) part?.rotation.set(0, 0, 0);
+    };
+    const place = (x, z, heading) => {
+        pos.set(x, surfaceAt(x, z), z); lastGround = pos.y;
+        th = heading; camTh = heading; v = 0; vy = 0; air = false; steerS = 0; walking = false;
+        const dx = Math.sin(th), dz = Math.cos(th);
+        camPos.set(x - dx * 5, pos.y + 2.4, z - dz * 5);
+        camLook.set(x + dx * 5, pos.y + 0.8, z + dz * 5);
+    };
+
+    const readInput = () => {
+        const k = (...names) => names.some(n => keys.has(n));
+        return {
+            left: input.left || k('a', 'arrowleft'),
+            right: input.right || k('d', 'arrowright'),
+            brake: input.brake || k('s', 'arrowdown', ' '),
+            tuck: input.tuck || k('w', 'arrowup')
+        };
+    };
+
+    const stepRide = (dt) => {
+        ride.t = Math.min(1, ride.t + dt / ride.dur);
+        const e = ride.t * ride.t * (3 - 2 * ride.t);
+        const x = ride.ax + (ride.bx - ride.ax) * e, z = ride.az + (ride.bz - ride.az) * e;
+        // wie am Seil über die Stützen: der Geländeform folgend, an den Stationen sanft auf den Boden
+        const lift = ride.h * Math.sin(Math.PI * Math.min(1, ride.t * 6, (1 - ride.t) * 6) / 2);
+        pos.set(x, surfaceAt(x, z) + lift, z);
+        v = 0;
+        if (ride.t >= 1) {
+            // oben aussteigen: in Richtung der Abfahrt, sonst in die Falllinie
+            th = ride.out ?? fallLine(pos.x, pos.z);
+            pos.y = lastGround = surfaceAt(pos.x, pos.z); vy = 0; air = false;
+            ride = null; v = 1.5;
+            say('Oben angekommen – los geht’s');
+        }
+    };
+
+    const stepSki = (dt, inp) => {
+        const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+        steerS += (steer - steerS) * ease(9, dt);
+        tuckS += ((inp.tuck ? 1 : 0) - tuckS) * ease(6, dt);
+        brakeS += ((inp.brake ? 1 : 0) - brakeS) * ease(8, dt);
+        // Lenken: im Stand auf der Stelle, mit dem Tempo weitere Bögen
+        th -= steerS * (2.7 / (1 + v * 0.035)) * (air ? 0.25 : 1) * dt;
+        const dx = Math.sin(th), dz = Math.cos(th);
+        const e = 0.6;
+        const s = (surfaceAt(pos.x + dx * e, pos.z + dz * e) - surfaceAt(pos.x - dx * e, pos.z - dz * e)) / (2 * e);
+        if (!air) {
+            const gx = toG(pos.x), gy = toG(pos.z);
+            const snow = hasSnowAt(gx, gy), forest = isForest(pos.x, pos.z);
+            walking = !snow;
+            if (walking) {
+                // Apere Wiese: die Ski gleiten nicht – wer weiter will, geht zu Fuß
+                const want = inp.tuck && !inp.brake ? 2.9 : 0;
+                v += (want - v) * ease(v > want ? 3.5 : 5, dt);
+                if (bumpT <= 0) { say(deps.touch?.() ? 'Kein Schnee – mit „Schuss“ geht es zu Fuß weiter' : 'Kein Schnee – mit W geht es zu Fuß weiter'); bumpT = 12; }
+            } else {
+                let a = -G * s / Math.sqrt(1 + s * s);
+                // Reibung: Piste gleitet, Tiefschnee bremst, im Wald erst recht
+                const mu = forest ? 0.32 : onPisteAt(pos.x, pos.z) ? 0.035 : 0.085;
+                const drag = (0.02 - 0.009 * tuckS) * v * v + Math.abs(steerS) * v * 0.2 + brakeS * (6 + v * 0.5);
+                if (v > 0.01) a -= mu * G + drag;
+                else if (a < mu * G) a = 0;                      // Haftung: im Flachen bleibt man stehen
+                if (inp.tuck && v < 3.4 && s < 0.3) a += 4.2;    // anschieben mit den Stöcken
+                v = clamp(v + a * dt, 0, V_MAX);
+            }
+        }
+        bumpT -= dt;
+        if (mesh.userData.carrying !== walking) mesh.userData.setCarry?.(walking);
+        // Weiterfahren, sofern nichts im Weg steht
+        const nx = pos.x + dx * v * dt, nz = pos.z + dz * v * dt;
+        const why = v > 0 ? blockedAt(nx, nz) : null;
+        if (why && !blockedAt(pos.x, pos.z)) {
+            if (v > 2) say(why === 'water' ? 'Wasser – hier geht es nicht weiter'
+                : why === 'edge' ? 'Ende des Skigebiets'
+                : why === 'rock' ? 'Fels im Weg' : 'Gebäude im Weg');
+            v = 0;
+        } else { pos.x = nx; pos.z = nz; }
+        // Höhe: am Boden kleben – außer das Gelände fällt schneller weg, als man fällt (Kuppe, Schanze)
+        const ground = surfaceAt(pos.x, pos.z);
+        const gvy = (ground - lastGround) / Math.max(dt, 1e-3);     // so schnell steigt oder fällt der Boden unter den Skiern
+        lastGround = ground;
+        if (air) {
+            vy -= FALL * dt; pos.y += vy * dt;
+            if (pos.y <= ground) { pos.y = ground; air = false; vy = gvy; }
+        } else if (v > 4 && gvy < vy - FALL * dt - 0.9) {
+            air = true; vy -= FALL * dt; pos.y += vy * dt;
+            if (pos.y <= ground) { pos.y = ground; air = false; vy = gvy; }
+        } else { pos.y = ground; vy = gvy; }
+        // Einsteigen möglich? Langsam und nah an einer Talstation
+        offer = null;
+        if (v < 4) {
+            let bd = 14;                    // großzügig: rund um die Talstation stehen Gebäude im Weg
+            for (const r of lifts()) {
+                const d = Math.hypot(toW(r.bottom.gx) - pos.x, toW(r.bottom.gy) - pos.z);
+                if (d < bd) { bd = d; offer = r; }
+            }
+        }
+        return s;
+    };
+
+    const poseSkier = (t, s) => {
+        const ud = mesh.userData;
+        mesh.position.set(pos.x, pos.y + 0.05, pos.z);
+        mesh.rotation.order = 'YXZ';
+        const lean = steerS * Math.min(0.5, 0.12 + v * 0.035);
+        const pitch = ride || walking ? 0 : -Math.atan(s) * (air ? 0.4 : 1);
+        mesh.rotation.set(pitch, th, lean);
+        if (walking && !ride) {
+            // zu Fuß: aufrecht, Beine und freier Arm schwingen im Schritt
+            const sw = Math.sin(t * 9) * 0.55 * Math.min(1, v / 2.9);
+            if (ud.torso) ud.torso.rotation.set(0.06, 0, 0);
+            if (ud.legL) { ud.legL.rotation.set(sw, 0, 0); ud.legR.rotation.set(-sw, 0, 0); }
+            if (ud.armL) { ud.armL.rotation.set(-sw * 0.7, 0, 0); ud.armR.rotation.set(-0.5, 0, 0); }
+            return;
+        }
+        const crouch = 0.3 + tuckS * 0.55 + Math.min(0.2, v * 0.012);
+        if (ud.torso) ud.torso.rotation.set(ride ? 0 : crouch, 0, 0);
+        const armX = ride ? 0 : -0.45 - tuckS * 0.7 + (air ? 0.5 : 0);
+        if (ud.armL) { ud.armL.rotation.set(armX, 0, -0.25 - brakeS * 0.3 - lean * 0.6); ud.armR.rotation.set(armX, 0, 0.25 + brakeS * 0.3 - lean * 0.6); }
+        // Beine: Pflug beim Bremsen, sonst leicht gegen die Schräglage
+        const wob = v > 1 && !air ? Math.sin(t * 9) * 0.02 : 0;
+        if (ud.legL) { ud.legL.rotation.set(wob, 0, -brakeS * 0.22 - lean * 0.3); ud.legR.rotation.set(-wob, 0, brakeS * 0.22 - lean * 0.3); }
+    };
+
+    const stepCamera = (dt) => {
+        // Die Kamera dreht verzögert mit – so sieht man den eigenen Schwung
+        let d = th - camTh;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        camTh += d * ease(ride ? 2 : 3.2, dt);
+        const cx = Math.sin(camTh), cz = Math.cos(camTh);
+        const back = 4.2 + v * 0.1 + (ride ? 3 : 0), up = 1.9 + v * 0.03 + (ride ? 1.5 : 0);
+        const wx = pos.x - cx * back, wz = pos.z - cz * back;
+        const wy = Math.max(pos.y + up, solidAt(wx, wz) + 1.3);
+        const k = ease(7, dt);
+        camPos.x += (wx - camPos.x) * k; camPos.z += (wz - camPos.z) * k;
+        camPos.y += (wy - camPos.y) * ease(4, dt);
+        const floor = solidAt(camPos.x, camPos.z) + 0.9;
+        if (camPos.y < floor) camPos.y = floor;
+        const ahead = 5 + v * 0.3;
+        const lx = pos.x + cx * ahead, lz = pos.z + cz * ahead;
+        const ly = ride ? pos.y + 0.6 : Math.min(pos.y + 0.9, Math.max(surfaceAt(lx, lz) + 0.9, pos.y - ahead * 0.6));
+        camLook.x += (lx - camLook.x) * k; camLook.z += (lz - camLook.z) * k;
+        camLook.y += (ly - camLook.y) * ease(5, dt);
+        camera.position.copy(camPos);
+        camera.lookAt(camLook);
+    };
+
+    return {
+        active: () => on,
+        setOnState(cb) { onState = cb; },
+        /** Los geht es oben an der Piste, die dem Blickpunkt am nächsten liegt. */
+        start(viewX, viewZ) {
+            if (on) return true;
+            if (!mesh) mesh = makeSkier(11);
+            resetPose();
+            const s = nearestStart(viewX, viewZ);
+            if (s) place(s.x, s.z, s.th);
+            else {
+                const x = clamp(viewX, -half + 3, half - 3), z = clamp(viewZ, -half + 3, half - 3);
+                place(x, z, 0); th = camTh = fallLine(x, z);
+            }
+            scene.add(mesh);
+            on = true; ride = null; offer = null; hintT = 0; bumpT = 0; emitT = 0;
+            keys.clear(); Object.assign(input, { left: false, right: false, brake: false, tuck: false });
+            ac = new AbortController();
+            const typing = (e) => /input|textarea|select/i.test(e.target?.tagName || '') || e.target?.isContentEditable;
+            window.addEventListener('keydown', (e) => {
+                if (typing(e)) return;
+                const k = e.key.toLowerCase();
+                if (['a', 'd', 'w', 's', ' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k)) { keys.add(k); e.preventDefault(); }
+            }, { signal: ac.signal });
+            window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()), { signal: ac.signal });
+            window.addEventListener('blur', () => keys.clear(), { signal: ac.signal });
+            poseSkier(0, 0); stepCamera(1);
+            emit();
+            return true;
+        },
+        /** Beenden; liefert den Ort, an dem die Fahrt endete (für die Übersichtskamera). */
+        stop() {
+            if (!on) return null;
+            on = false; ride = null; offer = null;
+            ac?.abort(); ac = null; keys.clear();
+            scene.remove(mesh);
+            emit();
+            return { x: pos.x, z: pos.z };
+        },
+        /** Eingaben der Knöpfe im HUD (Finger). */
+        setInput(part) { Object.assign(input, part); },
+        /** In den angebotenen Lift steigen und nach oben fahren. */
+        takeLift() {
+            if (!on || ride || !offer) return false;
+            const r = offer;
+            const ax = toW(r.bottom.gx), az = toW(r.bottom.gy);
+            let bx = toW(r.top.gx), bz = toW(r.top.gy);
+            // Ausstieg gleich am Beginn der nächsten Abfahrt – nicht mitten in der Bergstation
+            const out = nearestStart(bx, bz);
+            if (out && out.d < 40) { bx = out.x; bz = out.z; }
+            ride = { route: r, t: 0, ax, az, bx, bz, out: out && out.d < 40 ? out.th : null,
+                h: GROUND_LIFTS.includes(r.liftKind) ? 0 : 3.4,
+                dur: clamp(Math.hypot(bx - ax, bz - az) / 9, 4, 16) };
+            offer = null; walking = false; mesh.userData.setCarry?.(false);
+            th = Math.atan2(bx - ax, bz - az);
+            emitT = 0;
+            return true;
+        },
+        step(dt, t) {
+            if (!on) return;
+            let s = 0;
+            if (ride) stepRide(dt); else s = stepSki(dt, readInput());
+            poseSkier(t, s);
+            stepCamera(dt);
+            hintT -= dt; emitT -= dt;
+            if (emitT <= 0) { emitT = 0.15; emit(); }
+        },
+        /** Nur für Prüfungen beim Entwickeln. */
+        __state: () => ({ x: pos.x, y: pos.y, z: pos.z, th, v, air, ride: !!ride, offer: !!offer, hint: hintT > 0 ? hint : '', ahead: blockedAt(pos.x + Math.sin(th), pos.z + Math.cos(th)), forest: isForest(pos.x, pos.z) }),
+        /** Abstand Kamera–Figur (für den Dunst). */
+        viewDist: () => 8,
+        dispose() { ac?.abort(); if (mesh) scene.remove(mesh); on = false; }
+    };
+}

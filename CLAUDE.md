@@ -10,7 +10,7 @@ Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
   - `src/engine/terrainGen.js` – Landschaftserzeugung (Spielfeld samt Umland), siehe „Landschaft" unten
   - `src/components/game/` – 2D-Renderer (`WorldCanvas.jsx`, `DrawingUtils.js`)
   - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `SnowSurface.js`, `Surround3D.js`,
-    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`)
+    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`)
   - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
   - `src/components/menu/` – Hauptmenü und Ladebildschirm
   - `src/constants/` – Gebäude, Gäste, Lifte, Pisten, Kampagne (`campaign.js`: Level, Aufgaben, Fortschritt)
@@ -66,6 +66,20 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Bildpunkt: `raycastTerrain`) und den Direktstart `http://localhost:5180/?level=<id>` (z. B. `schweiz`).
   Die Uhr dabei nur vorwärts stellen.
 - App-Symbole neu erzeugen: `python3 tools/make-app-icons.py public/bg/logo.png public/pwa` (in `webgl-3d/`).
+
+## Selbst fahren (3D)
+- `src/webgl/SkiRun.js`: der Spieler steuert einen eigenen Skifahrer (Knopf „Fahren" in der Werkzeugleiste).
+  Start ist oben an der Piste, die dem Blickpunkt am nächsten liegt – so weit unterhalb der Bergstation, dass
+  Figur und Kamera frei stehen. Die Simulation läuft weiter; gespeichert wird davon nichts.
+- Die Szene schaltet dafür die Kamerasteuerung ab (`orbit.setEnabled`) und ruft im Bildtakt `skiRun.step`
+  statt `orbit.step`; Bau-Eingaben sind solange gesperrt. Schnittstelle der Szene: `startSki`, `stopSki`,
+  `skiInput` (gehaltene Knöpfe am Handy), `skiTakeLift`, `setOnSki` (Tempo, Lift-Angebot, Hinweis fürs HUD).
+- Fahrmodell: Hangabtrieb entlang der Fahrtrichtung, Reibung je Untergrund (Piste, Tiefschnee, Wald), auf
+  aperer Wiese geht die Figur zu Fuß. Es blockieren Kartenrand, Gebäude sowie – nur abseits der Piste –
+  Wasser und Felsblöcke (die Felsen sind bloß grob gerastert bekannt). Nahe einer Talstation bietet das HUD
+  die Bergfahrt an; sie endet am Beginn der nächsten Abfahrt.
+- Prüfen ohne flüssiges Bild: `window.__mtCam.ski()` liefert das Modul; `setInput` + `step(1/60, t)` in einer
+  Schleife spult die Fahrt vor, `__state()` zeigt Ort und Tempo.
 
 ## Landschaft, Umland, Schnee
 - **Erzeugung** (`engine/terrainGen.js`): kein Aufaddieren breiter Kuppeln mehr (das ergab in jedem Level einen

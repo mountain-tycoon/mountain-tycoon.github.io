@@ -608,6 +608,74 @@ const ConfirmBar = ({ p, fmt, onOk, onCancel, onRotate, onUndo }) => {
     );
 };
 
+/** Gehaltener Knopf der Fahrsteuerung (Finger): wirkt, solange er gedrückt ist. */
+const HoldBtn = ({ label, wide, onHold, children }) => {
+    const set = (v) => (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (v) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ältere Browser */ } }
+        onHold(v);
+    };
+    return (
+        <button aria-label={label} title={label} onPointerDown={set(true)} onPointerUp={set(false)} onPointerCancel={set(false)}
+                onLostPointerCapture={() => onHold(false)} onContextMenu={e => e.preventDefault()}
+                style={{ ...glass, width: wide ? 92 : 66, height: 62, borderRadius: 16, padding: 0, cursor: 'pointer', color: '#e8eaed',
+                         display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none',
+                         fontSize: 10.5, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            {children}
+        </button>
+    );
+};
+const Chevron = ({ flip }) => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+         style={flip ? { transform: 'scaleX(-1)' } : undefined}><path d="M15 5l-7 7 7 7" /></svg>
+);
+
+/** Anzeige und Steuerung beim Selbstfahren. */
+const SkiHud = ({ ski, touch, compact, onStop, onLift, onInput }) => (
+    <>
+        <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: `calc(${compact ? 8 : 14}px + ${SAFE_L})` }}>
+            <button onClick={onStop} style={{ ...btn, display: 'flex', alignItems: 'center', gap: 6 }} title="Zurück zum Bauen (Esc)">
+                <Ico name="back" size={12} /> Beenden
+            </button>
+        </div>
+        <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: 0, right: 0,
+                      display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+            <div style={{ ...chip, color: '#e8eef6', display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                <span style={{ fontSize: 19, fontWeight: 700, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{ski.kmh}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>km/h</span>
+            </div>
+        </div>
+        <div style={{ position: 'fixed', zIndex: 20, left: 0, right: 0, bottom: `calc(${touch ? 96 : 20}px + ${SAFE_B})`, boxSizing: 'border-box',
+                      padding: `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
+            {ski.hint && <div style={{ ...chip, color: '#fcd34d', fontSize: 12 }}>{ski.hint}</div>}
+            {ski.riding && <div style={{ ...chip, color: '#e8eef6', fontSize: 12 }}>Bergfahrt · {ski.riding}</div>}
+            {ski.lift && (
+                <button onClick={onLift} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
+                    {ski.lift} nach oben{touch ? '' : ' (L)'}
+                </button>
+            )}
+            {!touch && !ski.riding && (
+                <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5 }}>
+                    A / D oder ← / → lenken · W Schuss und anschieben · S bremsen · Esc beenden
+                </div>
+            )}
+        </div>
+        {touch && !ski.riding && (
+            <>
+                <div style={{ position: 'fixed', zIndex: 20, left: `calc(12px + ${SAFE_L})`, bottom: `calc(18px + ${SAFE_B})`, display: 'flex', gap: 10 }}>
+                    <HoldBtn label="Links" onHold={(v) => onInput({ left: v })}><Chevron /></HoldBtn>
+                    <HoldBtn label="Rechts" onHold={(v) => onInput({ right: v })}><Chevron flip /></HoldBtn>
+                </div>
+                <div style={{ position: 'fixed', zIndex: 20, right: `calc(12px + ${SAFE_R})`, bottom: `calc(18px + ${SAFE_B})`, display: 'flex', gap: 10 }}>
+                    <HoldBtn label="Bremsen" wide onHold={(v) => onInput({ brake: v })}>Bremsen</HoldBtn>
+                    <HoldBtn label="Schuss" wide onHold={(v) => onInput({ tuck: v })}>Schuss</HoldBtn>
+                </div>
+            </>
+        )}
+    </>
+);
+
 const World3D = ({ level, onExit, initialSave = null }) => {
     const canvasRef = useRef(null);
     const apiRef = useRef(null);
@@ -617,6 +685,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
     const touch = vp.coarse;             // Bedienung mit dem Finger
     const narrow = vp.w < 560;           // Hochkant-Handy: Karten über die ganze Breite
     const [pendingAct, setPendingAct] = useState(null);   // angetippte, noch nicht bestätigte Aktion
+    const [ski, setSki] = useState(null);                 // Selbst fahren: Tempo, Lift-Angebot … (null = aus)
     // Einmaliger Hinweis auf die Finger-Gesten
     const [gestureHelp, setGestureHelp] = useState(() => {
         try { return !localStorage.getItem('mt.touchHelp'); } catch { return true; }
@@ -660,6 +729,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
         api.setOnToast?.((m) => { setToast(m); clearTimeout(window.__toastT); window.__toastT = setTimeout(() => setToast(''), 25000); });
         api.setOnSelect?.((info) => setSelInfo(info));
         api.setOnPending?.((p) => setPendingAct(p));
+        api.setOnSki?.((info) => setSki(info));
         api.setOnStats((st) => {
             setStats(st);
             if ((level?.objectives?.length > 0) && level.objectives.every(o => evaluateObjective(o, st).done)) {
@@ -688,6 +758,23 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             api.dispose(); apiRef.current = null;
         };
     }, [level, initialSave]);
+
+    // ===== SELBST FAHREN =====
+    const startSki = () => {
+        setActive(null); setOpenCat(null); setSelInfo(null); setLiftSetup(null); setGoalsOpen(false);
+        apiRef.current?.startSki?.();
+    };
+    const stopSki = () => apiRef.current?.stopSki?.();
+    const skiing = !!ski;
+    useEffect(() => {
+        if (!skiing) return undefined;
+        const onKey = (e) => {
+            if (e.key === 'Escape') apiRef.current?.stopSki?.();
+            else if (e.key.toLowerCase() === 'l') apiRef.current?.skiTakeLift?.();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [skiing]);
 
     const applyTool = (item) => {
         const api = apiRef.current; if (!api) return;
@@ -771,7 +858,10 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: active ? 'crosshair' : 'grab' }} />
 
             {/* Kopfzeile: nur der Rückweg ins Menü; alle Zahlen sitzen zentriert oben */}
-            {compact ? (
+            {skiing ? (
+                <SkiHud ski={ski} touch={touch} compact={compact} onStop={stopSki}
+                        onLift={() => apiRef.current?.skiTakeLift?.()} onInput={(part) => apiRef.current?.skiInput?.(part)} />
+            ) : compact ? (
                 <div style={{ position: 'fixed', top: `calc(8px + ${SAFE_T})`, left: `calc(8px + ${SAFE_L})`, zIndex: 10 }}>
                     <button onClick={onExit} title="Zurück zum Hauptmenü"
                             style={{ ...glass, width: 40, height: 40, borderRadius: 13, padding: 0, cursor: 'pointer', color: '#e8eaed',
@@ -788,9 +878,9 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             )}
 
             {/* Beschneiungs-Zentrale: Wasservorrat, Bedarf und aktuelles Wetter */}
-            {stats && <StatusBoard stats={stats} onFocus={focusProblem} money={money} level={level} fmt={fmt} compact={compact} />}
+            {stats && !skiing && <StatusBoard stats={stats} onFocus={focusProblem} money={money} level={level} fmt={fmt} compact={compact} />}
 
-            {compact ? (
+            {skiing ? null : compact ? (
                 /* Handy: Werkzeugleiste unten – alle Kategorien nebeneinander, mit dem Daumen erreichbar */
                 <div className="mt-noscrollbar" style={{
                     position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 11, boxSizing: 'border-box',
@@ -817,6 +907,14 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                             </button>
                         );
                     })}
+                    <button title="Selbst durchs Skigebiet fahren" onClick={startSki} style={{
+                        flex: '1 0 40px', minWidth: 40, padding: '2px 1px', borderRadius: 10, cursor: 'pointer',
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
+                        border: '1px solid transparent', background: 'rgba(255,255,255,0.05)', color: '#e8eaed'
+                    }}>
+                        <span style={{ fontSize: 19, lineHeight: '19px' }}>⛷️</span>
+                        <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.02em', textTransform: 'uppercase', opacity: .85 }}>Fahren</span>
+                    </button>
                     <button title="Abriss" onClick={toggleDemolish} style={{
                         flex: '1 0 40px', minWidth: 40, padding: '2px 1px', borderRadius: 10, cursor: 'pointer',
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1,
@@ -850,6 +948,14 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                     );
                 })}
                 <div style={{ flex: 1 }} />
+                <button title="Selbst durchs Skigebiet fahren – Start oben an der Piste, die dem Blick am nächsten liegt" onClick={startSki} style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
+                    padding: '9px 4px', borderRadius: 3, cursor: 'pointer',
+                    border: '1px solid transparent', background: 'rgba(255,255,255,0.05)', color: '#e8eaed'
+                }}>
+                    <span style={{ fontSize: 26, lineHeight: '26px' }}>⛷️</span>
+                    <span style={{ fontSize: 7.5, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', opacity: .8 }}>Fahren</span>
+                </button>
                 <button title="Abriss" onClick={toggleDemolish} style={{
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1,
                     padding: '9px 4px', borderRadius: 3, cursor: 'pointer',
@@ -863,7 +969,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             )}
 
             {/* Ausklapp-Panel: am Rechner rechts neben der Leiste, am Handy als Karte über der Werkzeugleiste */}
-            {openCat && (
+            {openCat && !skiing && (
                 <div className={compact ? 'mt-noscrollbar' : undefined} style={compact ? {
                     position: 'fixed', zIndex: 12, left: `calc(8px + ${SAFE_L})`, bottom: aboveBar,
                     ...(narrow ? { right: `calc(8px + ${SAFE_R})` } : { width: 340 }),
@@ -956,7 +1062,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             )}
 
             {/* ===== AUFGABEN: nur ein Symbol, klappt bei Klick auf ===== */}
-            {level?.objectives?.length > 0 && stats && (() => {
+            {level?.objectives?.length > 0 && stats && !skiing && (() => {
                 const done = level.objectives.filter(o => evaluateObjective(o, stats).done).length;
                 const all = level.objectives.length;
                 return (
@@ -1004,7 +1110,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             })()}
 
             {/* Infofeld: angeklicktes Gebäude / Parkplatz */}
-            {selInfo && (
+            {selInfo && !skiing && (
                 <div className={compact ? 'mt-noscrollbar' : undefined} style={{ position: 'fixed', zIndex: 14, overflowY: 'auto', padding: '12px 14px', borderRadius: 14, background: 'rgba(7,15,30,0.94)', border: '1px solid rgba(255,255,255,0.3)', color: '#e8eaed', boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
                               ...(compact
                                   // Handy: Karte über der Werkzeugleiste (hochkant über die ganze Breite)
@@ -1178,7 +1284,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
 
             {/* Unterer Stapel: Meldung, Werkzeug-Hinweis und (Finger) die Bestätigen-Leiste.
                 Der Stapel selbst fängt keine Berührungen ab – das Gelände dahinter bleibt bedienbar. */}
-            <div style={{ position: 'fixed', left: 0, right: 0, bottom: compact ? aboveBar : 20, zIndex: 13, boxSizing: 'border-box',
+            <div style={{ position: 'fixed', left: 0, right: 0, bottom: skiing ? (touch ? `calc(150px + ${SAFE_B})` : 62) : compact ? aboveBar : 20, zIndex: 13, boxSizing: 'border-box',
                           padding: `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`,
                           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
                 {toast && (
@@ -1189,7 +1295,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                     </div>
                 )}
                 {/* Einmaliger Hinweis auf die Gesten, solange kein Werkzeug aktiv ist */}
-                {touch && gestureHelp && !hintText && !pendingAct && !selInfo && !openCat && (
+                {touch && gestureHelp && !skiing && !hintText && !pendingAct && !selInfo && !openCat && (
                     <div style={{ ...chip, pointerEvents: 'auto', display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%',
                                   boxSizing: 'border-box', color: '#e8eaed', fontSize: 11.5, lineHeight: 1.4, padding: '8px 6px 8px 13px' }}>
                         <span>1 Finger: verschieben · 2 Finger: zoomen und drehen · 2 Finger hoch/runter: neigen</span>
