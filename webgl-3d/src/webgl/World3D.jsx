@@ -665,8 +665,8 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onInput }) => {
                 {ski.hint && <div style={{ ...chip, color: '#fcd34d', fontSize: 12 }}>{ski.hint}</div>}
                 {ski.riding && (
                     <div style={{ ...chip, color: '#e8eef6', fontSize: 12 }}>
-                        {ski.waiting ? `${ski.riding} · die nächste Kabine kommt gleich`
-                            : ski.cabin ? `${ski.riding} · ${touch ? 'wischen' : 'mit der Maus ziehen'} zum Umsehen`
+                        {ski.waiting ? `${ski.riding} · gleich geht es los`
+                            : ski.look ? `${ski.riding} · ${touch ? 'wischen' : 'mit der Maus ziehen'} zum Umsehen`
                             : `Bergfahrt · ${ski.riding}`}
                     </div>
                 )}

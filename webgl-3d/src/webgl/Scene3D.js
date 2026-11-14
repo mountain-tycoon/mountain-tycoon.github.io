@@ -6291,6 +6291,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     if (import.meta.env.DEV && window.__mtCam) {   // nur beim Entwickeln: Tageszeit und Qualitätsstufe stellen
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
+            // Lift ohne Dialog bauen (Prüfungen): Art, Tal- und Bergpunkt in Weltkoordinaten
+            buildLift: (kind, ax, az, bx, bz) => { liftKind = kind; const g0 = worldToGrid(ax, az); try { return constructLift({ pt: new THREE.Vector3(ax, surfaceAt(ax, az), az), gx: g0.gx, gy: g0.gy }, new THREE.Vector3(bx, surfaceAt(bx, bz), bz), 0); } finally { for (const c of constructions) c.t = c.dur; } },   // Bauzeit überspringen
             quality: { get: () => qTier, set: (n) => { qTier = Math.max(0, Math.min(Q_MAX, n | 0)); applyQuality(); } } });
     }
     const animate=()=>{
@@ -6316,12 +6318,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         if (sim.timeAcc >= 1) { simTick(sim.timeAcc); sim.timeAcc = 0; emitStats(); if (selectedSel && onSelect) onSelect(infoFor(selectedSel)); }
         updateGuests(t, dt);
         updateRescues(t, dt);
-        if (skiRun && skiRun.active()) skiRun.step(dt, t);   // der Spieler fährt selbst: Kamera hängt an der Figur
-        else orbit.step();     // laufender Kameraflug
+        if (!(skiRun && skiRun.active())) orbit.step();     // laufender Kameraflug
         updateFog();           // Dunst an Kartengröße und Zoom anpassen
         updateConstructions(dt);
         updateQueue(t);
         for (const u of updaters) u(t);
+        // Der Spieler fährt selbst: Kamera hängt an der Figur. Erst NACH den Anlagen – in der Kabine
+        // zählt deren Lage in diesem Bild, sonst hinge man eine Bildlänge hinterher.
+        if (skiRun && skiRun.active()) skiRun.step(dt, t);
         if (water) water.userData.update(dt);     // Wellen und Strömung
         // ===== WIND: Böen treiben Schnee, Fahnen und Wipfel =====
         updateWind(t, dt);

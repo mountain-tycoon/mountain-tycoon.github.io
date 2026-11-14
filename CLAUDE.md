@@ -10,7 +10,7 @@ Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
   - `src/engine/terrainGen.js` – Landschaftserzeugung (Spielfeld samt Umland), siehe „Landschaft" unten
   - `src/components/game/` – 2D-Renderer (`WorldCanvas.jsx`, `DrawingUtils.js`)
   - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `SnowSurface.js`, `Surround3D.js`,
-    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`)
+    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`, `SkiFigure.js`)
   - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
   - `src/components/menu/` – Hauptmenü und Ladebildschirm
   - `src/constants/` – Gebäude, Gäste, Lifte, Pisten, Kampagne (`campaign.js`: Level, Aufgaben, Fortschritt)
@@ -81,13 +81,21 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   oder bergauf will, geht mit „vorwärts" Schritt für Schritt weiter; auf aperer Wiese werden die Ski geschultert.
   Es blockieren Kartenrand, Gebäude sowie – nur abseits der Piste – Wasser und Felsblöcke (die Felsen sind bloß
   grob gerastert bekannt). Schneestaub: kleiner Punkte-Vorrat (`stepDust`), mehr in Kurve und beim Bremsen.
+- Figur: `SkiFigure.js` (`makePlayerSkier`) – runde Gliedmaßen mit Knie- und Ellbogengelenk, Ski an den
+  Füßen, Stöcke in den Händen. `userData.setPose({...})` stellt die ganze Haltung (Kniebeuge je Bein, Pflug,
+  Oberkörper, Arme, `sit` für den Sessel) und hält dabei die Ski flach; `setCarry` schultert die Ski.
+- Wer steht, bleibt stehen (auch am Hang) – los geht es erst mit „vorwärts".
 - Lift: nahe einer Talstation bietet das HUD die Bergfahrt an. Die Figur wartet auf das nächste Fahrzeug der
-  Anlage (`model.carriers`, Platz über `model.seatPos` wie bei den Gästen) und fährt wirklich darin mit; in
-  Kabinen und Sesseln sitzt die Kamera auf dem Platz (Nahebene dafür auf 0.05, Blick durch Ziehen drehbar),
-  an Bodenliften bleibt die Verfolgerkamera. Anlagen ohne Fahrzeuge oder im Bau: Ersatzfahrt am Hang entlang.
-  Ausstieg am Beginn der nächsten Abfahrt.
+  Anlage (`model.carriers`, Platz über `model.seatPos` wie bei den Gästen) und fährt wirklich mit – aber nur
+  in eine fahrende Anlage (im Bau stehen die Fahrzeuge still und sind gestaucht). `skiRun.step` läuft in der
+  Szene NACH den Anlagen-Updates und rechnet mit `updateWorldMatrix`, sonst hängt man eine Bildlänge hinter
+  der Kabine. Kabine: Kamera auf dem eigenen Platz (Nahebene 0.05), Blick durch Ziehen drehbar. Sessel: die
+  Figur sitzt (`sit`), Kamera dicht dahinter, rundherum schwenkbar. Schlepp-/Tellerlift: die Figur steht im
+  Schnee, Bügel und Zugseil zeichnet `placeTow`. Anlagen ohne Fahrzeuge oder im Bau: Ersatzfahrt am Hang
+  entlang. Oben steht man neben der Bergstation (`arrive`) und entscheidet selbst, wohin es geht.
 - Prüfen ohne flüssiges Bild: `window.__mtCam.ski()` liefert das Modul; `start(x, z)`, `setInput` und
-  `step(1/60, t)` in einer Schleife spulen die Fahrt vor, `__state()` zeigt Ort und Tempo.
+  `step(1/60, t)` in einer Schleife spulen die Fahrt vor, `__state()` zeigt Ort und Tempo. `__mtCam.buildLift(art,
+  ax, az, bx, bz)` stellt ohne Dialog und Bauzeit einen Lift hin. Die Fahrzeuge bewegen sich nur in echten Bildern.
 
 ## Landschaft, Umland, Schnee
 - **Erzeugung** (`engine/terrainGen.js`): kein Aufaddieren breiter Kuppeln mehr (das ergab in jedem Level einen
