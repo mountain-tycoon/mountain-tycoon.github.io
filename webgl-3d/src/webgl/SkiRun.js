@@ -10,9 +10,9 @@
 import * as THREE from 'three';
 import { makePlayerSkier, PLAYER_SCALE } from './SkiFigure.js';
 
-const G = 7.2;              // Hangabtrieb
+const G = 8.4;              // Hangabtrieb
 const FALL = 15;            // Fallbeschleunigung im Sprung
-const V_MAX = 21;
+const V_MAX = 26;
 const KMH = 6;              // Anzeige: Einheiten je Sekunde -> km/h
 const GROUND_LIFTS = ['tbar', 'platter', 'carpet'];
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -51,6 +51,9 @@ export function createSkiRun(deps) {
     const NEAR0 = camera.near;
     const _seat = new THREE.Vector3(), _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ');
     let stride = 0;             // Schrittphase beim Gehen
+    let edgeSide = 0, hop = 0;  // Kantenwechsel: kurzes Entlasten zwischen zwei Schwüngen
+    let airT = 0, squat = 0;    // Flugzeit und Abfedern bei der Landung
+    let fov0 = camera.fov, camRoll = 0;
     // Schleppbügel: Querholz hinter der Hüfte und das Zugseil hinauf zur Klemme am Förderseil.
     // (Der Bügel des Anlagenmodells liegt auf Schneehöhe und ist aus der Nähe nicht zu erkennen.)
     const tow = new THREE.Group();
@@ -68,6 +71,77 @@ export function createSkiRun(deps) {
         towRope.scale.y = Math.max(0.1, _a.distanceTo(_b));
         towRope.quaternion.setFromUnitVectors(_up, _b.sub(_a).normalize());
         tow.visible = true;
+    };
+
+    // ===== KABINE VON INNEN =====
+    // Die Kabinen sind massive Körper ohne Innenleben. Für die eigene Fahrt bekommt die Kabine
+    // eine helle Decke mit Lichtband und einen Rahmen über dem Fensterband.
+    const cabinIn = new THREE.Group();
+    const linerMat = new THREE.MeshStandardMaterial({ color: 0xd8d4cc, emissive: 0x6a665e, roughness: 0.9, side: THREE.DoubleSide });   // leuchtet leicht: von unten fällt kaum Licht darauf
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff3d6, emissive: 0xffe2a8, emissiveIntensity: 0.9, roughness: 0.6 });
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x3a4048, roughness: 0.6, side: THREE.DoubleSide });
+    const fitCabin = (car) => {
+        cabinIn.clear();
+        const body = car.mesh.children.find(o => o.isMesh && o.geometry);
+        if (!body) return;
+        if (!body.geometry.boundingBox) body.geometry.computeBoundingBox();
+        const bb = body.geometry.boundingBox, w = bb.max.x - bb.min.x, d = bb.max.z - bb.min.z, h = bb.max.y - bb.min.y;
+        const yC = bb.max.y - h * 0.2 - 0.004;                  // Unterkante der Dachhaube
+        const ceil = new THREE.Mesh(new THREE.BoxGeometry(w * 0.95, 0.012, d * 0.95), linerMat);
+        ceil.position.y = yC; cabinIn.add(ceil);
+        for (const sx of [-1, 1]) {
+            const lamp = new THREE.Mesh(new THREE.BoxGeometry(w * 0.06, 0.006, d * 0.6), lampMat);
+            lamp.position.set(sx * w * 0.2, yC - 0.009, 0); cabinIn.add(lamp);
+        }
+        // Rahmen unter der Decke und Brüstung an der Fensterunterkante, ringsum
+        for (const [yy, hh] of [[yC - h * 0.03, h * 0.06], [bb.min.y + h * 0.4 + 0.012, 0.024]]) {
+            for (const sx of [-1, 1]) {
+                const a = new THREE.Mesh(new THREE.BoxGeometry(0.012, hh, d * 0.93), frameMat); a.position.set(sx * w * 0.468, yy, 0); cabinIn.add(a);
+                const b = new THREE.Mesh(new THREE.BoxGeometry(w * 0.93, hh, 0.012), frameMat); b.position.set(0, yy, sx * d * 0.468); cabinIn.add(b);
+            }
+        }
+        car.mesh.add(cabinIn);
+    };
+
+    // ===== SKISPUREN =====
+    // Zwei schmale Bänder hinter den Skiern, die letzten gut hundert Meter weit.
+    const TR_N = 240, TR_STEP = 0.4;
+    const trPos = new Float32Array(TR_N * 4 * 3).fill(-1e5);
+    const trGeo = new THREE.BufferGeometry();
+    trGeo.setAttribute('position', new THREE.BufferAttribute(trPos, 3));
+    {
+        const idx = [];
+        for (let i = 0; i < TR_N - 1; i++) for (const o of [0, 2]) {
+            const a = i * 4 + o, b = a + 1, c = a + 4, d = a + 5;
+            idx.push(a, c, b, b, c, d);
+        }
+        trGeo.setIndex(idx);
+    }
+    const trail = new THREE.Mesh(trGeo, new THREE.MeshBasicMaterial({ color: 0x8fa3bf, transparent: true, opacity: 0.3, depthWrite: false,
+        side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    trail.frustumCulled = false;
+    let trLast = null, trGap = true;
+    const clearTrail = () => { trPos.fill(-1e5); trGeo.attributes.position.needsUpdate = true; trLast = null; trGap = true; };
+    /** Spur fortschreiben; `draw` = die Ski liegen gerade im Schnee. */
+    const stepTrail = (draw) => {
+        if (trLast && Math.hypot(pos.x - trLast.x, pos.z - trLast.z) < TR_STEP) return;
+        trLast = { x: pos.x, z: pos.z };
+        trPos.copyWithin(0, 12);                                   // ältesten Abschnitt fallen lassen
+        const o = (TR_N - 1) * 12, rx = Math.cos(th), rz = -Math.sin(th);
+        const half = draw ? 0.04 : 0;                              // Breite 0 = Lücke (Sprung, zu Fuß)
+        if (!draw || trGap) {
+            // nach einer Lücke: vorletzte Reihe an dieselbe Stelle legen, damit kein Band quer durchs Bild läuft
+            for (let k = 0; k < 4; k++) { trPos[o - 12 + k * 3] = pos.x; trPos[o - 12 + k * 3 + 1] = pos.y; trPos[o - 12 + k * 3 + 2] = pos.z; }
+        }
+        let k = 0;
+        for (const side of [-1, 1]) for (const e of [-1, 1]) {
+            const off = side * 0.095 * PLAYER_SCALE + e * half;
+            const x = pos.x + rx * off, z = pos.z + rz * off;
+            trPos[o + k * 3] = x; trPos[o + k * 3 + 1] = surfaceAt(x, z) + 0.05; trPos[o + k * 3 + 2] = z;
+            k++;
+        }
+        trGap = !draw;
+        trGeo.attributes.position.needsUpdate = true;
     };
 
     // ===== SCHNEESTAUB =====
@@ -110,6 +184,16 @@ export function createSkiRun(deps) {
             dustPos[i * 3] += dustVel[i * 3] * dt; dustPos[i * 3 + 1] += dustVel[i * 3 + 1] * dt; dustPos[i * 3 + 2] += dustVel[i * 3 + 2] * dt;
         }
         dustGeo.attributes.position.needsUpdate = true;
+    };
+    /** Schneewolke auf einen Schlag (Landung nach einem Sprung). */
+    const burstDust = (n) => {
+        for (let j = 0; j < n; j++) {
+            const i = dustNext; dustNext = (dustNext + 1) % DUST_N;
+            const a = Math.random() * Math.PI * 2, sp = 1 + Math.random() * 2.6;
+            dustPos[i * 3] = pos.x; dustPos[i * 3 + 1] = pos.y + 0.08; dustPos[i * 3 + 2] = pos.z;
+            dustVel[i * 3] = Math.cos(a) * sp + Math.sin(th) * v * 0.3; dustVel[i * 3 + 1] = 0.8 + Math.random() * 1.8; dustVel[i * 3 + 2] = Math.sin(a) * sp + Math.cos(th) * v * 0.3;
+            dustLife[i] = 0.5 + Math.random() * 0.6;
+        }
     };
     const clearDust = () => { dustLife.fill(0); dustPos.fill(-1e5); dustGeo.attributes.position.needsUpdate = true; };
     let offer = null;           // Lift, in den man gerade einsteigen könnte
@@ -194,6 +278,7 @@ export function createSkiRun(deps) {
     const place = (x, z, heading) => {
         pos.set(x, surfaceAt(x, z), z); lastGround = pos.y;
         th = heading; camTh = heading; v = 0; vy = 0; air = false; steerS = 0; walking = false;
+        trLast = null; trGap = true;
         const dx = Math.sin(th), dz = Math.cos(th);
         camPos.set(x - dx * 5, pos.y + 2.4, z - dz * 5);
         camLook.set(x + dx * 5, pos.y + 0.8, z + dz * 5);
@@ -211,7 +296,7 @@ export function createSkiRun(deps) {
 
     /** Oben aussteigen: an den Beginn der nächsten Abfahrt, sonst neben die Bergstation. */
     const endRideView = () => {
-        resetPose(); tow.visible = false;
+        resetPose(); tow.visible = false; cabinIn.removeFromParent();
         camera.near = NEAR0; camera.updateProjectionMatrix();
     };
     /**
@@ -257,13 +342,12 @@ export function createSkiRun(deps) {
                 // Kabine: Blick vom eigenen Platz. Sessel und Bügel: Kamera dicht an der Figur.
                 ride.inside = !ride.ground && !ride.chair;
                 if (ride.inside) {
-                    // Blick aus dem Fenster am eigenen Platz (vorderste Reihe, an der Wand): die Mitfahrer im Rücken
-                    c.mesh.updateWorldMatrix(true, false);
-                    ride.model.seatPos(c, ride.seat, _seat);
-                    const side = Math.sign(c.mesh.worldToLocal(_seat).x) || 1;
-                    c.mesh.getWorldQuaternion(_q);
-                    _seat.set(side * 0.75, 0, 1).applyQuaternion(_q);     // schräg nach vorn hinaus
-                    mesh.visible = false; lookYaw = Math.atan2(_seat.x, _seat.z) - th; lookPitch = -0.16;
+                    fitCabin(c);
+                    // Platz mittig in der vorderen Reihe, Blick durch die Frontscheibe – an den Seiten
+                    // stehen Ecksäulen und der Skiköcher im Bild
+                    const inf = c.info || {}, rows = inf.rows || 1, perRow = Math.ceil((inf.seats || 1) / rows);
+                    ride.seat = Math.min((inf.seats || 1) - 1, perRow * (rows - 1) + Math.floor((perRow - 1) / 2));
+                    mesh.visible = false; lookYaw = 0.3; lookPitch = -0.1;
                     camera.near = 0.05; camera.updateProjectionMatrix();
                 } else { lookYaw = ride.chair ? 0.55 : 0.35; lookPitch = ride.chair ? -0.16 : -0.05; }   // schräg von hinten oben
                 emitT = 0;
@@ -304,6 +388,9 @@ export function createSkiRun(deps) {
     const stepSki = (dt, inp) => {
         const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
         steerS += (steer - steerS) * ease(5, dt);
+        // Kantenwechsel: beim Umsteigen von einer Kurve in die nächste kurz entlasten (hoch), dann tief in den Schwung
+        if (Math.sign(steerS) !== edgeSide && Math.abs(steerS) > 0.12) { edgeSide = Math.sign(steerS); if (v > 3) hop = 1; }
+        hop = Math.max(0, hop - dt * 3.2);
         tuckS += ((inp.tuck ? 1 : 0) - tuckS) * ease(6, dt);
         brakeS += ((inp.brake ? 1 : 0) - brakeS) * ease(8, dt);
         // Lenken: im Stand auf der Stelle, mit dem Tempo weitere Bögen
@@ -328,7 +415,7 @@ export function createSkiRun(deps) {
                 let a = -G * s / Math.sqrt(1 + s * s);
                 // Reibung: Piste gleitet, Tiefschnee bremst, im Wald erst recht
                 const mu = forest ? 0.32 : onPisteAt(pos.x, pos.z) ? 0.035 : 0.085;
-                const drag = (0.02 - 0.009 * tuckS) * v * v + Math.abs(steerS) * v * 0.2 + brakeS * (6 + v * 0.5);
+                const drag = (0.0135 - 0.007 * tuckS) * v * v + Math.abs(steerS) * v * 0.09 + brakeS * (6 + v * 0.5);
                 if (v > 0.01) a -= mu * G + drag;
                 else if (!inp.tuck || a < mu * G) a = 0;         // wer steht, bleibt stehen (Kanten quer) – los geht es erst mit „vorwärts"
                 if (inp.tuck && v < 3.4) a += 3.2;               // bergab anschieben mit den Stöcken
@@ -355,11 +442,15 @@ export function createSkiRun(deps) {
         lastGround = ground;
         if (air) {
             vy -= FALL * dt; pos.y += vy * dt;
-            if (pos.y <= ground) { pos.y = ground; air = false; vy = gvy; }
-        } else if (v > 4 && gvy < vy - FALL * dt - 0.9) {
+            if (pos.y <= ground) { if (airT > 0.25) { burstDust(Math.min(70, 20 + airT * 60)); squat = Math.min(1, airT * 1.6); } pos.y = ground; air = false; vy = gvy; }
+            else airT += dt;
+        } else if (v > 4 && gvy < vy - FALL * dt - 0.6) {
+            airT = 0;
             air = true; vy -= FALL * dt; pos.y += vy * dt;
             if (pos.y <= ground) { pos.y = ground; air = false; vy = gvy; }
         } else { pos.y = ground; vy = gvy; }
+        squat = Math.max(0, squat - dt * 2.2);
+        stepTrail(!air && !walking && hasSnowAt(toG(pos.x), toG(pos.z)));
         // Einsteigen möglich? Langsam und nah an einer Talstation
         offer = null;
         if (v < 4) {
@@ -389,7 +480,7 @@ export function createSkiRun(deps) {
             return;
         }
         mesh.position.set(pos.x, pos.y + 0.02, pos.z);
-        const lean = steerS * Math.min(0.5, 0.12 + v * 0.035);
+        const lean = steerS * Math.min(0.68, 0.12 + v * 0.05);
         const pitch = ride || walking || striding ? 0 : -Math.atan(s) * (air ? 0.4 : 1);
         mesh.rotation.set(pitch, th, lean);
         if (ride) { ud.setPose({ bendL: 0.15, bendR: 0.15, lean: 0.1, armX: -0.3, elbow: -0.4, pole: 0.7 }); return; }
@@ -404,8 +495,9 @@ export function createSkiRun(deps) {
             return;
         }
         // Fahren: Knie gebeugt, in der Kurve das Innenbein stärker; Schuss = tiefe Hocke, Stöcke unter den Armen
-        const bend = 0.34 + tuckS * 0.55 + Math.min(0.14, v * 0.01) + (air ? 0.35 : 0);
-        const edge = lean * 0.5;
+        // tief im Schwung, hoch beim Kantenwechsel, abfedern nach der Landung
+        const bend = 0.34 + tuckS * 0.55 + Math.min(0.14, v * 0.01) + (air ? 0.35 : 0) + Math.abs(lean) * 0.5 - hop * 0.22 + squat * 0.5;
+        const edge = lean * 0.75;
         ud.setPose({
             bendL: bend - edge, bendR: bend + edge, plough: brakeS,
             lean: 0.3 + tuckS * 0.75 + Math.min(0.12, v * 0.008),
@@ -437,9 +529,9 @@ export function createSkiRun(deps) {
         // Die Kamera dreht verzögert mit – so sieht man den eigenen Schwung
         let d = th - camTh;
         d = Math.atan2(Math.sin(d), Math.cos(d));
-        camTh += d * ease(ride ? 2 : 3.2, dt);
+        camTh += d * ease(ride ? 2 : 2.5, dt);
         const cx = Math.sin(camTh), cz = Math.cos(camTh);
-        const back = 4.2 + v * 0.1 + (ride ? 3 : 0), up = 1.9 + v * 0.03 + (ride ? 1.5 : 0);
+        const back = 4.0 + v * 0.07 + (ride ? 3 : 0), up = 1.85 - Math.min(0.5, v * 0.03) + (ride ? 1.5 : 0);
         const wx = pos.x - cx * back, wz = pos.z - cz * back;
         const wy = Math.max(pos.y + up, solidAt(wx, wz) + 1.3);
         const k = ease(7, dt);
@@ -453,11 +545,20 @@ export function createSkiRun(deps) {
         camLook.x += (lx - camLook.x) * k; camLook.z += (lz - camLook.z) * k;
         camLook.y += (ly - camLook.y) * ease(5, dt);
         camera.position.copy(camPos);
+        // Tempo spüren: bei hoher Fahrt leichtes Rütteln, weiterer Bildwinkel, die Kamera legt sich mit in die Kurve
+        const fast = clamp((v - 9) / 12, 0, 1);
+        if (fast > 0 && !air) { camera.position.x += (Math.random() - 0.5) * 0.035 * fast; camera.position.y += (Math.random() - 0.5) * 0.035 * fast; }
         camera.lookAt(camLook);
+        camRoll += (-steerS * Math.min(0.16, v * 0.012) - camRoll) * ease(4, dt);
+        camera.rotateZ(camRoll);
+        const fov = fov0 + clamp(v / 20, 0, 1) * 15 + tuckS * 3;
+        if (Math.abs(fov - camera.fov) > 0.05) { camera.fov += (fov - camera.fov) * ease(3, dt); camera.updateProjectionMatrix(); }
     };
 
     return {
         active: () => on,
+        /** Kabine, in der der Spieler gerade sitzt (die Szene blendet darin die Mitfahrer aus). */
+        cabinCar: () => (on && ride && ride.inside && ride.car && ride.car.along < 0.97 ? ride.car : null),   // kurz vor dem Ausstieg sind alle wieder zu sehen
         setOnState(cb) { onState = cb; },
         /**
          * Die Figur an einer frei gewählten Stelle absetzen: sie fällt aus kurzer Höhe in den Schnee.
@@ -474,7 +575,7 @@ export function createSkiRun(deps) {
             const dx = Math.sin(th), dz = Math.cos(th);
             camPos.set(x - dx * 5, pos.y + 2.4, z - dz * 5); camLook.set(x + dx * 5, pos.y + 0.8, z + dz * 5);
             pos.y += 4.5; air = true; vy = 0;             // fallen lassen
-            scene.add(mesh); scene.add(dust); scene.add(tow); tow.visible = false; clearDust();
+            scene.add(mesh); scene.add(dust); scene.add(tow); scene.add(trail); tow.visible = false; clearDust(); clearTrail(); fov0 = camera.fov; camRoll = 0;
             on = true; ride = null; offer = null; hintT = 0; bumpT = 0; emitT = 0;
             keys.clear(); Object.assign(input, { left: false, right: false, brake: false, tuck: false });
             ac = new AbortController();
@@ -515,8 +616,8 @@ export function createSkiRun(deps) {
             on = false; ride = null; offer = null;
             ac?.abort(); ac = null; keys.clear();
             resetPose();
-            camera.near = NEAR0; camera.updateProjectionMatrix();
-            scene.remove(mesh); scene.remove(dust); scene.remove(tow);
+            camera.near = NEAR0; camera.fov = fov0; camera.updateProjectionMatrix(); cabinIn.removeFromParent();
+            scene.remove(mesh); scene.remove(trail); scene.remove(dust); scene.remove(tow);
             emit();
             return { x: pos.x, z: pos.z };
         },
@@ -533,7 +634,7 @@ export function createSkiRun(deps) {
                 t: 0, ax, az, bx, bz, h: ground ? 0 : 3.4, dur: clamp(Math.hypot(bx - ax, bz - az) / 9, 4, 16) };
             offer = null; walking = false; striding = false; mesh.userData.setCarry(false);
             th = Math.atan2(bx - ax, bz - az);
-            clearDust(); hintT = 0;
+            clearDust(); hintT = 0; trGap = true;
             emitT = 0;
             return true;
         },

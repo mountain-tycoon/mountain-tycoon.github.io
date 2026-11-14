@@ -5569,7 +5569,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
                     r.model.seatPos(car, g.seatSlot || 0, _seatV);
                     g.mesh.position.copy(_seatV);
                     g.mesh.rotation.copy(car.mesh.rotation);
-                    g.mesh.visible = true;
+                    // Sitzt der Spieler selbst in dieser Kabine, stünden ihm die Mitfahrer direkt vor der Kamera
+                    g.mesh.visible = !(skiRun && skiRun.cabinCar() === car);
                     // In Kabinen sind die Figuren auf Innenhöhe geschrumpft,
                     // damit sie WIRKLICH drinstehen und durch die Scheiben zu
                     // sehen sind. Sessel/Bügel bleiben unskaliert.

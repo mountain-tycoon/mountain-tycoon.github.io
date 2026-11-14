@@ -85,11 +85,17 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Füßen, Stöcke in den Händen. `userData.setPose({...})` stellt die ganze Haltung (Kniebeuge je Bein, Pflug,
   Oberkörper, Arme, `sit` für den Sessel) und hält dabei die Ski flach; `setCarry` schultert die Ski.
 - Wer steht, bleibt stehen (auch am Hang) – los geht es erst mit „vorwärts".
+- Fahrgefühl: Schräglage und Kniebeuge wachsen mit dem Tempo, beim Kantenwechsel entlastet die Figur kurz
+  (`hop`), nach Sprüngen federt sie ab und wirft eine Schneewolke (`burstDust`). Die Kamera weitet mit dem Tempo
+  den Bildwinkel, legt sich in die Kurve und rüttelt bei hoher Fahrt leicht. Hinter den Skiern bleiben Spuren
+  (`stepTrail`, ein Band der letzten Meter).
 - Lift: nahe einer Talstation bietet das HUD die Bergfahrt an. Die Figur wartet auf das nächste Fahrzeug der
   Anlage (`model.carriers`, Platz über `model.seatPos` wie bei den Gästen) und fährt wirklich mit – aber nur
   in eine fahrende Anlage (im Bau stehen die Fahrzeuge still und sind gestaucht). `skiRun.step` läuft in der
   Szene NACH den Anlagen-Updates und rechnet mit `updateWorldMatrix`, sonst hängt man eine Bildlänge hinter
-  der Kabine. Kabine: Kamera auf dem eigenen Platz (Nahebene 0.05), Blick durch Ziehen drehbar. Sessel: die
+  der Kabine. Kabine: Kamera auf dem Platz vorn in der Mitte (Nahebene 0.05), Blick durch Ziehen drehbar;
+  die Kabinen sind massiv, deshalb hängt `fitCabin` für die Fahrt Decke, Lichtband und Fensterrahmen hinein,
+  und die Szene blendet die Mitfahrer dieser Kabine aus (`skiRun.cabinCar()`). Sessel: die
   Figur sitzt (`sit`), Kamera dicht dahinter, rundherum schwenkbar. Schlepp-/Tellerlift: die Figur steht im
   Schnee, Bügel und Zugseil zeichnet `placeTow`. Anlagen ohne Fahrzeuge oder im Bau: Ersatzfahrt am Hang
   entlang. Oben steht man neben der Bergstation (`arrive`) und entscheidet selbst, wohin es geht.
