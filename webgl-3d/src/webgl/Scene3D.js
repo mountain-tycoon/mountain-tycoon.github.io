@@ -2753,8 +2753,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
 
         // Ticketschalter (Kasse) zwischen Parkplatz und Lift
         const tk = P(-3, 3);
-        const ticket = place(makeTicketOffice(), tk.gx, tk.gy, Math.atan2(upx, upy), 2.0, 'ticket', 29200);
-        const ticketPos = ticket.position.clone();  // Kasse zählt via place() wie ein gebautes Gebäude
+        // Leerer Start: auch die Kasse baut der Spieler selbst. Die Stelle bleibt als Treffpunkt im Ort bestehen
+        // (Ziel der Anreisenden), bis eine echte Kasse steht.
+        const ticket = START_EMPTY ? null : place(makeTicketOffice(), tk.gx, tk.gy, Math.atan2(upx, upy), 2.0, 'ticket', 29200);
+        const ticketPos = ticket ? ticket.position.clone() : worldPosSmooth(tk.gx, tk.gy);  // Kasse zählt via place() wie ein gebautes Gebäude
         // Startzustand: NUR Lift + Kasse. Alles andere baut der Spieler selbst.
 
         // Initiale Zufahrt: GERADE, achsenparallele Straße von der VORDERKANTE des

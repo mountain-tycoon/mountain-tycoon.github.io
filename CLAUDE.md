@@ -160,7 +160,7 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (mit Umland, Spielfeld als Rahmen) und druckt Hangneigung, Wald-, Wasser- und Eisanteil.
 
 ## Start eines Gebiets und Liftlängen
-- Ein Gebiet beginnt **leer**: Ort und Zufahrt stehen, Bahn und Piste baut der Spieler selbst (`START_EMPTY` in
+- Ein Gebiet beginnt **leer**: Ort und Zufahrt stehen; Bahn, Piste und Kasse baut der Spieler selbst (`START_EMPTY` in
   `createScene3D`). Die frühere Startanlage (Gondel Basis–Gipfel samt Abfahrt) gibt es nur noch für Spielstände
   ohne `st` im Stand (`legacyStart`, in `World3D.jsx` aus dem geladenen Stand abgeleitet) – ihnen fehlte sonst
   der Hauptlift. Code, der Lifte oder Pisten voraussetzt, muss mit leeren Listen zurechtkommen.
