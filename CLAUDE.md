@@ -90,12 +90,17 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   den Bildwinkel, legt sich in die Kurve und rüttelt bei hoher Fahrt leicht. Hinter den Skiern bleiben Spuren
   (`stepTrail`, ein Band der letzten Meter).
 - Anlagen (`skiRunAt` in der Szene liefert Art, Lage längs/quer und Achse): Kicker und Funpark stehen im Gelände,
-  der Sprung ergibt sich aus der Fahrphysik; über einer Anlage dreht sich die Figur (`takeOff`/`land`). Halfpipe:
-  gefahren wird auf der SCHALE (`skiSurfaceAt`, dieselbe Formel wie bei den Gästen), nicht in der tieferen Mulde;
-  an der Kante geht es hoch, die Fahrtrichtung wird an der Pipe-Achse gespiegelt und die Figur treibt zurück in
-  die Wand. Rennstrecke: Zeitnahme vom ersten bis zum letzten Tor, Bestzeit je Strecke (nur für die Sitzung).
+  der Sprung ergibt sich aus der Fahrphysik. Halfpipe: gefahren wird auf der SCHALE (`skiSurfaceAt`, dieselbe
+  Formel wie bei den Gästen), nicht in der tieferen Mulde; in der Rinne gibt es etwas Schwung dazu, an der Kante
+  geht es hoch, die Fahrtrichtung wird an der Pipe-Achse gespiegelt, und die Figur treibt in der Luft zurück in
+  die Wand und talwärts. Die Kamera steht dort über der Rinne und schaut sie hinunter (nie hinter dem
+  Startbanner). Rennstrecke: Zeitnahme vom ersten bis zum letzten Tor, Bestzeit je Strecke (nur für die Sitzung).
   Anlagen belegen Bauplatz, blockieren den Fahrer aber nicht. Das Tempo `v` gilt entlang der Oberfläche
   (`hCos`), sonst stimmt am Steilhang nichts.
+- Tricks (`takeOff`/`land`): in der Luft drehen links/rechts die Figur, „vorwärts" ist der Salto vorwärts,
+  Bremsen der Salto rückwärts – frei mischbar, die Fahrtrichtung bleibt. Nur bei echten Sprüngen (auf einer
+  Anlage oder mit kräftigem Absprung). Gelandet wird sauber, wenn auf halbe Drehungen bzw. ganze Salti
+  ausgedreht ist – dann gibt es Namen und Punkte (Pipe ×1,5), sonst einen Sturz (`crashT`).
 - Einkehr: nahe einem Gastro-Gebäude (`HUT_NAMES`) bietet das HUD „Einkehren" an (`toggleHut`): Ski geschultert,
   die Kamera kreist langsam um die Stelle, Blick durch Ziehen drehbar.
 - Ton: `SkiSound.js` erzeugt alles aus Rauschen und Summern (Fahrtwind, Kanten, Liftsurren, Landung), keine

@@ -661,6 +661,7 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput }
                     <div style={{ ...chip, color: '#e8eef6', display: 'flex', alignItems: 'baseline', gap: 6 }}>
                         <span style={{ fontSize: 19, fontWeight: 700, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{ski.kmh}</span>
                         <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>km/h</span>
+                        {ski.score > 0 && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>{ski.score.toLocaleString('de-DE')} P</span>}
                         {ski.timer && <span style={{ fontSize: 15, fontWeight: 700, marginLeft: 10, color: '#fcd34d', fontVariantNumeric: 'tabular-nums' }}>{ski.timer}</span>}
                     </div>
                 </div>
