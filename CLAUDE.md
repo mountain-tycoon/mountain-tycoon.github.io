@@ -155,6 +155,15 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - **Prüfen ohne Spiel:** `node tools/relief.mjs <ordner> [level …]` zeichnet die Landschaft als Reliefbild
   (mit Umland, Spielfeld als Rahmen) und druckt Hangneigung, Wald-, Wasser- und Eisanteil.
 
+## Start eines Gebiets und Liftlängen
+- Ein Gebiet beginnt **leer**: Ort und Zufahrt stehen, Bahn und Piste baut der Spieler selbst (`START_EMPTY` in
+  `createScene3D`). Die frühere Startanlage (Gondel Basis–Gipfel samt Abfahrt) gibt es nur noch für Spielstände
+  ohne `st` im Stand (`legacyStart`, in `World3D.jsx` aus dem geladenen Stand abgeleitet) – ihnen fehlte sonst
+  der Hauptlift. Code, der Lifte oder Pisten voraussetzt, muss mit leeren Listen zurechtkommen.
+- Jede Liftart hat eine Höchstlänge (`max` in `LIFT_PARAMS`, in Kacheln; angezeigt in Metern, 30 Kacheln ≙ 100 m):
+  Förderband 100 m, dann Teller-, Schlepp-, Sessel- und Kabinenbahnen steigend; Pendelbahnen unbegrenzt. Geprüft
+  wird beim Bauen (`liftTooLong`: Vorschau rot, Hinweis im HUD), nicht beim Nachbauen eines Spielstands.
+
 ## Spielstände (3D)
 - Gespeichert wird nicht die Szene, sondern **was der Spieler getan hat**: jede Bauaktion der Reihe nach
   (`logAction` in `Scene3D.js`), dazu Kontostand und Kennzahlen. `getSave()` liefert das als schlichtes Objekt,

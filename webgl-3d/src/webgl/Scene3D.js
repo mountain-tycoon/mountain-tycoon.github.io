@@ -374,7 +374,10 @@ function findLakes(landcover, heightmap, gridSize) {
     return lakes;
 }
 
-export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
+export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, opts = {}) {
+    // Ein Gebiet beginnt LEER: keine Bahn, keine Piste – beides baut der Spieler selbst. Nur Spielstände aus der
+    // Zeit davor (ohne `st` im Stand) bekommen die frühere Startanlage wieder, sonst fehlte ihnen ihr Hauptlift.
+    const START_EMPTY = !opts.legacyStart;
     // Handy oder kleines Tablet? Dort startet die Bildqualität eine Stufe tiefer (siehe „BILDQUALITÄT").
     const smallTouch = (!!window.matchMedia?.('(pointer: coarse)').matches || (navigator.maxTouchPoints || 0) > 0)
         && Math.min(window.screen?.width || 9999, window.screen?.height || 9999) < 900;
@@ -1088,17 +1091,18 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     // base/per = Baukosten. cap = Personen je Fahrzeug, gap = Sekunden bis das
     // nächste Fahrzeug einfahrbereit ist, speed = Fahrtdauer-Faktor.
     const LIFT_PARAMS = {
-        carpet:  { base: 700,   per: 100,  cap: 1, gap: 2.5, speed: 0.9 },   // Magic Carpet (Anfänger)
-        platter: { base: 1500,  per: 200,  cap: 1, gap: 4.0, speed: 1.0 },   // Tellerlift
-        tbar:    { base: 4000,  per: 350,  cap: 2, gap: 5.0, speed: 1.1 },   // Schlepplift (T-Bar)
-        chair2:  { base: 7700,  per: 800,  cap: 2, gap: 6.0, speed: 1.3 },   // 2er-Sessel
-        chair:   { base: 8000,  per: 700,  cap: 4, gap: 6.5, speed: 1.4 },   // 4er-Sessel
-        chair6:  { base: 25200, per: 1300, cap: 6, gap: 6.0, speed: 1.7 },   // 6er-Sesselbahn mit Haube
-        gondola: { base: 15000, per: 1200, cap: 8, gap: 7.0, speed: 1.8 },   // Gondelbahn
-        gondola4:{ base: 19000, per: 1200, cap: 4, gap: 3.0, speed: 2.0 },   // kleine 4er-Kabinenbahn
-        gondola8:{ base: 34000, per: 1900, cap: 8, gap: 4.5, speed: 2.2 },   // 8er-Kabinenbahn
+        // max = größte Länge in Kacheln (30 Kacheln ≙ 100 m in der Anzeige): kleine Anlagen kurz, große weit
+        carpet:  { base: 700,   per: 100,  cap: 1, gap: 2.5, speed: 0.9, max: 30 },   // Magic Carpet (Anfänger)
+        platter: { base: 1500,  per: 200,  cap: 1, gap: 4.0, speed: 1.0, max: 75 },   // Tellerlift
+        tbar:    { base: 4000,  per: 350,  cap: 2, gap: 5.0, speed: 1.1, max: 120 },   // Schlepplift (T-Bar)
+        chair2:  { base: 7700,  per: 800,  cap: 2, gap: 6.0, speed: 1.3, max: 180 },   // 2er-Sessel
+        chair:   { base: 8000,  per: 700,  cap: 4, gap: 6.5, speed: 1.4, max: 240 },   // 4er-Sessel
+        chair6:  { base: 25200, per: 1300, cap: 6, gap: 6.0, speed: 1.7, max: 330 },   // 6er-Sesselbahn mit Haube
+        gondola: { base: 15000, per: 1200, cap: 8, gap: 7.0, speed: 1.8, max: 450 },   // Gondelbahn
+        gondola4:{ base: 19000, per: 1200, cap: 4, gap: 3.0, speed: 2.0, max: 360 },   // kleine 4er-Kabinenbahn
+        gondola8:{ base: 34000, per: 1900, cap: 8, gap: 4.5, speed: 2.2, max: 540 },   // 8er-Kabinenbahn
         // Prestige-Anlage: sehr teuer, dafür hohe Förderleistung
-        mega:    { base: 96000, per: 4200, cap: 10, gap: 3.2, speed: 2.6 },  // große Einseilumlaufbahn
+        mega:    { base: 96000, per: 4200, cap: 10, gap: 3.2, speed: 2.6, max: 690 },  // große Einseilumlaufbahn
         tramxl:  { base: 128000, per: 5200, cap: 20, gap: 14, speed: 3.0 },  // Jumbo-Pendelbahn
         tram:    { base: 40000, per: 2600, cap: 30, gap: 22.0, speed: 2.6 }  // Pendelbahn
     };
@@ -2033,7 +2037,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         // Demo-Piste: gerade Trasse vom Gipfel zur Basis (parallel zum Demo-Lift),
         // damit Lift und Piste garantiert Basis<->Gipfel verbinden.
         const rsteps = Math.max(20, Math.round(Math.hypot(RSX - BASE_GX, RSY - BASE_GY)));
-        for (let i = 0; i <= rsteps; i++) { const t = i / rsteps; routePts.push({ gx: RSX + (BASE_GX - RSX) * t, gy: RSY + (BASE_GY - RSY) * t }); }
+        if (!START_EMPTY) for (let i = 0; i <= rsteps; i++) { const t = i / rsteps; routePts.push({ gx: RSX + (BASE_GX - RSX) * t, gy: RSY + (BASE_GY - RSY) * t }); }
 
         // Wald entlang der Route zu präpariertem Schnee
         const rad = 3;
@@ -2050,11 +2054,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         // Demo: Lift (Basis->Gipfel) + Piste (Gipfel->Basis)
         // Die Startanlage bekommt ebenfalls einen Namen — sonst zeigt das
         // Infofeld beim Anklicken der Station keine Bezeichnung an.
+        if (!START_EMPTY) {
         const demoLift = makeLiftRoute({ gx: RSX, gy: RSY }, { gx: BASE_GX, gy: BASE_GY }, 'gondola', LIFT_PARAMS.gondola);
         demoLift.name = 'Talbahn 1';
         guestRoutes.push(demoLift);
         // Die Startabfahrt ist eine breite (nicht extrabreite) Piste.
         guestRoutes.push({ top: routePts[0], bottom: routePts[routePts.length - 1], path: routePts.slice(), kind: 'piste', width: 'wide', snowW: 3.8 });   // Startabfahrt ist BREIT, nicht extrabreit
+        }
     }
 
     // ===== BASIS-PLATTFORM am Kartenrand ebnen (Halbkreis in die Karte) =====
@@ -2593,6 +2599,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const sx = Math.round(sSnap.gx), sy = Math.round(sSnap.gy), vx = Math.round(vSnap.gx), vy = Math.round(vSnap.gy);
         const valley=worldPos(vx,vy), summit=worldPos(sx,sy);
 
+        if (!START_EMPTY) {
         // Terrain-Profil entlang der Liftlinie (Seil folgt dem Berg)
         const samples=[];
         const S=Math.max(8,Math.floor(valley.distanceTo(summit)/4));
@@ -2624,6 +2631,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         // landete regelmäßig genau auf der Talstation.
         for (const st0 of [{ gx: vx, gy: vy }, { gx: sx, gy: sy }]) {
             parcelClaim(st0.gx - 3, st0.gy - 3, 7, OCC_BUILD, 'lift');
+        }
         }
 
         const place=(obj,gx,gy,rotY=0,r=2.6,selType=null,selCost=0)=>{
@@ -3189,6 +3197,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         // Pistenraupen: erscheinen erst, wenn eine Garage gebaut ist, und fahren
         // sichtbar AUS der Garage auf die Piste (Anzahl = Stellplätze der Garagen).
         const routeAt = (p) => { // p in 0..1 -> {gx,gy} entlang routePts
+            if (!routePts.length) return { gx: RVX, gy: RVY };       // leerer Start: noch keine Abfahrt
             const fi = Math.max(0, Math.min(routePts.length - 1, p * (routePts.length - 1)));
             const i0 = Math.floor(fi), i1 = Math.min(routePts.length - 1, i0 + 1), f = fi - i0;
             const a = routePts[i0], b = routePts[i1];
@@ -3483,7 +3492,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
 
         // ===== SKIFAHRER wedeln die Piste hinunter =====
         const skiers = [];
-        for (let i = 0; i < 8; i++) {
+        for (let i = 0; i < (START_EMPTY ? 0 : 8); i++) {
             const sk = makeSkier(i);
             scene.add(sk);
             // Jeder Skifahrer individuell: Tempo, Schwungradius und -frequenz (Anfänger bis Raser)
@@ -6562,6 +6571,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
     }[kind] || 'Lift');
     const nextLiftName = (kind) => liftBaseName(kind) + ' ' + (built.lift + 1);
     // Lifttypen wie im 2D (LIFT_TYPES): Preise skaliert auf die 3D-Ökonomie
+    /** Länge in Metern, wie sie dem Spieler gezeigt wird (30 Kacheln ≙ 100 m). */
+    const liftMeters = (tiles) => Math.round(tiles / tile * (100 / 30) / 10) * 10;
+    /** Zu lang für diese Liftart? Liefert dann den Hinweistext, sonst ''. Pendelbahnen haben keine Grenze. */
+    const liftTooLong = (a, b) => {
+        const max = (LIFT_PARAMS[liftKind] || {}).max;
+        const len = Math.hypot(a.x - b.x, a.z - b.z) / tile;
+        return max && len > max ? `zu lang: höchstens ${liftMeters(max)} m, gewählt ${liftMeters(len)} m` : '';
+    };
     const liftCost = (a, b) => { const p = LIFT_PARAMS[liftKind]; return Math.round(p.base + a.distanceTo(b) * p.per); };
 
     // ===== PISTEN-WERKZEUG (Multi-Wegpunkt, wie im 2D) =====
@@ -8166,7 +8183,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             if (!pt) return;
             const pts = [liftStart.pt.clone().add(new THREE.Vector3(0,2.4,0)), pt.clone().add(new THREE.Vector3(0,2.4,0))];
             // Echte, transparente Vorschau der kompletten Anlage
-            const okBuild = money >= liftCost(liftStart.pt, pt);
+            const tooLong = liftTooLong(liftStart.pt, pt);
+            const okBuild = money >= liftCost(liftStart.pt, pt) && !tooLong;
+            if (onBuildHint) onBuildHint(tooLong);
             const gr2 = worldToGrid(pt.x, pt.z);
             buildLiftPreview(liftStart, { pt, gx: gr2.gx, gy: gr2.gy }, okBuild);
             return;
@@ -8442,10 +8461,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
             if (needConfirm) {
                 onMove({ __pt: pt.clone() });              // Vorschau der ganzen Anlage zum angetippten Punkt
                 const longEnough = liftStart.pt.distanceTo(pt) > 6;
-                setPending({ kind: 'lift', pt: pt.clone(), cost, ok: money >= cost && longEnough,
-                    why: !longEnough ? 'zu kurz' : 'zu wenig Geld' });
+                const tooLongT = liftTooLong(liftStart.pt, pt);
+                setPending({ kind: 'lift', pt: pt.clone(), cost, ok: money >= cost && longEnough && !tooLongT,
+                    why: !longEnough ? 'zu kurz' : tooLongT || 'zu wenig Geld' });
                 return;
             }
+            // zu lang für diese Liftart: nichts bauen, die Talstation bleibt gesetzt – einfach näher klicken
+            if (!e.__confirmed && liftTooLong(liftStart.pt, pt)) { if (onBuildHint) onBuildHint(liftTooLong(liftStart.pt, pt)); return; }
             if (money >= cost && liftStart.pt.distanceTo(pt) > 6) constructLift(liftStart, pt, cost);
             // aufräumen + abwählen
             if (liftMarker) { scene.remove(liftMarker); liftMarker = null; }
@@ -9091,7 +9113,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         const simOut = {};
         for (const k of SIM_KEYS) if (Number.isFinite(sim[k])) simOut[k] = +sim[k].toFixed(3);
         return {
-            v: 1, gen: world.gen || 1, level: level?.id || '', t: Date.now(),
+            v: 1, st: START_EMPTY ? 1 : 0, gen: world.gen || 1, level: level?.id || '', t: Date.now(),
             money: Math.round(money), played: Math.round(playSeconds),
             sim: simOut,
             eco: { skiPass: eco.skiPass, ad: { id: eco.ad.id, daysLeft: eco.ad.daysLeft } },
@@ -9208,6 +9230,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}) {
         },
         /** Vorschlag für den nächsten Anlagennamen (fortlaufend nummeriert). */
         suggestLiftName(kind){ return nextLiftName(kind); },
+        /** Größte Länge einer Liftart in Metern (0 = unbegrenzt). */
+        liftMaxMeters(kind){ const m = (LIFT_PARAMS[kind] || {}).max; return m ? liftMeters(m) : 0; },
         setPiste(on, lit, width){ deselect(); endLift(); endPiste(); endRoad(); pisteMode = !!on; pisteLit = !!lit; if (width) pisteWidth = width; currentBuild = null; demolishMode = false; if (ghost) { scene.remove(ghost); ghost = null; } },
         setRoad(on){ deselect(); endLift(); endPiste(); endRoad(); roadMode = !!on; showParcelGrid(!!on); currentBuild = null; demolishMode = false; if (ghost) { scene.remove(ghost); ghost = null; } },
         getMoney(){ return money; },

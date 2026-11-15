@@ -751,7 +751,8 @@ const World3D = ({ level, onExit, initialSave = null }) => {
         const world = buildLevelWorld(level, MASSIFS[level?.id]);
         const gridSize = world.gridSize;
         const t1 = performance.now();
-        const api = createScene3D(canvasRef.current, world, gridSize, level?.theme || {}, level || {});
+        // Spielstände aus der Zeit, als jedes Gebiet mit Bahn und Abfahrt begann, behalten diese Startanlage
+        const api = createScene3D(canvasRef.current, world, gridSize, level?.theme || {}, level || {}, { legacyStart: !!(initialSave && !initialSave.st) });
         if (import.meta.env.DEV) console.info(`[Welt] Landschaft ${Math.round(t1 - t0)} ms, Szene ${Math.round(performance.now() - t1)} ms`);
         apiRef.current = api;
         setMoney(api.getMoney());
@@ -819,6 +820,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
         if (item.tool === 'build') api.setBuild(item.key);
         else if (item.tool === 'lift') {
             // Nicht sofort bauen: erst Name und Lackierung abfragen
+            setLiftMax(api.liftMaxMeters?.(item.kind) || 0);
             setLiftSetup({ kind: item.kind, key: item.key,
                            suggestion: api.suggestLiftName?.(item.kind) || 'Lift' });
         }
@@ -827,6 +829,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
     };
     // Vor dem Liftbau erscheint der Einrichtungsdialog
     const [liftSetup, setLiftSetup] = useState(null);
+    const [liftMax, setLiftMax] = useState(0);          // Höchstlänge der gewählten Liftart in Metern (0 = unbegrenzt)
     /** Kamera zum gemeldeten Problem führen (Klick auf die HUD-Warnung). */
     const focusProblem = (kind) => { apiRef.current?.focusProblem?.(kind); };
     /** Aktives Werkzeug ganz beenden (× im Hinweis). */
@@ -866,9 +869,12 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             ? 'Gebäude antippen, dann mit ✓ abreißen (60 % Erstattung)'
             : 'Klicke auf ein gebautes Gebäude zum Abreißen (60% Erstattung)';
         if (!activeItem) return null;
-        if (activeItem.tool === 'lift') return touch
-            ? 'Lift: erst die Talstation antippen, dann die Bergstation – mit ✓ bauen'
-            : 'Lift ziehen: 1. Klick Talstation, 2. Klick Bergstation';
+        if (activeItem.tool === 'lift') {
+            const max = liftMax;
+            return (buildHint ? '⛔ ' + buildHint + ' · ' : '') + (touch
+                ? 'Lift: erst die Talstation antippen, dann die Bergstation – mit ✓ bauen'
+                : 'Lift ziehen: 1. Klick Talstation, 2. Klick Bergstation') + (max ? ` · höchstens ${max} m` : '');
+        }
         if (activeItem.tool === 'piste') return touch
             ? 'Piste: Punkt für Punkt bergab antippen, dann mit ✓ bauen'
             : 'Piste zeichnen: pro Klick ein Kurvenpunkt · Doppelklick beendet · Schwierigkeit ergibt sich aus dem Gefälle';
