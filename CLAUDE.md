@@ -164,6 +164,9 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `createScene3D`). Die frühere Startanlage (Gondel Basis–Gipfel samt Abfahrt) gibt es nur noch für Spielstände
   ohne `st` im Stand (`legacyStart`, in `World3D.jsx` aus dem geladenen Stand abgeleitet) – ihnen fehlte sonst
   der Hauptlift. Code, der Lifte oder Pisten voraussetzt, muss mit leeren Listen zurechtkommen.
+- Kasse: Gäste ohne Skipass gehen zur nächsten Kasse – bevorzugt in kurzer Gehweite, sonst bis `TICKET_WALK_FAR`
+  (110 Kacheln; `nearestTicketDesk`, `sendWalk`, `lotDesk`). Ein schmaler Bach hält sie dabei nicht auf, ein See
+  schon. Orte ohne Kasse in dieser Reichweite warten, bis der Spieler dort eine baut.
 - Jede Liftart hat eine Höchstlänge (`max` in `LIFT_PARAMS`, in Kacheln; angezeigt in Metern, 30 Kacheln ≙ 100 m):
   Förderband 100 m, Tellerlift 200 m, Schlepplift 300 m, Sessel 450–800 m, Kabinenbahnen 900–1800 m, Pendelbahnen
   2500 bzw. 3000 m. Geprüft

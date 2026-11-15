@@ -2882,7 +2882,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             const lotDesk = (lot) => {
                 if (lot._deskN === placedBuildings.length && lot._desk !== undefined) return lot._desk;
                 lot._deskN = placedBuildings.length;
-                let best = null, bd = 34;                 // max. Gehweite zur Kasse
+                let best = null, bd = 110;                // max. Gehweite zur Kasse (wie TICKET_WALK_FAR)
                 for (const b of placedBuildings) {
                     if (b.type !== 'ticket') continue;
                     const d = Math.hypot((b.rec.x + half) / tile - lot.gx, (b.rec.z + half) / tile - lot.gy);
@@ -4128,9 +4128,12 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
      * Kasse im Gebiet, notfalls quer über die gesamte Karte. Genau daher kam
      * die Wanderung aus den Nebenorten.
      */
-    const TICKET_WALK_MAX = 30;
+    // Seit ein Gebiet ohne Kasse beginnt, steht sie dort, wo der Spieler sie hinbaut – oft an der Talstation
+    // statt im Ort. Deshalb gilt die kurze Gehweite nur als Vorzug: liegt keine Kasse so nah, gehen die Gäste
+    // auch den längeren Weg (TICKET_WALK_FAR). Weiter entfernte Orte warten weiterhin auf eine eigene Kasse.
+    const TICKET_WALK_MAX = 30, TICKET_WALK_FAR = 110;
     const nearestTicketDesk = (from) => {
-        let best = null, bd = TICKET_WALK_MAX;
+        let best = null, bd = TICKET_WALK_FAR;
         for (const b of placedBuildings) {
             if (b.type !== 'ticket') continue;
             const p = { gx: (b.rec.x + half) / tile, gy: (b.rec.z + half) / tile };
@@ -4185,6 +4188,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         return world.landcover[y * gridSize + x] === 2;
     };
     /** Kreuzt die direkte Verbindung ein Gewässer? */
+    /** Wie viele Kacheln eines geraden Wegs liegen im Wasser? */
+    const waterSteps = (a, b) => {
+        const steps = Math.max(2, Math.ceil(dist2D(a, b)));
+        let n = 0;
+        for (let k = 0; k <= steps; k++) { const f = k / steps; if (isWaterAt(a.gx + (b.gx - a.gx) * f, a.gy + (b.gy - a.gy) * f)) n++; }
+        return n;
+    };
     const crossesWater = (a, b) => {
         const steps = Math.max(2, Math.ceil(dist2D(a, b)));
         for (let k = 0; k <= steps; k++) {
@@ -4198,11 +4208,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // für einen Hüttenbesuch: 34 Kacheln waren so knapp, dass eine große
         // Bahn am anderen Ende des Basisplatzes gar nicht erreichbar war und
         // die Gäste stattdessen herumstanden.
-        const cap = visitType === 'liftwalk' ? WALK_HARD_MAX_LIFT : WALK_HARD_MAX;
+        // Zur Kasse gilt die weite Grenze: ohne Skipass geht sonst gar nichts, und die Kasse steht, wo der Spieler sie baut.
+        const cap = visitType === 'ticket' ? TICKET_WALK_FAR : visitType === 'liftwalk' ? WALK_HARD_MAX_LIFT : WALK_HARD_MAX;
         if (dist2D(from, to) > cap) return false;
         // NIEMAND läuft durchs Wasser. Führt der direkte Weg über einen See,
         // einen Fluss oder ins Meer, wird er verworfen.
-        if (crossesWater(from, to)) return false;
+        // (Ausnahme: auf dem Weg zur Kasse wird ein schmaler Bach überquert – sonst sperrt jedes Rinnsal den ganzen Ort aus.)
+        if (visitType === 'ticket' ? waterSteps(from, to) > 5 : crossesWater(from, to)) return false;
         g.state = 'walk'; g.prog = 0;
         g.walkFrom = { gx: from.gx, gy: from.gy };
         g.walkTo = { gx: to.gx, gy: to.gy };
@@ -5385,7 +5397,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 if (g.state === 'walk') {
                     // Gehtempo ist eine feste STRECKE pro Sekunde — ein langer
                     // Weg dauert damit auch wirklich länger als ein kurzer.
-                    g.prog += dt * (1.15 / (g.walkLen || 6));
+                    // (der lange Weg zur Kasse wird zügiger gegangen – sonst dauert es Minuten, bis der erste Gast ankommt)
+                    g.prog += dt * ((g.visitType === 'ticket' && g.walkLen > TICKET_WALK_MAX ? 2.0 : 1.15) / (g.walkLen || 6));
                     const f = Math.min(1, g.prog);
                     const gx2 = g.walkFrom.gx + (g.walkTo.gx - g.walkFrom.gx) * f;
                     const gy2 = g.walkFrom.gy + (g.walkTo.gy - g.walkFrom.gy) * f;
@@ -6344,6 +6357,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     if (import.meta.env.DEV && window.__mtCam) {   // nur beim Entwickeln: Tageszeit und Qualitätsstufe stellen
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
+            guests: () => guestPool, villagesNow: () => villages,
             // Gebäude oder Anlage ohne Bauzeit hinstellen (Prüfungen)
             place: (type, gx, gy) => { try { return placeBuildingAt(type, { gx, gy }); } finally { for (const c of constructions) c.t = c.dur; } },
             // Lift ohne Dialog bauen (Prüfungen): Art, Tal- und Bergpunkt in Weltkoordinaten
