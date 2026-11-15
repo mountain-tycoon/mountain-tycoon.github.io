@@ -152,6 +152,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   unter einer Piste ändert, ruft `bed.reseat` (macht `flattenUnderBuilding` schon).
 - **Startpunkt:** Talstation = tiefste Randkachel, von dort mindestens `BASE_IN` Kacheln ins Gebiet (sonst
   klemmt das Dorf am Rand und die Zufahrt findet keinen Weg). Bäche und Seen meiden die Linie Dorf–Gipfel.
+  Liegt dieser Punkt schon im Anstieg, sucht die Szene im Umkreis eine flachere, nicht höhere Stelle (Abschnitt
+  „Bauplatz für den Ort" in `Scene3D.js`) – sonst stünde der Ort auf einer aufgeschütteten Kuppe. Der Platz wird
+  auf das untere Drittel der Höhen eingeebnet (abtragen statt aufschütten) und läuft umso breiter aus, je größer
+  der Höhenunterschied ist. Die Startgebäude (Kasse) werden erst NACH den Ortschaften auf Höhe gesetzt.
 - **Prüfen ohne Spiel:** `node tools/relief.mjs <ordner> [level …]` zeichnet die Landschaft als Reliefbild
   (mit Umland, Spielfeld als Rahmen) und druckt Hangneigung, Wald-, Wasser- und Eisanteil.
 

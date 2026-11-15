@@ -2031,6 +2031,36 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         while (tIn < Math.min(90, ul0 * 0.4) && edgeGap(tIn) < BASE_IN) tIn += 1;
         RVX = Math.max(M + 2, Math.min(G - M - 2, Math.round(EDGE_X + ux * tIn)));
         RVY = Math.max(M + 2, Math.min(G - M - 2, Math.round(EDGE_Y + uy * tIn)));
+        // ===== BAUPLATZ FÜR DEN ORT: flach und tief, kein Sockel am Hang =====
+        // Der Punkt auf der Linie Rand–Gipfel liegt in manchen Gebieten schon mitten im Anstieg. Dort eingeebnet
+        // steht der Ort auf einer aufgeschütteten Kuppe hoch über dem Tal. Deshalb wird im Umkreis nach einer
+        // ruhigeren Stelle gesucht – nur wenn sie deutlich besser ist, sonst bleibt alles, wie es war.
+        {
+            const gap = (x, y) => Math.min(x, y, G - 1 - x, G - 1 - y);
+            const relief = (cx, cy) => {                      // Höhenspanne im künftigen Platz (Halbmesser 24)
+                let mn = 1e18, mx = -1e18;
+                for (const r of [8, 16, 24]) for (let a = 0; a < 12; a++) {
+                    const x = Math.round(cx + Math.cos(a / 12 * Math.PI * 2) * r), y = Math.round(cy + Math.sin(a / 12 * Math.PI * 2) * r);
+                    if (x < 1 || y < 1 || x >= G - 1 || y >= G - 1) return 1e9;
+                    if (lc[y * G + x] === 2 && r < 24) return 1e9;                     // kein Wasser im Ort
+                    const h = hm[y * G + x]; if (h < mn) mn = h; if (h > mx) mx = h;
+                }
+                const hc = hm[cy * G + cx];
+                return Math.max(mx, hc) - Math.min(mn, hc);
+            };
+            const score = (x, y) => relief(x, y) + 0.35 * (hm[y * G + x] - minZ) + 0.25 * Math.hypot(x - RVX, y - RVY);
+            const here = relief(RVX, RVY);
+            let best = null, bs = score(RVX, RVY);
+            for (let dy = -72; dy <= 72; dy += 4) for (let dx = -72; dx <= 72; dx += 4) {
+                const x = RVX + dx, y = RVY + dy;
+                if (dx * dx + dy * dy > 72 * 72 || gap(x, y) < BASE_IN || !okTile(x, y)) continue;
+                if (Math.hypot(RSX - x, RSY - y) < 60) continue;                        // nicht am Gipfel
+                if (hm[y * G + x] > hm[RVY * G + RVX]) continue;                         // nie höher hinauf als bisher – der Ort gehört ins Tal
+                const sc = score(x, y);
+                if (sc < bs) { bs = sc; best = { x, y }; }
+            }
+            if (best && relief(best.x, best.y) < here * 0.8) { RVX = best.x; RVY = best.y; }
+        }
         EDGE_GX = EDGE_X; EDGE_GY = EDGE_Y; // Einfahrtspunkt merken
         const BASE_GX = RVX, BASE_GY = RVY;
 
@@ -2067,14 +2097,25 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const BASE_GX = RVX, BASE_GY = RVY;
     {
         const G = gridSize, hm = heightmap, lc = world.landcover;
-        const baseH = hm[BASE_GY * G + BASE_GX];
-        const inner = 15, outer = 24;
+        // Höhe des Platzes: nicht die der Mitte, sondern das untere Drittel der Höhen ringsum. So wird am Hang
+        // vor allem abgetragen statt aufgeschüttet – der Ort liegt als Terrasse im Gelände, nicht auf einer Kuppe.
+        const inner = 15;
+        const around = [];
+        for (let gy = Math.max(1, BASE_GY - inner); gy <= Math.min(G - 2, BASE_GY + inner); gy += 2)
+            for (let gx = Math.max(1, BASE_GX - inner); gx <= Math.min(G - 2, BASE_GX + inner); gx += 2)
+                if (Math.hypot(gx - BASE_GX, gy - BASE_GY) <= inner && lc[gy * G + gx] !== 2) around.push(hm[gy * G + gx]);
+        around.sort((p, q) => p - q);
+        const baseH = around.length ? around[Math.floor(around.length * 0.3)] : hm[BASE_GY * G + BASE_GX];
+        // Übergang zum Gelände umso breiter, je größer der Höhenunterschied – sonst steht eine Böschung wie eine Mauer
+        const span = around.length ? (around[around.length - 1] - around[0]) * hScale : 0;
+        const outer = inner + Math.round(Math.max(9, Math.min(34, span * 2.6)));
         for (let gy = Math.max(1, BASE_GY - outer); gy <= Math.min(G - 2, BASE_GY + outer); gy++) {
             for (let gx = Math.max(1, BASE_GX - outer); gx <= Math.min(G - 2, BASE_GX + outer); gx++) {
                 const d = Math.hypot(gx - BASE_GX, gy - BASE_GY); if (d > outer) continue;
                 const idx = gy * G + gx;
                 if (lc[idx] === 2) continue;
                 let f = d <= inner ? 1 : 1 - (d - inner) / (outer - inner); f = Math.max(0, Math.min(1, f));
+                f = f * f * (3 - 2 * f);                    // weich auslaufen lassen, keine Kante am Rand des Platzes
                 hm[idx] = hm[idx] * (1 - f) + baseH * f;
                 if (f > 0.5) lc[idx] = 0;
             }
@@ -7732,6 +7773,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // Erst hier existiert flattenUnderBuilding. Nach dem Einebnen muss das
     // Gebäude neu aufgesetzt werden, weil sich der Boden darunter geändert hat.
     for (const pf of pendingFlatten) {
+        // Höhe JETZT bestimmen, mit etwas Umgriff: die Ortschaft hat das Gelände ringsum inzwischen eingeebnet –
+        // mit der Höhe von vorhin stünde das Gebäude (die Kasse) auf einem Sockel über dem Ort.
+        pf.y = Math.min(pf.y, footprintStats(pf.gx, pf.gy, pf.r * 2.4).minY);
         flattenUnderBuilding(pf.gx, pf.gy, pf.r, pf.y);
         const st9 = footprintStats(pf.gx, pf.gy, pf.r);
         pf.obj.position.y = st9.minY;
