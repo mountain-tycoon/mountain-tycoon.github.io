@@ -167,6 +167,12 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - Kasse: Gäste ohne Skipass gehen zur nächsten Kasse – bevorzugt in kurzer Gehweite, sonst bis `TICKET_WALK_FAR`
   (110 Kacheln; `nearestTicketDesk`, `sendWalk`, `lotDesk`). Ein schmaler Bach hält sie dabei nicht auf, ein See
   schon. Orte ohne Kasse in dieser Reichweite warten, bis der Spieler dort eine baut.
+- Gäste und der Schrittbegrenzer (`clampStep` am Ende von `updateGuests`): er bremst jede Figur auf Gehtempo. Wer
+  eine Figur an einen entfernten Ort versetzt, muss sie deshalb SETZEN (Position und `_prevPos`), sonst zieht der
+  Begrenzer sie in gerader Linie dorthin – Leute, die über die Karte schweben. Neue Gäste werden beim Einsatz an
+  ihren Startpunkt gesetzt; zur Station gehen sie (`queueAt` in `planNext`), statt sich aus bis zu `R_LINK`
+  Kacheln Entfernung direkt anzustellen. Prüfen: `__mtCam.fastForward(n, dt, each)` spult Gäste und Anlagen vor,
+  `__mtCam.guests()` liefert die Figuren.
 - Jede Liftart hat eine Höchstlänge (`max` in `LIFT_PARAMS`, in Kacheln; angezeigt in Metern, 30 Kacheln ≙ 100 m):
   Förderband 100 m, Tellerlift 200 m, Schlepplift 300 m, Sessel 450–800 m, Kabinenbahnen 900–1800 m, Pendelbahnen
   2500 bzw. 3000 m. Geprüft

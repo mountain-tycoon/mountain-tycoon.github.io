@@ -4369,6 +4369,17 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             for (let i = 0; i < list.length; i++) { pick -= w[i]; if (pick <= 0) return list[i]; }
             return list[list.length - 1];
         };
+        /**
+         * Zur Station und anstellen. „In der Nähe" reicht bis R_LINK – wer weiter als ein paar Schritte entfernt
+         * steht (Kasse oder Ort neben der Talstation), GEHT erst hin. Sonst zöge ihn die Schlange in gerader Linie
+         * quer übers Gelände: die Gäste schwebten stehend zur Station.
+         */
+        const queueAt = (L, down = false) => {
+            if (!g.hasTicket) return false;
+            const st = down ? routeTop(L) : routeBottom(L);
+            if (dist2D(st, at) > 5 && sendWalk(g, at, st, 'liftwalk', null)) return true;
+            return joinLiftQueue(g, L, down);
+        };
         const hasOnward = downhill.length || liftsUp.length || liftsDown.length || walkLift;
 
         // 2) Einkehr in Gehweite — aber nur, wenn es danach auch weitergeht.
@@ -4384,19 +4395,19 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // 3) Oben an der Bergstation: zuerst eine Abfahrt, sonst weiter hinauf
         if (atTop) {
             if (downhill.length) { takeDownhill(); return; }
-            if (liftsUp.length && joinLiftQueue(g, pickLift(liftsUp))) return;
+            if (liftsUp.length && queueAt(pickLift(liftsUp))) return;
             // Keine Abfahrt und kein Anschluss: mit Sessel oder Gondel einfach
             // wieder hinunterfahren. Das ist völlig normal — nur am Schlepplift
             // geht es nicht, dort sitzt man fest.
-            if (liftsDown.length && joinLiftQueue(g, pickLift(liftsDown), true)) return;
+            if (liftsDown.length && queueAt(pickLift(liftsDown), true)) return;
         }
 
         // 4) Talstation in Reichweite -> anstellen
-        if (liftsUp.length && joinLiftQueue(g, pickLift(liftsUp))) return;
+        if (liftsUp.length && queueAt(pickLift(liftsUp))) return;
         // 5) Auch unten kann eine Abfahrt weiterführen (verzweigtes Gebiet)
         if (downhill.length) { takeDownhill(); return; }
         // 6) Talfahrt als Rückweg, falls die Anlage das hergibt
-        if (liftsDown.length && joinLiftQueue(g, pickLift(liftsDown), true)) return;
+        if (liftsDown.length && queueAt(pickLift(liftsDown), true)) return;
         // 7) Zu Fuß zur nächsten Talstation, wenn sie in Gehweite liegt
         if (walkLift && sendWalk(g, at, routeBottom(walkLift), 'liftwalk', null)) return;
 
@@ -5287,6 +5298,16 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 // Echter Neueinsatz an einem Startpunkt — dieser eine Sprung
                 // ist erlaubt; ab dann gilt der Schrittbegrenzer.
                 g._spawn = true;
+                // Die Figur steht AB SOFORT an ihrem Startpunkt. Eine neue Figur entsteht in der Kartenmitte – ohne
+                // diesen Schritt zöge sie der Schrittbegrenzer von dort in gerader Linie zum Ort: Leute, die quer
+                // über die Karte schweben.
+                {
+                    const sp0 = worldPosSmooth(start.gx, start.gy);
+                    if (Math.hypot(g.mesh.position.x - sp0.x, g.mesh.position.z - sp0.z) > 3) {
+                        g.mesh.position.set(sp0.x, sp0.y + 0.09, sp0.z);
+                        g._prevPos.copy(g.mesh.position);
+                    }
+                }
                 planNext(g, start, false, lifts, pistes);
                 if (!g.state) { g.mesh.visible = false; continue; }
             }
@@ -5398,7 +5419,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                     // Gehtempo ist eine feste STRECKE pro Sekunde — ein langer
                     // Weg dauert damit auch wirklich länger als ein kurzer.
                     // (der lange Weg zur Kasse wird zügiger gegangen – sonst dauert es Minuten, bis der erste Gast ankommt)
-                    g.prog += dt * ((g.visitType === 'ticket' && g.walkLen > TICKET_WALK_MAX ? 2.0 : 1.15) / (g.walkLen || 6));
+                    g.prog += dt * ((g.visitType === 'liftwalk' ? 2.2 : g.visitType === 'ticket' && g.walkLen > TICKET_WALK_MAX ? 2.0 : 1.15) / (g.walkLen || 6));   // zur Station geht es flott
                     const f = Math.min(1, g.prog);
                     const gx2 = g.walkFrom.gx + (g.walkTo.gx - g.walkFrom.gx) * f;
                     const gy2 = g.walkFrom.gy + (g.walkTo.gy - g.walkFrom.gy) * f;
@@ -6358,6 +6379,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
             guests: () => guestPool, villagesNow: () => villages,
+            walkers: () => _dbgWalkers, buildPiste: (pts) => buildPistePath(pts),
+            // Gäste und Anlagen vorspulen (Prüfungen): n Schritte zu je dt Sekunden; `each` wird nach jedem Schritt gerufen
+            fastForward: (n, dt, each) => { let tt = clock.getElapsedTime(); for (let i = 0; i < n; i++) { tt += dt; for (const u of updaters) u(tt); updateGuests(tt, dt); if (each) each(i); } },
             // Gebäude oder Anlage ohne Bauzeit hinstellen (Prüfungen)
             place: (type, gx, gy) => { try { return placeBuildingAt(type, { gx, gy }); } finally { for (const c of constructions) c.t = c.dur; } },
             // Lift ohne Dialog bauen (Prüfungen): Art, Tal- und Bergpunkt in Weltkoordinaten
