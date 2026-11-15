@@ -113,7 +113,7 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   die Kabinen sind massiv, deshalb hängt `fitCabin` für die Fahrt Decke, Lichtband und Fensterrahmen hinein,
   und die Szene blendet die Mitfahrer dieser Kabine aus (`skiRun.cabinCar()`). Sessel: die
   Figur sitzt (`sit`), Kamera dicht dahinter, rundherum schwenkbar. Schlepp-/Tellerlift: die Figur steht im
-  Schnee, Bügel und Zugseil zeichnet `placeTow`. Anlagen ohne Fahrzeuge oder im Bau: Ersatzfahrt am Hang
+  Schnee; `placeTow` zeichnet beim Schlepplift Bügel und Zugseil, beim Tellerlift Teller und Stange. Anlagen ohne Fahrzeuge oder im Bau: Ersatzfahrt am Hang
   entlang. Oben steht man neben der Bergstation (`arrive`) und entscheidet selbst, wohin es geht.
 - Prüfen ohne flüssiges Bild: `window.__mtCam.ski()` liefert das Modul; `start(x, z)`, `setInput` und
   `step(1/60, t)` in einer Schleife spulen die Fahrt vor, `__state()` zeigt Ort und Tempo. `__mtCam.buildLift(art,
@@ -165,8 +165,11 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   ohne `st` im Stand (`legacyStart`, in `World3D.jsx` aus dem geladenen Stand abgeleitet) – ihnen fehlte sonst
   der Hauptlift. Code, der Lifte oder Pisten voraussetzt, muss mit leeren Listen zurechtkommen.
 - Jede Liftart hat eine Höchstlänge (`max` in `LIFT_PARAMS`, in Kacheln; angezeigt in Metern, 30 Kacheln ≙ 100 m):
-  Förderband 100 m, dann Teller-, Schlepp-, Sessel- und Kabinenbahnen steigend; Pendelbahnen unbegrenzt. Geprüft
+  Förderband 100 m, Tellerlift 200 m, Schlepplift 300 m, Sessel 450–800 m, Kabinenbahnen 900–1800 m, Pendelbahnen
+  2500 bzw. 3000 m. Geprüft
   wird beim Bauen (`liftTooLong`: Vorschau rot, Hinweis im HUD), nicht beim Nachbauen eines Spielstands.
+- Bodenlifte (Förderband, Teller-, Schlepplift) roden beim Bau den Wald entlang der Trasse und beschneien sie
+  (`constructLift`). Gerodet werden die Bäume selbst (`clearForestAlongPath`), die Bodenart bleibt.
 
 ## Spielstände (3D)
 - Gespeichert wird nicht die Szene, sondern **was der Spieler getan hat**: jede Bauaktion der Reihe nach

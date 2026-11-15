@@ -63,15 +63,26 @@ export function createSkiRun(deps) {
     const towMat = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.6, metalness: 0.3 });
     const towBar = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.05, 0.05), new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.8 }));
     const towRope = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1, 6), towMat);
-    tow.add(towBar); tow.add(towRope); tow.visible = false;
+    // Tellerlift: statt des Querholzes eine Stange mit Teller, die man zwischen die Beine nimmt
+    const towDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.035, 14), new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.7 }));
+    tow.add(towBar); tow.add(towDisc); tow.add(towRope); tow.visible = false;
     const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
-    const placeTow = (c) => {
-        // Bügel quer hinter dem Gesäß, Seil von dort schräg nach vorn oben
-        _a.set(pos.x - Math.sin(th) * 0.13, pos.y + 0.5 * PLAYER_SCALE, pos.z - Math.cos(th) * 0.13);
+    const placeTow = (c, platter) => {
+        const dx = Math.sin(th), dz = Math.cos(th);
         c.mesh.getWorldPosition(_b);
-        towBar.position.copy(_a); towBar.rotation.set(0, th, 0);
+        towBar.visible = !platter; towDisc.visible = !!platter;
+        if (platter) {
+            // Teller hinter dem Gesäß (Fläche in Fahrtrichtung), die Stange läuft zwischen den Beinen nach vorn oben
+            _a.set(pos.x - dx * 0.17, pos.y + 0.44 * PLAYER_SCALE, pos.z - dz * 0.17);
+            towDisc.position.copy(_a); towDisc.rotation.set(Math.PI / 2 - 0.25, th, 0, 'YXZ');
+            _a.x += dx * 0.05; _a.z += dz * 0.05;
+        } else {
+            // Bügel quer hinter dem Gesäß, Seil von dort schräg nach vorn oben
+            _a.set(pos.x - dx * 0.13, pos.y + 0.5 * PLAYER_SCALE, pos.z - dz * 0.13);
+            towBar.position.copy(_a); towBar.rotation.set(0, th, 0);
+        }
         towRope.position.copy(_a).add(_b).multiplyScalar(0.5);
-        towRope.scale.y = Math.max(0.1, _a.distanceTo(_b));
+        towRope.scale.set(platter ? 1.6 : 1, Math.max(0.1, _a.distanceTo(_b)), platter ? 1.6 : 1);   // Stange etwas kräftiger als das Seil
         towRope.quaternion.setFromUnitVectors(_up, _b.sub(_a).normalize());
         tow.visible = true;
     };
@@ -437,7 +448,7 @@ export function createSkiRun(deps) {
                 _seat.y = surfaceAt(_seat.x, _seat.z);   // am Bügel: die Ski bleiben im Schnee
             }
             pos.copy(_seat);
-            if (ride.ground) placeTow(c);
+            if (ride.ground) placeTow(c, ride.route.liftKind === 'platter');
             mesh.scale.setScalar(ride.inside ? PLAYER_SCALE * (c.info?.scale || 1) : PLAYER_SCALE);
             return;
         }

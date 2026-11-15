@@ -1093,18 +1093,18 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const LIFT_PARAMS = {
         // max = größte Länge in Kacheln (30 Kacheln ≙ 100 m in der Anzeige): kleine Anlagen kurz, große weit
         carpet:  { base: 700,   per: 100,  cap: 1, gap: 2.5, speed: 0.9, max: 30 },   // Magic Carpet (Anfänger)
-        platter: { base: 1500,  per: 200,  cap: 1, gap: 4.0, speed: 1.0, max: 75 },   // Tellerlift
-        tbar:    { base: 4000,  per: 350,  cap: 2, gap: 5.0, speed: 1.1, max: 120 },   // Schlepplift (T-Bar)
-        chair2:  { base: 7700,  per: 800,  cap: 2, gap: 6.0, speed: 1.3, max: 180 },   // 2er-Sessel
-        chair:   { base: 8000,  per: 700,  cap: 4, gap: 6.5, speed: 1.4, max: 240 },   // 4er-Sessel
-        chair6:  { base: 25200, per: 1300, cap: 6, gap: 6.0, speed: 1.7, max: 330 },   // 6er-Sesselbahn mit Haube
-        gondola: { base: 15000, per: 1200, cap: 8, gap: 7.0, speed: 1.8, max: 450 },   // Gondelbahn
-        gondola4:{ base: 19000, per: 1200, cap: 4, gap: 3.0, speed: 2.0, max: 360 },   // kleine 4er-Kabinenbahn
-        gondola8:{ base: 34000, per: 1900, cap: 8, gap: 4.5, speed: 2.2, max: 540 },   // 8er-Kabinenbahn
+        platter: { base: 1500,  per: 200,  cap: 1, gap: 4.0, speed: 1.0, max: 60 },   // Tellerlift
+        tbar:    { base: 4000,  per: 350,  cap: 2, gap: 5.0, speed: 1.1, max: 90 },   // Schlepplift (T-Bar)
+        chair2:  { base: 7700,  per: 800,  cap: 2, gap: 6.0, speed: 1.3, max: 135 },   // 2er-Sessel
+        chair:   { base: 8000,  per: 700,  cap: 4, gap: 6.5, speed: 1.4, max: 180 },   // 4er-Sessel
+        chair6:  { base: 25200, per: 1300, cap: 6, gap: 6.0, speed: 1.7, max: 240 },   // 6er-Sesselbahn mit Haube
+        gondola: { base: 15000, per: 1200, cap: 8, gap: 7.0, speed: 1.8, max: 330 },   // Gondelbahn
+        gondola4:{ base: 19000, per: 1200, cap: 4, gap: 3.0, speed: 2.0, max: 270 },   // kleine 4er-Kabinenbahn
+        gondola8:{ base: 34000, per: 1900, cap: 8, gap: 4.5, speed: 2.2, max: 420 },   // 8er-Kabinenbahn
         // Prestige-Anlage: sehr teuer, dafür hohe Förderleistung
-        mega:    { base: 96000, per: 4200, cap: 10, gap: 3.2, speed: 2.6, max: 690 },  // große Einseilumlaufbahn
-        tramxl:  { base: 128000, per: 5200, cap: 20, gap: 14, speed: 3.0 },  // Jumbo-Pendelbahn
-        tram:    { base: 40000, per: 2600, cap: 30, gap: 22.0, speed: 2.6 }  // Pendelbahn
+        mega:    { base: 96000, per: 4200, cap: 10, gap: 3.2, speed: 2.6, max: 540 },  // große Einseilumlaufbahn
+        tramxl:  { base: 128000, per: 5200, cap: 20, gap: 14, speed: 3.0, max: 900 },  // Jumbo-Pendelbahn
+        tram:    { base: 40000, per: 2600, cap: 30, gap: 22.0, speed: 2.6, max: 750 }  // Pendelbahn
     };
     /**
      * Eine Liftanlage als Gäste-Route. Jede Anlage führt eine eigene
@@ -8348,8 +8348,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             rocks.userData.clearAlong(
                 [{ gx: start.gx, gy: start.gy }, { gx: grE.gx, gy: grE.gy }], 4.5);
         }
-        // Bodengebundene Lifte (Schlepplift): Wald roden + Boden beschneien entlang der Trasse
-        if (liftKind === 'tbar') {
+        // Bodengebundene Lifte (Schlepp-, Tellerlift, Förderband): Wald roden + Boden beschneien entlang der Trasse –
+        // dort fährt man auf dem Schnee, zwischen Bäumen hindurch geht das nicht
+        if (['tbar', 'platter', 'carpet'].includes(liftKind)) {
             const lane = [{ gx: start.gx, gy: start.gy }, { gx: grE.gx, gy: grE.gy }];
             clearForestAlongPath(lane);
             snowifyGroundAlongPath(lane, 3.0);
