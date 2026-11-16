@@ -3780,14 +3780,15 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // Hält ein Gerät die Bildrate nicht, geht es stufenweise herunter; läuft es flüssig,
     // geht es vorsichtig hinauf – bis zur vollen Schärfe (Stufe 4).
     // shadow = Kantenlänge der Schattenkarte (0 = keine Schatten), shEvery = Schatten nur in jedem n-ten Bild neu
-    // rechnen (die Landschaft steht still – nur Kabinen und Gäste hinken dann ein, zwei Bilder nach).
+    // rechnen. Überall 1: das Auslassen machte abwechselnd kurze und lange Bilder – auf dem Tablet ein sichtbares
+    // Zittern, schlimmer als die gleichmäßig etwas niedrigere Bildrate.
     // Die beiden untersten Stufen sind für ältere Geräte: weniger Bildpunkte, zuletzt ganz ohne Schatten.
     const QUALITY = [
         { px: 0.7,  shadow: 0,    shEvery: 1, bloom: false, smaa: false, sharp: 0.30 },
-        { px: 0.85, shadow: 1024, shEvery: 4, bloom: false, smaa: false, sharp: 0.20 },
-        { px: 1.0,  shadow: 1024, shEvery: 3, bloom: false, smaa: false, sharp: 0 },
-        { px: 1.25, shadow: 2048, shEvery: 2, bloom: false, smaa: true,  sharp: 0.30 },
-        { px: 1.5,  shadow: 2048, shEvery: 2, bloom: true,  smaa: true,  sharp: 0.30 },
+        { px: 0.85, shadow: 1024, shEvery: 1, bloom: false, smaa: false, sharp: 0.20 },
+        { px: 1.0,  shadow: 1024, shEvery: 1, bloom: false, smaa: false, sharp: 0 },
+        { px: 1.25, shadow: 2048, shEvery: 1, bloom: false, smaa: true,  sharp: 0.30 },
+        { px: 1.5,  shadow: 2048, shEvery: 1, bloom: true,  smaa: true,  sharp: 0.30 },
         { px: 1.75, shadow: smallTouch ? 2048 : 4096, shEvery: 1, bloom: true, smaa: true, sharp: 0.28 },
         { px: 2.0,  shadow: smallTouch ? 2048 : 4096, shEvery: 1, bloom: true, smaa: true, sharp: 0.25 }
     ];
@@ -4245,8 +4246,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (dist2D(from, to) > cap) return false;
         // NIEMAND läuft durchs Wasser. Führt der direkte Weg über einen See,
         // einen Fluss oder ins Meer, wird er verworfen.
-        // (Ausnahme: auf dem Weg zur Kasse wird ein schmaler Bach überquert – sonst sperrt jedes Rinnsal den ganzen Ort aus.)
-        if (visitType === 'ticket' ? waterSteps(from, to) > 5 : crossesWater(from, to)) return false;
+        // (Ausnahme: auf dem Weg zur Kasse oder zur Talstation wird ein schmaler Bach überquert – sonst sperrt jedes Rinnsal den ganzen Ort aus.)
+        if (visitType === 'ticket' || visitType === 'liftwalk' ? waterSteps(from, to) > 5 : crossesWater(from, to)) return false;
         g.state = 'walk'; g.prog = 0;
         g.walkFrom = { gx: from.gx, gy: from.gy };
         g.walkTo = { gx: to.gx, gy: to.gy };
@@ -4367,7 +4368,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // Zu Fuß NIE in eine andere Ortschaft: wer in Ort B steht, wandert
         // nicht quer über die Karte nach Ort A. Ein Ziel, das näher an einem
         // FREMDEN Ort liegt als am eigenen Standort, fällt weg.
-        if (walkLift) {
+        // (Die Regel gilt nur für Gäste, die selbst IN einem Ort stehen. Wer am Ende einer Abfahrt am Hang steht,
+        // gehört zu keinem Ort – ihm wurde sonst die Talstation neben dem Dorf verwehrt, und er blieb stehen.)
+        const inOwnVillage = villages.some(v => dist2D(v, at) < 22);
+        if (walkLift && inOwnVillage) {
             const tgt = routeBottom(walkLift);
             for (const v of villages) {
                 if (dist2D(v, at) < 22) continue;          // der eigene Ort zählt nicht
@@ -4426,6 +4430,16 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
 
         // 3) Oben an der Bergstation: zuerst eine Abfahrt, sonst weiter hinauf
         if (atTop) {
+            // UMSTEIGEN: führt von hier eine Anlage weiter hinauf, nimmt ein Teil der Gäste sie statt der Abfahrt –
+            // so verteilen sie sich bis in die oberen Teile des Gebiets. Wer die Anschlussbahn noch nie gefahren
+            // ist, ist neugieriger; wer gerade erst umgestiegen ist, fährt eher erst einmal ab.
+            if (liftsUp.length && downhill.length) {
+                const next = pickLift(liftsUp);
+                const known = (g.ridden && g.ridden.get(next)) || 0;
+                const chance = (known ? 0.3 : 0.6) * (g.hops ? 0.6 : 1);
+                if (Math.random() < chance && queueAt(next)) { g.hops = (g.hops || 0) + 1; return; }
+            }
+            g.hops = 0;
             if (downhill.length) { takeDownhill(); return; }
             if (liftsUp.length && queueAt(pickLift(liftsUp))) return;
             // Keine Abfahrt und kein Anschluss: mit Sessel oder Gondel einfach
@@ -4442,6 +4456,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (liftsDown.length && queueAt(pickLift(liftsDown), true)) return;
         // 7) Zu Fuß zur nächsten Talstation, wenn sie in Gehweite liegt
         if (walkLift && sendWalk(g, at, routeBottom(walkLift), 'liftwalk', null)) return;
+        // 7b) Ehe jemand strandet: zur NÄCHSTEN Talstation, auch wenn es eine kleine Anlage ist, zu der man sonst
+        //     nicht so weit ginge. Stehenbleiben neben einem Lift ist das schlechtere Ergebnis.
+        if (!inOwnVillage) {
+            let near = null, nd = WALK_HARD_MAX_LIFT;
+            for (const r of lifts) { const d = dist2D(routeBottom(r), at); if (d > R_LINK && d < nd) { nd = d; near = r; } }
+            if (near && sendWalk(g, at, routeBottom(near), 'liftwalk', null)) return;
+        }
 
         // 8) Wirklich nichts erreichbar: Der Gast strandet sichtbar. Sobald der
         //    Spieler hier einen Lift oder eine Piste baut, greift Schritt 3–7

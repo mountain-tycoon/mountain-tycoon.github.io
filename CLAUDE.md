@@ -48,8 +48,9 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   erreichbar sein. Eigene Kamera-Knöpfe gibt es bewusst nicht – die Gesten genügen.
 - **Bildqualität** regelt sich selbst: Stufen `QUALITY` (0–6: Auflösung, Schatten, Glühen, Glättung) und Messung
   `qualityFrame` in `Scene3D.js` (Stand je Gerät in `localStorage['mt.quality2']`). Die beiden untersten Stufen sind
-  für alte Geräte (gröber als der Bildschirm, zuletzt ohne Schatten). Schatten werden nur in jedem `shEvery`-ten
-  Bild neu gerechnet (`sun.shadow.autoUpdate = false`, Anstoß in `animate`). Herunter geht es bei unter 30 Bildern/s
+  für alte Geräte (gröber als der Bildschirm, zuletzt ohne Schatten). Schatten werden in JEDEM Bild neu gerechnet
+  (`shEvery: 1`): sie nur jedes n-te Bild zu rechnen ergab abwechselnd kurze und lange Bilder – auf dem Tablet ein
+  sichtbares Zittern. Nicht wieder einführen. Herunter geht es bei unter 30 Bildern/s
   oder vielen langen Einzelbildern, hinauf selten und auf Probe; eine Stufe, die zweimal nicht hielt, bleibt für
   die Sitzung gesperrt – jeder Wechsel ruckelt selbst. Neue teure Effekte an eine Stufe hängen.
   Gemessen (Nov. 2026): die Spiellogik braucht unter 2 ms je Bild; Ruckeln kommt von der Grafikseite.
@@ -183,6 +184,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   ihren Startpunkt gesetzt; zur Station gehen sie (`queueAt` in `planNext`), statt sich aus bis zu `R_LINK`
   Kacheln Entfernung direkt anzustellen. Prüfen: `__mtCam.fastForward(n, dt, each)` spult Gäste und Anlagen vor,
   `__mtCam.guests()` liefert die Figuren.
+- Gäste am Berg: oben an einer Bergstation steigt ein Teil in eine Anschlussbahn um, wenn eine weiter hinaufführt
+  (`planNext`, „Umsteigen"). Wer am Ende einer Abfahrt steht und keinen Anschluss in der Nähe hat, geht zur
+  nächsten Talstation bis `WALK_HARD_MAX_LIFT` (Schritt 7b) – die Regel „nie zu Fuß in einen fremden Ort" gilt nur
+  für Gäste, die selbst in einem Ort stehen.
 - Freischaltung: `UNLOCK` in `World3D.jsx` nennt je Werkzeug den Index des Kampagnen-Levels, ab dem es wählbar ist
   (`lockedUntil`); gesperrte Einträge zeigen im Baumenü das Level. Die Sandbox hat alles. Nur das Menü sperrt –
   Spielstände bauen weiterhin alles nach. Neue Werkzeuge dort einsortieren und prüfen, dass die Aufgaben des
@@ -195,7 +200,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `public/loading/<id>.png`. `python3 tools/make-level-cards.py` baut beide aus einem Bildschirmfoto und schreibt
   nach dem Umstellen der Reihenfolge die Nummern auf den Karten neu.
 - Pistenraupen: drei Klassen – PB 300, PB 500, PB 600 Winde (`garage…`, `garage5_…`, `garage6_…`; `makeSnowcat`
-  in `Vehicles3D.js`, Modell '300' | '500' | '600'). Größere Klassen präparieren mehr (`groomRate`).
+  in `Vehicles3D.js`, Modell '300' | '500' | '600'). Größere Klassen präparieren mehr (`groomRate`). Am Ende von
+  `makeSnowcat` werden alle festen Teile je Material zu einem Netz verschmolzen (rund 30 statt 200 Zeichenaufrufe
+  je Raupe) – neue Teile davor anfügen; was sich bewegt oder ein-/ausgeblendet wird, als Gruppe oder mit eigenem
+  Material anlegen. Für andere Fahrzeuge mit vielen Einzelteilen gilt dasselbe Rezept.
 - Jede Liftart hat eine Höchstlänge (`max` in `LIFT_PARAMS`, in Kacheln; angezeigt in Metern, 30 Kacheln ≙ 100 m):
   Förderband 100 m, Tellerlift 200 m, Schlepplift 300 m, Sessel 450–800 m, Kabinenbahnen 900–1800 m, Pendelbahnen
   2500 bzw. 3000 m. Geprüft

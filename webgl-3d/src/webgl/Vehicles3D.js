@@ -3,6 +3,7 @@
 // Realistische Farben, einfache aber saubere Karosserien.
 // ============================================================
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const wheelMat = new THREE.MeshStandardMaterial({ color: 0x14181f, roughness: 0.85 });
 const glassMat = new THREE.MeshStandardMaterial({ color: 0x8fbfe0, roughness: 0.16, metalness: 0.18, envMapIntensity: 0.35 });
@@ -511,6 +512,33 @@ export function makeSnowcat(bodyColor = 0xf97316, model = '300') {
         // zweiter Auspuff
         const ex2 = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.42, 8), steel);
         ex2.position.set(-w * 0.30, 1.05, -l * 0.30); g.add(ex2);
+    }
+    // ===== ZUSAMMENFASSEN =====
+    // Die Raupe besteht aus weit über hundert Einzelteilen. Jedes kostete einen eigenen Zeichenaufruf (und einen
+    // zweiten für den Schatten) – mit ein paar Raupen auf der Piste ruckelte es auf Tablets. Alle festen Teile mit
+    // gleichem Material werden deshalb zu je EINEM Netz verschmolzen. Getrennt bleibt, was sich bewegt oder
+    // ein- und ausgeblendet wird (Lichtkegel, Rundumleuchte, Rauch, Schneefontäne).
+    {
+        const groups = new Map();
+        for (const o of g.children.slice()) {
+            if (!o.isMesh || o.children.length || Array.isArray(o.material)) continue;
+            if (o.material.blending === THREE.AdditiveBlending) continue;         // Lichtkegel
+            o.updateMatrix();
+            let e = groups.get(o.material);
+            if (!e) groups.set(o.material, e = { geos: [], shadow: false, meshes: [] });
+            const geo = (o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone()).applyMatrix4(o.matrix);
+            for (const name of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(name)) geo.deleteAttribute(name);
+            e.geos.push(geo); e.shadow = e.shadow || o.castShadow; e.meshes.push(o);
+        }
+        for (const [material, e] of groups) {
+            if (e.meshes.length < 2) continue;
+            const merged = mergeGeometries(e.geos, false);
+            if (!merged) continue;
+            for (const o of e.meshes) g.remove(o);
+            const m = new THREE.Mesh(merged, material);
+            m.castShadow = e.shadow;
+            g.add(m);
+        }
     }
     return g;
 }
