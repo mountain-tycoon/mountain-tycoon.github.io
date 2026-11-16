@@ -37,6 +37,7 @@ const ROCK_STYLES = {
     // Schwarzwald: kleine, moosige Buntsandstein-Brocken, sehr einheitlich
     mittelgebirge:{ base: [0.46,0.52,0.44], v: 0.09, shape: 'dodeca', size: 0.70, sizeV: 0.35, rough: 1.0 },
     // Tirol: heller Kalk, mittelgroß, mäßig gestreut
+    vorland:      { base: [0.66,0.64,0.58], v: 0.10, shape: 'dodeca', size: 0.95, sizeV: 0.6, rough: 0.9 },
     alpen:        { base: [0.70,0.68,0.64], v: 0.11, shape: 'ico',    size: 1.10, sizeV: 0.7, rough: 0.9 },
     // Wallis: große helle Granitblöcke, kühl, stark unterschiedliche Größen
     schweiz:      { base: [0.72,0.73,0.78], v: 0.10, shape: 'ico',    size: 1.45, sizeV: 1.0, rough: 0.85 },
@@ -1131,7 +1132,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     let onMoney = null;
     let onStats = null;
     // Zähler gebauter Objekte (für Missions-HUD)
-    const built = { lift: 0, chalet: 0, hotel: 0, restaurant: 0, ticket: 0, snowcannon: 0, funpark: 0, funpark_s: 0, funpark_l: 0, parking: 0, parkgarage: 0, skischool: 0, skirental: 0, shop: 0, imbiss: 0, busstop: 0, garage: 0, garage2: 0, garage4: 0, garage5_1: 0, garage5_2: 0, garage5_4: 0, toilet: 0,
+    const built = { lift: 0, chalet: 0, hotel: 0, restaurant: 0, ticket: 0, snowcannon: 0, funpark: 0, funpark_s: 0, funpark_l: 0, parking: 0, parkgarage: 0, skischool: 0, skirental: 0, shop: 0, imbiss: 0, busstop: 0, garage: 0, garage2: 0, garage4: 0, garage5_1: 0, garage5_2: 0, garage5_4: 0, garage6_1: 0, garage6_2: 0, garage6_4: 0, toilet: 0,
         hotel_pension: 0, hotel_budget: 0, hotel_mid: 0, hotel_resort: 0, hotel_lux: 0, chalet_s: 0, chalet_l: 0, chalet_lux: 0,
         huette: 0, bergrest: 0, panorama: 0, sterne: 0, apres: 0, partyzelt: 0, disco: 0, souvenir: 0,
         medical: 0, hospital: 0, workshop: 0, reservoir: 0, reservoir_l: 0, cannon_s: 0, cannon_l: 0,
@@ -1170,6 +1171,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const LEVEL_ORDER = ['mittelgebirge', 'alpen', 'schweiz', 'frankreich', 'italien',
                          'norwegen', 'rockies', 'kanada', 'anden', 'japan'];
     const levelNo = (() => {
+        if (level?.id === 'vorland') return 1;               // deutsche Voralpen: Marken und Fuhrpark wie im Schwarzwald
         const byId = LEVEL_ORDER.indexOf(level?.id);
         if (byId >= 0) return byId + 1;
         if (Number.isFinite(level?.index)) return Math.max(1, Math.min(10, level.index + 1));
@@ -1294,7 +1296,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     MATS.cabinB.color.setHex(fleet.b);
     // Pistenraupen-Kapazität aus den gebauten Garagen (1er/2er/4er)
     const catCapacity = () => built.garage + built.garage2 * 2 + built.garage4 * 4
-        + built.garage5_1 + built.garage5_2 * 2 + built.garage5_4 * 4;
+        + built.garage5_1 + built.garage5_2 * 2 + built.garage5_4 * 4
+        + built.garage6_1 + built.garage6_2 * 2 + built.garage6_4 * 4;
+    /** Windenraupen (PistenBully 600): die größte Klasse. */
+    const cat600Count = () => built.garage6_1 + built.garage6_2 * 2 + built.garage6_4 * 4;
     // Wie viele davon sind große 500er? (walzen breiter und schneller)
     const cat500Count = () => built.garage5_1 + built.garage5_2 * 2 + built.garage5_4 * 4;
     let garagePos = null;   // Standort der zuletzt gebauten Garage (Ausfahrt der Raupen)
@@ -1552,6 +1557,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             garage5_1:  { icon: '🚜', name: 'Garage (1× PB 500)', desc: 'Halle für den großen PistenBully 500.' },
             garage5_2:  { icon: '🚜', name: 'Garage (2× PB 500)', desc: 'Zwei große Maschinen — präparieren doppelt so breit.' },
             garage5_4:  { icon: '🚜', name: 'Garage (4× PB 500)', desc: 'Flotte aus vier Flaggschiffen für große Gebiete.' },
+            garage6_1:  { icon: '🚜', name: 'Garage (1× PB 600 Winde)', desc: 'Halle für die Windenraupe: die größte Maschine, präpariert am breitesten und schnellsten.' },
+            garage6_2:  { icon: '🚜', name: 'Garage (2× PB 600 Winde)', desc: 'Zwei Windenraupen für steile, lange Abfahrten.' },
+            garage6_4:  { icon: '🚜', name: 'Garage (4× PB 600 Winde)', desc: 'Vier Windenraupen — die Flotte der ganz großen Gebiete.' },
             funpark_s:  { icon: '🏂', name: 'Funpark (klein)', desc: 'Kicker und Rail für erste Sprünge.' },
             funpark_l:  { icon: '🏂', name: 'Funpark (groß)', desc: 'Big Air, Wallride, Halfpipe — Top-Laune!' },
             toilet:     { icon: '🚻', name: 'Toilettenhäuschen', desc: 'Erfüllt ein Grundbedürfnis — hebt die Laune.' },
@@ -1744,9 +1752,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         else if (t === 'restaurant') { lines.push({ k: 'Gastro-Umsatz', v: '+1,2 / Gast' }); }
         else if (t === 'funpark') { lines.push({ k: 'Attraktivität', v: '+12' }); }
         else if (t.startsWith('garage')) {
-            const bays = /4/.test(t.replace('garage5_', 'x')) || t === 'garage4' ? 4
-                : (t === 'garage2' || t === 'garage5_2') ? 2 : 1;
-            lines.push({ k: 'Modell', v: t.startsWith('garage5') ? 'PistenBully 500' : 'PistenBully 300' });
+            const bays = /4$/.test(t) ? 4 : /2$/.test(t) ? 2 : 1;
+            lines.push({ k: 'Modell', v: t.startsWith('garage6') ? 'PistenBully 600 Winde' : t.startsWith('garage5') ? 'PistenBully 500' : 'PistenBully 300' });
             lines.push({ k: 'Stellplätze', v: bays });
             lines.push({ k: 'Raupen gesamt', v: catCapacity() });
             lines.push({ k: 'Pistenzustand', v: Math.round(sim.groom) + '%' });
@@ -1886,12 +1893,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             + built.skischool * 1 + built.skirental * 0.8 + built.shop * 0.8 + built.souvenir * 0.5 + built.busstop * 0.3
             + (built.garage * 1.2 + built.garage2 * 2 + built.garage4 * 3.6)
             + (built.garage5_1 * 2 + built.garage5_2 * 3.4 + built.garage5_4 * 6)
+            + (built.garage6_1 * 3.2 + built.garage6_2 * 5.6 + built.garage6_4 * 10)
             + totalNight() * 1.8 + totalWell() * 2.5 + built.medical * 1.5 + built.hospital * 6
             + built.workshop * 1.2 + built.reservoir * 1 + built.reservoir_l * 4.5 + built.toilet * 0.3);
         money -= cost; sim.dayCost += cost;
         // Pistenzustand (wie 2D): Gäste fahren die Piste ab, Raupe (mit Garage) präpariert
         const wear = sim.active * dt * 0.05;                             // Abnutzung durch Betrieb
-        const groomRate = (catCapacity() + cat500Count() * 0.8) * dt * 2.2;   // 500er präpariert breiter
+        const groomRate = (catCapacity() + cat500Count() * 0.8 + cat600Count() * 1.7) * dt * 2.2;   // 500er präpariert breiter, die 600er noch mehr
         // Beschneiung: nur Kanonen mit Wasseranschluss (Stausee) produzieren Schnee
         const snowGuns = built.cannon_s + built.snowcannon + built.cannon_l;
         const snowRate = snowGuns * snowmakingRatio() * dt * 1.6;   // Schnee nur mit Wasser                      // je Pistenraupe mehr Präparierung
@@ -2343,12 +2351,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // erschließen kann. In jedem Ort kommen Gäste an.
     const villages = [];
     const VSTYLE = {
-        mittelgebirge: 'schwarzwald', alpen: 'alpin', schweiz: 'alpin',
+        mittelgebirge: 'schwarzwald', vorland: 'alpin', alpen: 'alpin', schweiz: 'alpin',
         frankreich: 'alpin', italien: 'dolomiten', norwegen: 'nordisch',
         rockies: 'nordamerika', kanada: 'nordamerika', anden: 'anden', japan: 'japan'
     };
     const VNAMES = {
         mittelgebirge: ['Tannbach', 'Hinterzell', 'Falkenau'],
+        vorland:       ['Steibach', 'Oberau', 'Weitnau'],
         alpen:         ['Grünwald', 'Sankt Leonhard', 'Achenkirch'],
         schweiz:       ['Zermatten', 'Grindelbach', 'Saas Fee'],
         frankreich:    ['Val Clair', 'Montfort', 'Les Deux Bois'],
@@ -3428,15 +3437,18 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         updaters.push((t) => {
             const cap = catCapacity();
             while (cats.length < cap) {                                  // neue Raupe je Stellplatz
-                const m2 = makeSnowcat(SNOWCAT_COLOR, cats.length < cat500Count() ? '500' : '300'); m2.visible = false; scene.add(m2);
+                // Welche Klasse fehlt noch? Erst die großen Maschinen, dann die kleinen.
+                const have = (mdl) => cats.filter(q => q.model === mdl).length;
+                const model = have('600') < cat600Count() ? '600' : have('500') < cat500Count() ? '500' : '300';
+                const m2 = makeSnowcat(SNOWCAT_COLOR, model); m2.visible = false; scene.add(m2);
                 if (m2.userData.setNight) nightVehicles.push(m2);
                 // Sofort losfahren: der Zyklus startet am Garagentor, damit die
                 // frisch gebaute Raupe direkt sichtbar herausfährt.
-                const isBig = cats.length < cat500Count();
-                // 300er zuckelt, 500er ist zügiger
-                const spd = isBig ? 0.011 : 0.0075;
+                const isBig = model !== '300';
+                // 300er zuckelt, 500er ist zügiger, die 600er am schnellsten
+                const spd = model === '600' ? 0.0128 : isBig ? 0.011 : 0.0075;
                 cats.push({
-                    mesh: m2, big: isBig, speed: spd,
+                    mesh: m2, big: isBig, model, speed: spd,
                     // WICHTIG: der Versatz muss mit DERSELBEN Geschwindigkeit
                     // gerechnet werden, sonst läuft der Zyklus ins Negative und
                     // die Raupe wird außerhalb der Strecke platziert — genau
@@ -6519,6 +6531,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         garage5_1:   { cost: 52000,  r: 3.2, make: () => makeSnowcatGarage(1, '500') },
         garage5_2:   { cost: 92000,  r: 4.2, make: () => makeSnowcatGarage(2, '500') },
         garage5_4:   { cost: 168000, r: 5.8, make: () => makeSnowcatGarage(4, '500') },
+        garage6_1:   { cost: 88000,  r: 3.6, make: () => makeSnowcatGarage(1, '600') },
+        garage6_2:   { cost: 158000, r: 4.8, make: () => makeSnowcatGarage(2, '600') },
+        garage6_4:   { cost: 290000, r: 6.6, make: () => makeSnowcatGarage(4, '600') },
         // ===== Restlicher 2D-Katalog (Kosten 1:1 aus buildings.js) =====
         // ===== SECHS HOTELSTUFEN, 25 bis 250 BETTEN =====
         hotel_pension:{ cost: 42000,  r: 2.4, make: () => makeHotelClass('pension') },
@@ -6725,6 +6740,51 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const pisteMat = makePisteMaterial(snowU);
     const BAND_ACROSS = [-1, -0.5, 0, 0.5, 1];
     const BAND_LIFT = 0.06;                 // so weit liegt das Band über dem Gelände
+    // ===== KREUZUNGEN =====
+    // Welche Kacheln gehören zu welcher Piste? Zwei Einträge je Kachel reichen, um „hier liegt noch eine
+    // andere" zu erkennen. Daraus bekommt jeder Eckpunkt eines Bands seinen Kreuzungsanteil (aJoin), und eine
+    // neue Piste weiß, ob sie auf einer anderen beginnt oder endet (dann läuft sie dort trichterförmig aus).
+    let pisteCover = null;
+    const coverAt = (gx, gy, selfId = 0) => {
+        if (!pisteCover) return 0;
+        const x = Math.round(gx), y = Math.round(gy);
+        if (x < 0 || y < 0 || x >= gridSize || y >= gridSize) return 0;
+        const a = pisteCover.o1[y * gridSize + x], b = pisteCover.o2[y * gridSize + x];
+        return a !== 0 && (a !== selfId || b !== 0) ? 1 : 0;
+    };
+    const refreshPisteJoins = () => {
+        const N = gridSize, o1 = new Int16Array(N * N), o2 = new Int16Array(N * N);
+        const list = guestRoutes.filter(r => r.kind === 'piste' && r.path && r.path.length > 1 && r.bed);
+        list.forEach((r, ri) => {
+            const id = ri + 1, W = (r.snowW || PISTE_WIDTHS[r.width] || 3) * 0.95, R = Math.ceil(W);
+            for (let k = 0; k < r.path.length - 1; k++) {
+                const a = r.path[k], b = r.path[k + 1], n = Math.max(1, Math.round(Math.hypot(a.gx - b.gx, a.gy - b.gy)));
+                for (let q = 0; q <= n; q++) {
+                    const cx = a.gx + (b.gx - a.gx) * q / n, cy = a.gy + (b.gy - a.gy) * q / n;
+                    for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+                        const x = Math.round(cx) + dx, y = Math.round(cy) + dy;
+                        if (x < 0 || y < 0 || x >= N || y >= N || Math.hypot(x - cx, y - cy) > W) continue;
+                        const i = y * N + x;
+                        if (o1[i] === 0 || o1[i] === id) o1[i] = id; else if (o2[i] === 0) o2[i] = id;
+                    }
+                }
+            }
+        });
+        pisteCover = { o1, o2 };
+        list.forEach((r, ri) => {
+            const id = ri + 1, rec = r.bed, n = rec.grid.length / 2;
+            let attr = rec.geo.getAttribute('aJoin');
+            if (!attr) { attr = new THREE.BufferAttribute(new Float32Array(n), 1); rec.geo.setAttribute('aJoin', attr); }
+            for (let i = 0; i < n; i++) {
+                const gx = rec.grid[i * 2], gy = rec.grid[i * 2 + 1];
+                // über die Nachbarkacheln gemittelt: der Übergang ist weich statt gerastert
+                let v = 0;
+                for (const [dx, dy] of [[0, 0], [0.9, 0], [-0.9, 0], [0, 0.9], [0, -0.9]]) v += coverAt(gx + dx, gy + dy, id);
+                attr.array[i] = v / 5;
+            }
+            attr.needsUpdate = true;
+        });
+    };
     const buildPisteBand = (pts, snowW, rgb) => {
         // Mittellinie in gleichmäßigen Schritten
         const mid = [];
@@ -6733,7 +6793,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             const n = Math.max(1, Math.round(Math.hypot(b.gx - a.gx, b.gy - a.gy)));
             for (let k = seg === 0 ? 0 : 1; k <= n; k++) mid.push({ gx: a.gx + (b.gx - a.gx) * k / n, gy: a.gy + (b.gy - a.gy) * k / n });
         }
-        const NA = BAND_ACROSS.length, W = snowW * 1.06;      // etwas über die Sollbreite: der Rand läuft weich aus
+        const NA = BAND_ACROSS.length, W0 = snowW * 1.06;     // etwas über die Sollbreite: der Rand läuft weich aus
+        // Beginnt oder endet die Piste AUF einer anderen, weitet sie sich dort zum Trichter: sie mündet ein
+        const FL = 9, endOn = (q) => coverAt(q.gx, q.gy) > 0;
+        const flareA = mid.length > FL * 2 && endOn(mid[0]), flareB = mid.length > FL * 2 && endOn(mid[mid.length - 1]);
+        const flareAt = (i) => {
+            const t = Math.max(flareA ? 1 - i / FL : 0, flareB ? 1 - (mid.length - 1 - i) / FL : 0);
+            return t <= 0 ? 0 : t * t * (3 - 2 * t);
+        };
         const pos = [], col = [], band = [], axis = [], grid = [], idx = [], gIdx = [];
         let along = 0;
         for (let i = 0; i < mid.length; i++) {
@@ -6741,6 +6808,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             let tx = b.gx - a.gx, ty = b.gy - a.gy; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
             const px = -ty, py = tx;
             if (i > 0) along += Math.hypot(c.gx - mid[i - 1].gx, c.gy - mid[i - 1].gy) * tile;
+            const W = W0 * (1 + 0.85 * flareAt(i));
             for (let j = 0; j < NA; j++) {
                 const sd = BAND_ACROSS[j], gx = c.gx + px * W * sd, gy = c.gy + py * W * sd;
                 const wp = worldPosSmooth(gx, gy);
@@ -6769,6 +6837,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         geo.setAttribute('aBand', new THREE.Float32BufferAttribute(band, 3));
         geo.setAttribute('aAxis', new THREE.Float32BufferAttribute(axis, 2));
         geo.setAttribute('aState', new THREE.BufferAttribute(new Float32Array((pos.length / 3) * 2).fill(1), 2));
+        geo.setAttribute('aJoin', new THREE.BufferAttribute(new Float32Array(pos.length / 3), 1));
         geo.setIndex(idx); geo.computeVertexNormals();
         const mesh = new THREE.Mesh(geo, pisteMat);
         mesh.receiveShadow = true; mesh.renderOrder = 1;
@@ -7569,6 +7638,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         rt.bed = bedRec;
         pisteBeds.push(bedRec);
     }
+    refreshPisteJoins();
 
     /**
      * ORTSCHAFTEN PLATZIEREN.
@@ -7581,7 +7651,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
      * auseinanderliegen und jeder ein eigenes Einzugsgebiet hat.
      */
     function placeVillages() {
-        const lvlIdx = level?.index ?? 0;
+        // Zahl der Orte nach der URSPRÜNGLICHEN Stellung des Levels in der Kampagne: die Reihenfolge darf sich
+        // ändern (neues Level eingeschoben), ohne dass bestehende Gebiete einen Ort dazubekommen oder verlieren.
+        const VILL_RANK = { mittelgebirge: 0, vorland: 1, alpen: 1, schweiz: 2, frankreich: 3, italien: 4, norwegen: 5, rockies: 6, kanada: 7, anden: 8, japan: 9 };
+        const lvlIdx = VILL_RANK[level?.id] ?? level?.index ?? 0;
         const nVill = lvlIdx === 0 ? 1 : lvlIdx >= 6 ? 3 : 2;
         const style = VSTYLE[level?.id] || 'alpin';
         const names = (VNAMES[level?.id] || VNAMES.alpen).slice();
@@ -8069,6 +8142,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                      width: pisteLit ? 'medium' : pisteWidth, snowW };
         bedRec.route = rt;
         guestRoutes.push(rt);
+        refreshPisteJoins();                 // Kreuzungen mit den bestehenden Pisten neu bestimmen
         // Pistennummer + anklickbares Schild am unteren Ende (wie im 2D)
         pisteNo++;
         const domDiff = diffLen.black > diffLen.red && diffLen.black > diffLen.blue ? 'black'

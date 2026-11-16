@@ -1,6 +1,7 @@
 // Realistische / passende Gipfelnamen je Level (Top 3 Gipfel)
 export const PEAK_NAMES = {
     mittelgebirge: ['Feldberg', 'Belchen', 'Herzogenhorn'],
+    vorland:       ['Hochgrat', 'Rindalphorn', 'Stuiben'],
     alpen:         ['Wildspitze', 'Zuckerhütl', 'Hohe Mut'],
     schweiz:       ['Matterhorn', 'Dom', 'Weisshorn'],
     frankreich:    ['Mont Blanc', 'Grande Casse', 'Aiguille du Midi'],

@@ -15,7 +15,7 @@ const BASE = import.meta.env.BASE_URL || '/';
  * für alles Weitere greift der Fallback auf ein Menü-Foto zurück.
  */
 const LOADING_LEVELS = new Set([
-    'mittelgebirge', 'alpen', 'schweiz', 'frankreich', 'italien',
+    'mittelgebirge', 'vorland', 'alpen', 'schweiz', 'frankreich', 'italien',
     'norwegen', 'rockies', 'kanada', 'anden', 'japan'
 ]);
 const FALLBACK_BG = {};

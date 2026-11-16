@@ -20,6 +20,14 @@ export const MASSIFS = {
         { name: 'Herzogenhorn',x: 0.42, y: 0.68, h: 0.93, r: 0.50, sharp: 2.4, stretch: 1.3,  angle: 110 },
         { name: 'Belchen',     x: 0.34, y: 0.44, h: 0.85, r: 0.45, sharp: 2.5, stretch: 1.25, angle: 20 }
     ],
+    // Allgäuer Voralpen: ein breiter Rücken mit Vorgipfeln, davor flaches Seenland
+    vorland: [
+        { name: 'Hochgrat',    x: 0.58, y: 0.66, h: 1.00, r: 0.60, sharp: 2.5, stretch: 1.7,  angle: 85 },
+        { name: 'Rindalphorn', x: 0.70, y: 0.60, h: 0.92, r: 0.46, sharp: 2.7, stretch: 1.4,  angle: 80 },
+        { name: 'Stuiben',     x: 0.44, y: 0.64, h: 0.88, r: 0.48, sharp: 2.6, stretch: 1.5,  angle: 95 },
+        { name: 'Hündle',      x: 0.36, y: 0.44, h: 0.62, r: 0.44, sharp: 2.3, stretch: 1.3,  angle: 50 },
+        { name: 'Imberg',      x: 0.62, y: 0.40, h: 0.55, r: 0.42, sharp: 2.2, stretch: 1.25, angle: 120 }
+    ],
     // Stubai/Zillertal: ein hoher Hauptkamm, davor gestaffelte Vorberge
     alpen: [
         { name: 'Hauptkamm',   x: 0.60, y: 0.66, h: 1.00, r: 0.66, sharp: 3.2, stretch: 1.9,  angle: 95 },
@@ -234,51 +242,48 @@ export const CAMPAIGN_LEVELS = [
         ]
     },
     {
-        id: 'alpen',
+        id: 'vorland',
         index: 1,
-        name: 'Tiroler Alpen',
-        country: 'Österreich',
-        flag: '🇦🇹',
-        tagline: 'Das klassische Alpenpanorama.',
-        description: 'Steilere Hänge, echte Gipfel und anspruchsvollere Gäste. Zeit für rote Pisten und die erste Hütte mit Kaiserschmarrn.',
-        gridSize: 340,
-        startingMoney: 1800000,
+        name: 'Alpenvorland',
+        country: 'Deutschland',
+        flag: '🇩🇪',
+        tagline: 'Sanfte Voralpen mit Seen — der nächste Schritt.',
+        description: 'Zwischen Seen und Wiesen steigen die ersten richtigen Berge auf. Die Hänge sind länger als im Schwarzwald, aber noch gutmütig — ideal für das erste Gebiet mit Sesselbahn und Hütte.',
+        gridSize: 316,
+        startingMoney: 1500000,
         terrain: {
-            seed: 4711,
-            baseAltitude: 1400,
-            peakSpread: 0.38,
-            peakCount: 6,
-            peakHeight: 820,
+            seed: 8153,
+            baseAltitude: 900,
+            peakSpread: 0.34,
+            peakCount: 5,
+            peakHeight: 600,
             outerHills: 3,
-            ridges: 3,
-            ruggedness: 0.34,
-            spires: 3, valleyReach: 0.6,
+            ridges: 2,
+            ruggedness: 0.3,
+            spires: 0, valleyReach: 0.55, valleyCutDepth: 0.12,
             valleyDepth: 10,
-            treeLine: 330,
-            snowLine: 18,
-            glacierLine: 520,
-            forestDensity: 0.65,
-            forestMix: 'conifer',
-            riverCount: 0,
-            riverWidth: 2.0,
-            lakeCount: 3,
-            stretch: 1.7,
-            stretchAxis: 'x'
+            treeLine: 320,
+            snowLine: 26,
+            glacierLine: null,
+            forestDensity: 0.8,
+            forestMix: 'mixed',
+            riverCount: 1,
+            riverWidth: 1.8,
+            lakeCount: 4
         },
         theme: {
-            skyTop: [80, 136, 205], skyBottom: [178, 208, 238],
-            snowWarmth: 0.15,
-            grassLight: [128, 165, 92], grassDark: [88, 124, 66],
-            hazeColor: [200, 216, 236]
+            skyTop: [88, 142, 208], skyBottom: [184, 212, 240],
+            snowWarmth: 0.28,
+            grassLight: [136, 172, 94], grassDark: [92, 128, 68],
+            hazeColor: [203, 218, 236]
         },
         objectives: [
-            { type: 'poi_summit', target: 10 },
-            { type: 'piste_km_total', target: 5 },
-            { type: 'piste_km_red', target: 1 },
-            { type: 'guests_total', target: 150 },
+            { type: 'poi_summit', target: 8 },
+            { type: 'lift_count', target: 3 },
+            { type: 'piste_km_total', target: 4 },
+            { type: 'guests_total', target: 100 },
             { type: 'gastro_count', target: 1 },
-            { type: 'satisfaction', target: 70, minGuests: 15 },
-            { type: 'revenue_total', target: 90000 }
+            { type: 'revenue_total', target: 60000 }
         ]
     },
     {
@@ -376,6 +381,55 @@ export const CAMPAIGN_LEVELS = [
             { type: 'gastro_count', target: 2 },
             { type: 'satisfaction', target: 74, minGuests: 25 },
             { type: 'revenue_total', target: 400000 }
+        ]
+    },
+    {
+        id: 'alpen',
+        index: 1,
+        name: 'Tiroler Alpen',
+        country: 'Österreich',
+        flag: '🇦🇹',
+        tagline: 'Das klassische Alpenpanorama — groß und bekannt.',
+        description: 'Steilere Hänge, echte Gipfel und anspruchsvollere Gäste. Zeit für rote Pisten und die erste Hütte mit Kaiserschmarrn.',
+        gridSize: 340,
+        startingMoney: 2750000,
+        terrain: {
+            seed: 4711,
+            baseAltitude: 1400,
+            peakSpread: 0.38,
+            peakCount: 6,
+            peakHeight: 820,
+            outerHills: 3,
+            ridges: 3,
+            ruggedness: 0.34,
+            spires: 3, valleyReach: 0.6,
+            valleyDepth: 10,
+            treeLine: 330,
+            snowLine: 18,
+            glacierLine: 520,
+            forestDensity: 0.65,
+            forestMix: 'conifer',
+            riverCount: 0,
+            riverWidth: 2.0,
+            lakeCount: 3,
+            stretch: 1.7,
+            stretchAxis: 'x'
+        },
+        theme: {
+            skyTop: [80, 136, 205], skyBottom: [178, 208, 238],
+            snowWarmth: 0.15,
+            grassLight: [128, 165, 92], grassDark: [88, 124, 66],
+            hazeColor: [200, 216, 236]
+        },
+        objectives: [
+            { type: 'poi_summit', target: 12 },
+            { type: 'piste_km_total', target: 8 },
+            { type: 'piste_km_red', target: 2 },
+            { type: 'piste_km_black', target: 1 },
+            { type: 'guests_total', target: 320 },
+            { type: 'gastro_count', target: 2 },
+            { type: 'satisfaction', target: 75, minGuests: 25 },
+            { type: 'revenue_total', target: 280000 }
         ]
     },
     {
@@ -667,6 +721,9 @@ export const CAMPAIGN_LEVELS = [
         ]
     }
 ];
+
+// Die Reihenfolge im Feld IST die Reihenfolge der Kampagne
+CAMPAIGN_LEVELS.forEach((lvl, i) => { lvl.index = i; });
 
 // Sandbox-Standardwerte (frei einstellbar im Menü)
 export const SANDBOX_DEFAULTS = {

@@ -155,7 +155,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   = Raupenbahnen und Rillen, verspurt = graue Fahrspuren, ausgeapert = Band blendet aus. Die Farbe der
   Schwierigkeit ist aus der Ferne ein Farbband, aus der Nähe nur ein Hauch und eine Randlinie. Sie richtet sich
   nach dem steilsten Fünftel der Strecke (`pisteDifficulty`: Stücke von sechs Kacheln, 80 %-Wert; ab 35 % rot,
-  ab 55 % schwarz), nicht nach dem Mittel – sonst macht jeder flache Auslauf die Abfahrt blau. Wer Gelände
+  ab 55 % schwarz), nicht nach dem Mittel – sonst macht jeder flache Auslauf die Abfahrt blau.
+  Kreuzungen: `refreshPisteJoins` trägt je Kachel ein, welche Pisten dort liegen, und gibt jedem Eckpunkt den
+  Anteil `aJoin`; das Material blendet dort Randlinie, Farbband und Walzmuster aus, sodass die Flächen
+  zusammenlaufen. Beginnt oder endet eine Piste auf einer anderen, weitet sich ihr Band dort zum Trichter. Wer Gelände
   unter einer Piste ändert, ruft `bed.reseat` (macht `flattenUnderBuilding` schon).
 - **Startpunkt:** Talstation = tiefste Randkachel, von dort mindestens `BASE_IN` Kacheln ins Gebiet (sonst
   klemmt das Dorf am Rand und die Zufahrt findet keinen Weg). Bäche und Seen meiden die Linie Dorf–Gipfel.
@@ -184,6 +187,15 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (`lockedUntil`); gesperrte Einträge zeigen im Baumenü das Level. Die Sandbox hat alles. Nur das Menü sperrt –
   Spielstände bauen weiterhin alles nach. Neue Werkzeuge dort einsortieren und prüfen, dass die Aufgaben des
   Levels erfüllbar bleiben. Startgeld je Level: `startingMoney` in `constants/campaign.js`.
+- Kampagne: die Reihenfolge im Feld `CAMPAIGN_LEVELS` ist die Reihenfolge der Level (`index` wird daraus gesetzt):
+  Schwarzwald, Alpenvorland (`vorland`), Wallis, Savoyen, Tirol (`alpen`), Dolomiten … Die Ids bleiben, Spielstände
+  und Fortschritt hängen daran. Ein neues Level braucht Einträge in `MASSIFS`, den Tabellen je Level-Id
+  (`ROCK_STYLES`, `VSTYLE`, `VNAMES`, `VILL_RANK` in `Scene3D.js`, `PeakNames.js`, `FOREST_MIX_TABLE`), in
+  `LOADING_LEVELS` und zwei Bilder: `public/levels/<id>.png` (Nummer, Name, Land sind Teil der Grafik) und
+  `public/loading/<id>.png`. `python3 tools/make-level-cards.py` baut beide aus einem Bildschirmfoto und schreibt
+  nach dem Umstellen der Reihenfolge die Nummern auf den Karten neu.
+- Pistenraupen: drei Klassen – PB 300, PB 500, PB 600 Winde (`garage…`, `garage5_…`, `garage6_…`; `makeSnowcat`
+  in `Vehicles3D.js`, Modell '300' | '500' | '600'). Größere Klassen präparieren mehr (`groomRate`).
 - Jede Liftart hat eine Höchstlänge (`max` in `LIFT_PARAMS`, in Kacheln; angezeigt in Metern, 30 Kacheln ≙ 100 m):
   Förderband 100 m, Tellerlift 200 m, Schlepplift 300 m, Sessel 450–800 m, Kabinenbahnen 900–1800 m, Pendelbahnen
   2500 bzw. 3000 m. Geprüft

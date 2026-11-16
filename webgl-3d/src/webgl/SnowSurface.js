@@ -282,13 +282,15 @@ const PISTE_VERT_DECL = /* glsl */`
     attribute vec3 aBand;
     attribute vec2 aAxis;
     attribute vec2 aState;
+    attribute float aJoin;
+    varying float vJoin;
     varying vec3 vBand;
     varying vec2 vAxis;
     varying vec2 vState;
     varying vec3 vPistePos;
 `;
 const PISTE_VERT_MAIN = /* glsl */`
-    vBand = aBand; vAxis = aAxis; vState = aState;
+    vBand = aBand; vAxis = aAxis; vState = aState; vJoin = aJoin;
     vPistePos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 `;
 const PISTE_FRAG_DECL = /* glsl */`
@@ -297,6 +299,7 @@ const PISTE_FRAG_DECL = /* glsl */`
     varying vec3 vBand;
     varying vec2 vAxis;
     varying vec2 vState;
+    varying float vJoin;
     varying vec3 vPistePos;
     float gPisteFresh = 0.0, gPisteCov = 0.0, gPisteNear = 0.0, gPisteWorn = 0.0;
     ${NOISE_GLSL}
@@ -310,6 +313,9 @@ const PISTE_FRAG_COLOR = /* glsl */`
         float near = (1.0 - smoothstep(45.0, 170.0, camDist)) * uDetail;
         float n1 = snNoise(vPistePos.xz * 0.33 + 4.0);
         float fresh = smoothstep(0.35, 0.95, q);
+        // Kreuzung: wo eine andere Piste dieselbe Fläche belegt, laufen beide zu EINER Schneefläche zusammen –
+        // keine Randlinie quer durch die Nachbarpiste, kein Farbband, kein Walzmuster gegen den Strich
+        float jn = clamp(vJoin, 0.0, 1.0);
 
         // frisch gewalzt: Bahnen der Raupe, dazwischen eine feine Naht
         float lf = lat / 1.15;
@@ -317,10 +323,10 @@ const PISTE_FRAG_COLOR = /* glsl */`
         float laneTone = mod(lane, 2.0) < 0.5 ? 1.0 : -1.0;
         float seam = smoothstep(0.40, 0.5, abs(lf - lane));
         vec3 snow = uSnowCol * 1.03;
-        snow *= 1.0 + laneTone * 0.020 * fresh;
-        snow *= 1.0 - seam * 0.045 * fresh;
+        snow *= 1.0 + laneTone * 0.020 * fresh * (1.0 - jn);
+        snow *= 1.0 - seam * 0.045 * fresh * (1.0 - jn);
         // die Rillen selbst – nur aus der Nähe als Streifen, weiter weg wären sie Flimmern
-        snow *= 1.0 + sin(lat * 43.98) * 0.030 * fresh * near;
+        snow *= 1.0 + sin(lat * 43.98) * 0.030 * fresh * near * (1.0 - jn);
 
         // verspurt: längs gezogene Fahrspuren und abgerutschte Stellen, stumpf und leicht grau
         float tracks = snNoise(vec2(lat * 2.6 + n1 * 2.0, vBand.z * 0.30));
@@ -331,13 +337,13 @@ const PISTE_FRAG_COLOR = /* glsl */`
         // Schwierigkeit: fern ein Farbband, nah ein Hauch und eine Linie am Rand
         float core = 1.0 - smoothstep(0.60, 0.76, side);
         float tintK = mix(0.09, 0.30, smoothstep(55.0, 260.0, camDist));
-        snow = mix(snow, diffCol, core * tintK);
+        snow = mix(snow, diffCol, core * tintK * (1.0 - 0.7 * jn));
         float line = smoothstep(0.82, 0.855, side) * (1.0 - smoothstep(0.90, 0.935, side));
-        snow = mix(snow, diffCol, line * 0.45);
+        snow = mix(snow, diffCol, line * 0.45 * (1.0 - jn));
 
         diffuseColor.rgb = snow;
         // am Rand läuft das Band in den Schnee daneben aus; wo die Piste ausgeapert ist, verschwindet es
-        diffuseColor.a *= (1.0 - smoothstep(0.90, 1.0, side)) * smoothstep(0.05, 0.5, cov);
+        diffuseColor.a *= (1.0 - smoothstep(mix(0.90, 0.70, jn), 1.0, side)) * smoothstep(0.05, 0.5, cov);
         gPisteFresh = fresh * cov; gPisteCov = cov; gPisteNear = near; gPisteWorn = (1.0 - q) * cov;
     }
 `;
@@ -381,7 +387,7 @@ export function makePisteMaterial(uniforms) {
             .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.indirectDiffuse *= mix(vec3(1.0), uShade, gPisteCov);')
             .replace('#include <fog_fragment>', SOFT_FOG);
     };
-    mat.customProgramCacheKey = () => 'piste-band';
+    mat.customProgramCacheKey = () => 'piste-band-2';
     return mat;
 }
 

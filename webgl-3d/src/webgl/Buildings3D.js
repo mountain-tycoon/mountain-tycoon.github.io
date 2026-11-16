@@ -2644,23 +2644,23 @@ export function makeBusStop() {
 }
 /** Pistenraupen-Garage (2D: snowcat_garage) — orange Halle mit Rolltor. */
 export function makeSnowcatGarage(bays = 1, model = '300') {
-    const big = model === '500';
+    const huge = model === '600', big = model === '500' || huge;
     const g = new THREE.Group();
     // Halle für die großen 500er-Maschinen ist breiter und höher
-    const w = (big ? 4.2 : 3.2) + (bays - 1) * (big ? 3.4 : 2.6);                  // je Stellplatz breiter
-    const H = big ? 2.1 : 1.6, D = big ? 3.4 : 2.6;
+    const w = (huge ? 4.9 : big ? 4.2 : 3.2) + (bays - 1) * (huge ? 4.0 : big ? 3.4 : 2.6);                  // je Stellplatz breiter
+    const H = huge ? 2.5 : big ? 2.1 : 1.6, D = huge ? 4.2 : big ? 3.4 : 2.6;
     const hall = new THREE.Mesh(new THREE.BoxGeometry(w, H, D),
-        new THREE.MeshStandardMaterial({ color: big ? 0x9a3412 : 0xb45309, roughness: 0.8 }));
+        new THREE.MeshStandardMaterial({ color: huge ? 0x4b5563 : big ? 0x9a3412 : 0xb45309, roughness: 0.8 }));
     hall.position.y = H / 2; hall.castShadow = hall.receiveShadow = true; g.add(hall);
     const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.3, 0.12, D + 0.3), M.metal);
     roof.position.y = H + 0.06; roof.castShadow = true; g.add(roof);
     // Typschild "300" / "500" über dem Tor
-    const typeTex = makeLabelTexture(model, 0xffffff, big ? 0x7c2d12 : 0xb45309);
+    const typeTex = makeLabelTexture(model, 0xffffff, huge ? 0xb91c1c : big ? 0x7c2d12 : 0xb45309);
     const typePlate = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.28),
         new THREE.MeshBasicMaterial({ map: typeTex }));
     typePlate.position.set(-w / 2 + 0.8, H - 0.3, D / 2 + 0.02); g.add(typePlate);
     // ein Rolltor je Pistenraupe
-    const doorW = big ? 3.0 : 2.2, doorH = big ? 1.7 : 1.2, gap = w / bays;
+    const doorW = huge ? 3.5 : big ? 3.0 : 2.2, doorH = huge ? 2.05 : big ? 1.7 : 1.2, gap = w / bays;
     for (let b = 0; b < bays; b++) {
         const cx = -w / 2 + gap * (b + 0.5);
         const dw = Math.min(doorW, gap - 0.3);

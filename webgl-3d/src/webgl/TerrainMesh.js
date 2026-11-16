@@ -18,6 +18,7 @@ const mix = (a, b, t) => [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2
  */
 export const FOREST_MIX_TABLE = {
         mittelgebirge: { spruce: 0.30, fir: 0.18, broad: 0.52, hue: [0.34, 0.58, 0.29] }, // Schwarzwald: helles Laubgrün
+        vorland:       { spruce: 0.52, fir: 0.26, broad: 0.22, hue: [0.22, 0.45, 0.28] }, // Bergmischwald
         alpen:         { spruce: 0.62, fir: 0.28, broad: 0.10, hue: [0.21, 0.46, 0.30] }, // sattes Alpengrün
         schweiz:       { spruce: 0.70, fir: 0.25, broad: 0.05, hue: [0.17, 0.41, 0.31] }, // kühles Tannengrün
         frankreich:    { spruce: 0.55, fir: 0.30, broad: 0.15, hue: [0.26, 0.51, 0.29] }, // frisches Mittelgrün

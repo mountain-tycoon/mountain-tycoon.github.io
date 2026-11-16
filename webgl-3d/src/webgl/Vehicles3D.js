@@ -84,9 +84,10 @@ export function makeBus() {
  *  - '500' = großes Flaggschiff (breiter, längere Kette, Heckfräse, Kabinenaufbau)
  */
 export function makeSnowcat(bodyColor = 0xf97316, model = '300') {
-    const big = model === '500';
+    // Drei Klassen: 300 (kompakt), 500 (groß), 600 (Windenraupe, die größte)
+    const huge = model === '600', big = model === '500' || huge;
     const g = new THREE.Group();
-    const w = big ? 1.75 : 0.9, l = big ? 3.2 : 1.6;
+    const w = huge ? 2.1 : big ? 1.75 : 0.9, l = huge ? 3.9 : big ? 3.2 : 1.6;
     // Aufstandsfläche für die Bodenanpassung in der Szene (halbe Maße)
     g.userData.foot = { w: w * 0.5, l: l * 0.5 };
     // ===== LACKIERUNG =====
@@ -253,7 +254,7 @@ export function makeSnowcat(bodyColor = 0xf97316, model = '300') {
     g.userData.setNight(0);
 
     // Räumschild vorne — beim 500er breiter und mit Mittelsteg
-    const bladeMat = new THREE.MeshStandardMaterial({ color: 0xfbbf24, roughness: 0.5 });
+    const bladeMat = new THREE.MeshStandardMaterial({ color: 0x23282f, roughness: 0.45, metalness: 0.55 });
     const blade = new THREE.Mesh(new THREE.BoxGeometry(w * (big ? 1.65 : 1.35), big ? 0.6 : 0.45, 0.12), bladeMat);
     blade.position.set(0, big ? 0.45 : 0.38, l * 0.55); blade.castShadow = true; g.add(blade);
     if (big) {
@@ -317,15 +318,6 @@ export function makeSnowcat(bodyColor = 0xf97316, model = '300') {
         const hl2 = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.09, 0.06),
             new THREE.MeshStandardMaterial({ color: 0xfff8d0, emissive: 0xffe9a0, emissiveIntensity: 1.5 }));
         hl2.position.set(sx3 * w, 0.72, l * 0.4); g.add(hl2);
-    }
-    // Warnstreifen am Räumschild (typisches Baustellenmuster)
-    for (let si = 0; si < (big ? 7 : 5); si++) {
-        const stripe = new THREE.Mesh(new THREE.BoxGeometry(w * (big ? 0.2 : 0.22), big ? 0.6 : 0.45, 0.02),
-            new THREE.MeshStandardMaterial({ color: si % 2 ? 0x1f2937 : 0xfbbf24, roughness: 0.6 }));
-        const span = w * (big ? 1.6 : 1.3);
-        stripe.position.set(-span / 2 + (si + 0.5) * (span / (big ? 7 : 5)),
-                            big ? 0.45 : 0.38, l * 0.55 + 0.07);
-        g.add(stripe);
     }
     // Fahrer in der Kabine
     const driver = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.28, 0.16),
@@ -440,6 +432,86 @@ export function makeSnowcat(bodyColor = 0xf97316, model = '300') {
         }
         fp.needsUpdate = true;
     };
+    // ===== FEINSCHLIFF: Lackierung, Schild, Fräse, Lichtbalken =====
+    const white = new THREE.MeshStandardMaterial({ color: 0xf3f3ef, roughness: 0.4, metalness: 0.25 });
+    const black = new THREE.MeshStandardMaterial({ color: 0x14171c, roughness: 0.6, metalness: 0.35 });
+    const bladeW = w * (big ? 1.65 : 1.35), bladeH = big ? 0.6 : 0.45, bladeY = big ? 0.45 : 0.38, bladeZ = l * 0.55;
+    // Kettenabdeckungen in Wagenfarbe, vorn und hinten abgeschrägt
+    for (const sx of [-1, 1]) {
+        const fender = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.035, l * 0.86), orange);
+        fender.position.set(sx * w * 0.44, 0.37, 0); fender.castShadow = true; g.add(fender);
+        for (const sz of [-1, 1]) {
+            const lip = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.035, 0.2), orange);
+            lip.position.set(sx * w * 0.44, 0.33, sz * l * 0.5); lip.rotation.x = sz * 0.5; g.add(lip);
+        }
+        // Zierband: weiß über schwarzem Sockel, über die ganze Flanke
+        const band = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.07, l * 0.8), white);
+        band.position.set(sx * (w * 0.5 + 0.012), 0.6, 0); g.add(band);
+        const skirt = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.1, l * 0.8), black);
+        skirt.position.set(sx * (w * 0.5 + 0.012), 0.36, 0); g.add(skirt);
+        // Schildflügel: außen nach vorn angestellt, wie beim Zwölf-Wege-Schild
+        const wing = new THREE.Mesh(new THREE.BoxGeometry(bladeW * 0.2, bladeH, 0.09), bladeMat);
+        wing.position.set(sx * bladeW * 0.57, bladeY, bladeZ + bladeW * 0.045); wing.rotation.y = -sx * 0.5; wing.castShadow = true; g.add(wing);
+    }
+    // Schild: Oberkante in Wagenfarbe, Schürfleiste unten, Rippen
+    const topEdge = new THREE.Mesh(new THREE.BoxGeometry(bladeW, 0.07, 0.15), orange);
+    topEdge.position.set(0, bladeY + bladeH / 2 + 0.02, bladeZ + 0.03); topEdge.rotation.x = 0.35; g.add(topEdge);
+    const cutEdge = new THREE.Mesh(new THREE.BoxGeometry(bladeW, 0.05, 0.14), steel);
+    cutEdge.position.set(0, bladeY - bladeH / 2 + 0.02, bladeZ + 0.03); g.add(cutEdge);
+    for (let k2 = 0; k2 < (big ? 5 : 3); k2++) {
+        const rib = new THREE.Mesh(new THREE.BoxGeometry(0.035, bladeH * 0.8, 0.03), steel);
+        rib.position.set((k2 / ((big ? 5 : 3) - 1) - 0.5) * bladeW * 0.8, bladeY, bladeZ + 0.07); g.add(rib);
+    }
+    // Fräse: Finisher (Gummimatte mit Kamm) hinter der Fräswelle, Seitenfinisher
+    const tillW = w * (big ? 1.6 : 1.25);
+    const mat2 = new THREE.Mesh(new THREE.BoxGeometry(tillW, 0.03, 0.34), black);
+    mat2.position.set(0, 0.1, -l * 0.55 - 0.27); mat2.rotation.x = -0.12; g.add(mat2);
+    for (let k2 = 0; k2 < (big ? 9 : 6); k2++) {
+        const tooth = new THREE.Mesh(new THREE.BoxGeometry(tillW / (big ? 9 : 6) * 0.7, 0.012, 0.08), steel);
+        tooth.position.set((k2 + 0.5) / (big ? 9 : 6) * tillW - tillW / 2, 0.075, -l * 0.55 - 0.43); g.add(tooth);
+    }
+    for (const sx of [-1, 1]) {
+        const side = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.2, 0.36), orange);
+        side.position.set(sx * tillW * 0.5, 0.26, -l * 0.55 - 0.05); g.add(side);
+    }
+    // Sonnenblende und Lichtbalken über der Frontscheibe
+    const roofTop = 0.48 + 0.18 + cabH + 0.045;
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.03, 0.16), black);
+    visor.position.set(0, roofTop - 0.03, l * 0.02 + l * 0.2); visor.rotation.x = 0.3; g.add(visor);
+    const barMat = new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xffe9a8, emissiveIntensity: 0.5, roughness: 0.3 });
+    g.userData.registerNightMat(barMat, 0.5, 2.6);
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(w * 0.66, 0.05, 0.05), black);
+    bar.position.set(0, roofTop + 0.07, l * 0.02 + l * 0.1); g.add(bar);
+    for (let k2 = 0; k2 < (big ? 6 : 4); k2++) {
+        const led = new THREE.Mesh(new THREE.BoxGeometry(w * 0.07, 0.04, 0.02), barMat);
+        led.position.set(((k2 + 0.5) / (big ? 6 : 4) - 0.5) * w * 0.62, roofTop + 0.07, l * 0.02 + l * 0.1 + 0.03); g.add(led);
+    }
+    // Funkantenne
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.01, 0.7, 5), black);
+    antenna.position.set(-w * 0.32, roofTop + 0.35, l * 0.02 - l * 0.13); antenna.rotation.x = -0.12; g.add(antenna);
+    // Stirnseite der Haube: Kühlerjalousie in Schwarz, weißes Typfeld
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(w * 0.34, 0.11, 0.012), white);
+    plate.position.set(0, 0.5, -l * 0.41 - 0.006); g.add(plate);
+    if (huge) {
+        // ===== SEILWINDE (PistenBully 600 W) =====
+        // Trommel auf dem Heck, drehbarer Ausleger über die Kabine nach vorn, Seil läuft talwärts aus.
+        const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, w * 0.42, 14), steel);
+        drum.rotation.z = Math.PI / 2; drum.position.set(0, 1.12, -l * 0.3); drum.castShadow = true; g.add(drum);
+        for (const sx of [-1, 1]) {
+            const cheek = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.04, 14), orange);
+            cheek.rotation.z = Math.PI / 2; cheek.position.set(sx * w * 0.22, 1.12, -l * 0.3); g.add(cheek);
+        }
+        const boomLen = l * 0.8;
+        const boom = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.11, boomLen), orange);
+        boom.position.set(0, 1.5 + boomLen * 0.11, -l * 0.3 + boomLen * 0.46); boom.rotation.x = -0.26; boom.castShadow = true; g.add(boom);
+        const head = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.16, 10), steel);
+        head.rotation.z = Math.PI / 2; head.position.set(0, 1.5 + boomLen * 0.225, -l * 0.3 + boomLen * 0.93); g.add(head);
+        const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 2.4, 5), black);
+        rope.rotation.x = Math.PI / 2 - 0.2; rope.position.set(0, 1.5 + boomLen * 0.225 - 0.24, -l * 0.3 + boomLen * 0.93 + 1.16); g.add(rope);
+        // zweiter Auspuff
+        const ex2 = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.42, 8), steel);
+        ex2.position.set(-w * 0.30, 1.05, -l * 0.30); g.add(ex2);
+    }
     return g;
 }
 

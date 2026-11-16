@@ -61,10 +61,10 @@ const UNLOCK = {
     garage2: 1, garage5_1: 1, medical: 1, snowcannon: 1, sauna: 1, funpark_s: 1, kicker: 1,
     // ab dem 3. Level
     lift8: 2, tram: 2, panorama: 2, partyzelt: 2, hotel_mid: 2, parkgarage: 2, garage4: 2, garage5_2: 2,
-    workshop: 2, cannon_l: 2, reservoir_l: 2, eisbahn: 2, funpark: 2, halfpipe: 2, racecourse: 2,
+    workshop: 2, garage6_1: 2, cannon_l: 2, reservoir_l: 2, eisbahn: 2, funpark: 2, halfpipe: 2, racecourse: 2,
     // ab dem 4. Level
     liftmega: 3, lifttramxl: 3, sterne: 3, disco: 3, hotel_resort: 3, hotel_lux: 3, chalet_lux: 3,
-    garage5_4: 3, hospital: 3, therme: 3, funpark_l: 3
+    garage5_4: 3, garage6_2: 3, garage6_4: 3, hospital: 3, therme: 3, funpark_l: 3
 };
 /** Index des Levels, ab dem das Werkzeug frei ist – oder -1, wenn es hier schon gewählt werden darf. */
 const lockedUntil = (item, level) => {
@@ -154,6 +154,9 @@ const CATEGORIES = [
             { key: 'garage5_1',  tool: 'build', icon: '🚛', name: 'Garage PB 500', group: 'Garage PB 500', variant: '1×', cost: 52000 },
             { key: 'garage5_2',  tool: 'build', icon: '🚛', name: 'Garage PB 500', group: 'Garage PB 500', variant: '2×', cost: 92000 },
             { key: 'garage5_4',  tool: 'build', icon: '🚛', name: 'Garage PB 500', group: 'Garage PB 500', variant: '4×', cost: 168000 },
+            { key: 'garage6_1',  tool: 'build', icon: '🚛', name: 'Garage PB 600 Winde', group: 'Garage PB 600 Winde', variant: '1×', cost: 88000 },
+            { key: 'garage6_2',  tool: 'build', icon: '🚛', name: 'Garage PB 600 Winde', group: 'Garage PB 600 Winde', variant: '2×', cost: 158000 },
+            { key: 'garage6_4',  tool: 'build', icon: '🚛', name: 'Garage PB 600 Winde', group: 'Garage PB 600 Winde', variant: '4×', cost: 290000 },
             { key: 'workshop',   tool: 'build', icon: '🔧', name: 'Werkstatt',   cost: 80000 },
             { key: 'medical',    tool: 'build', icon: '⛑️', name: 'Medizin', group: 'Medizin', variant: 'Station', cost: 65000 },
             { key: 'hospital',   tool: 'build', icon: '🏥', name: 'Medizin', group: 'Medizin', variant: 'Klinik',  cost: 325000 },
