@@ -52,6 +52,26 @@ const warnBtn = (col) => ({
 // Bau-Kategorien mit ihren Werkzeugen.
 // `group` fasst Größenvarianten zusammen (Untermenü statt endloser Liste),
 // `variant` ist das kurze Label innerhalb der Gruppe.
+// ===== FREISCHALTUNG JE LEVEL =====
+// In den ersten Leveln gibt es noch nicht alles: Stufe = Index des Kampagnen-Levels, ab dem ein Werkzeug
+// wählbar ist. Was hier nicht steht, gibt es von Anfang an. Die Sandbox (kein Index) hat immer alles.
+const UNLOCK = {
+    // ab dem 2. Level
+    chair6: 1, lift4: 1, lift: 1, piste_xw: 1, piste_lit: 1, bergrest: 1, apres: 1, hotel: 1, chalet_l: 1,
+    garage2: 1, garage5_1: 1, medical: 1, snowcannon: 1, sauna: 1, funpark_s: 1, kicker: 1,
+    // ab dem 3. Level
+    lift8: 2, tram: 2, panorama: 2, partyzelt: 2, hotel_mid: 2, parkgarage: 2, garage4: 2, garage5_2: 2,
+    workshop: 2, cannon_l: 2, reservoir_l: 2, eisbahn: 2, funpark: 2, halfpipe: 2, racecourse: 2,
+    // ab dem 4. Level
+    liftmega: 3, lifttramxl: 3, sterne: 3, disco: 3, hotel_resort: 3, hotel_lux: 3, chalet_lux: 3,
+    garage5_4: 3, hospital: 3, therme: 3, funpark_l: 3
+};
+/** Index des Levels, ab dem das Werkzeug frei ist – oder -1, wenn es hier schon gewählt werden darf. */
+const lockedUntil = (item, level) => {
+    const need = UNLOCK[item.key] || 0, have = Number.isInteger(level?.index) ? level.index : 99;
+    return have < need ? need : -1;
+};
+
 const CATEGORIES = [
     {
         key: 'lifte', label: 'Lifte', icon: '🚡',
@@ -1041,10 +1061,12 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                         return blocks.map((b, bi) => {
                             if (!b.group) {
                                 const it = b.items[0];
-                                const affordable = typeof it.cost !== 'number' || money >= it.cost;
+                                const lock = lockedUntil(it, level);
+                                const affordable = lock < 0 && (typeof it.cost !== 'number' || money >= it.cost);
                                 const sel = active === it.key;
                                 return (
-                                    <button key={it.key} onClick={() => selectItem(it)} disabled={!affordable} style={{
+                                    <button key={it.key} onClick={() => selectItem(it)} disabled={!affordable}
+                                            title={lock >= 0 ? `Freigeschaltet ab ${CAMPAIGN_LEVELS[lock]?.name || 'einem späteren Level'}` : undefined} style={{
                                         display: 'flex', alignItems: 'center', gap: 9, width: '100%', marginBottom: 6,
                                         padding: '8px 10px', borderRadius: 3, cursor: affordable ? 'pointer' : 'not-allowed',
                                         border: sel ? '1px solid rgba(255,255,255,0.85)' : '1px solid rgba(255,255,255,0.1)',
@@ -1053,7 +1075,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                                     }}>
                                         <BuildIcon itemKey={it.key} emoji={it.icon} size={25} />
                                         <span style={{ flex: 1, fontSize: 12, fontWeight: 600 }}>{it.name}</span>
-                                        <span style={{ fontSize: 10, color: '#a8aeb6' }}>{fmt(it.cost)}</span>
+                                        <span style={{ fontSize: 10, color: '#a8aeb6' }}>{lock >= 0 ? `🔒 ab ${CAMPAIGN_LEVELS[lock]?.name || 'später'}` : fmt(it.cost)}</span>
                                     </button>
                                 );
                             }
@@ -1067,10 +1089,12 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                                     {/* Handy: mehr als drei Varianten brechen in eine zweite Reihe um, Knöpfe fingergroß */}
                                     <div style={{ display: 'flex', gap: 5, flexWrap: compact ? 'wrap' : 'nowrap' }}>
                                         {b.items.map(it => {
-                                            const affordable = typeof it.cost !== 'number' || money >= it.cost;
+                                            const lock = lockedUntil(it, level);
+                                            const affordable = lock < 0 && (typeof it.cost !== 'number' || money >= it.cost);
                                             const sel = active === it.key;
                                             return (
-                                                <button key={it.key} onClick={() => selectItem(it)} disabled={!affordable} style={{
+                                                <button key={it.key} onClick={() => selectItem(it)} disabled={!affordable}
+                                                        title={lock >= 0 ? `Freigeschaltet ab ${CAMPAIGN_LEVELS[lock]?.name || 'einem späteren Level'}` : undefined} style={{
                                                     flex: compact && b.items.length > 3 ? '1 0 30%' : 1,
                                                     padding: compact ? '10px 3px' : '6px 3px', borderRadius: 2, cursor: affordable ? 'pointer' : 'not-allowed',
                                                     border: sel ? '1px solid rgba(255,255,255,0.85)' : '1px solid rgba(255,255,255,0.1)',
@@ -1078,7 +1102,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                                                     color: '#e8eaed', opacity: affordable ? 1 : 0.4, transition: 'all .12s'
                                                 }}>
                                                     <div style={{ fontSize: 10.5, fontWeight: 700 }}>{it.variant}</div>
-                                                    <div style={{ fontSize: 9, color: '#a8aeb6', marginTop: 1 }}>{fmt(it.cost)}</div>
+                                                    <div style={{ fontSize: 9, color: '#a8aeb6', marginTop: 1 }}>{lock >= 0 ? `🔒 ${CAMPAIGN_LEVELS[lock]?.name || 'später'}` : fmt(it.cost)}</div>
                                                 </button>
                                             );
                                         })}

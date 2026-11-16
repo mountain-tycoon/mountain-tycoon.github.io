@@ -198,7 +198,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Sanfte Mittelgebirgshänge — der perfekte Einstieg.',
         description: 'Baue dein erstes kleines Skigebiet zwischen bewaldeten Kuppen. Grüne Täler, ein Bach, viel Wald — und Gäste, die auf ihre erste Abfahrt warten.',
         gridSize: 292,
-        startingMoney: 2000000,
+        startingMoney: 1200000,
         terrain: {
             seed: 20261,
             baseAltitude: 800,
@@ -242,7 +242,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Das klassische Alpenpanorama.',
         description: 'Steilere Hänge, echte Gipfel und anspruchsvollere Gäste. Zeit für rote Pisten und die erste Hütte mit Kaiserschmarrn.',
         gridSize: 340,
-        startingMoney: 3000000,
+        startingMoney: 1800000,
         terrain: {
             seed: 4711,
             baseAltitude: 1400,
@@ -290,7 +290,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Viertausender und ewiges Eis.',
         description: 'Unter den höchsten Gipfeln der Alpen wartet ein gewaltiger Gletscher. Baue ein nobles Resort im Stil von Zermatt — mit Gletscherskigebiet und Panorama-Gondeln.',
         gridSize: 356,
-        startingMoney: 3500000,
+        startingMoney: 2200000,
         terrain: {
             seed: 1291,
             baseAltitude: 1620,
@@ -338,7 +338,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Das größte Skigebiet der Welt bauen.',
         description: 'Weite Hochtäler wie in Les Trois Vallées: verbinde mehrere Berge zu einem riesigen Liftverbund. Gletscher, endlose Grate und französische Gastronomie.',
         gridSize: 372,
-        startingMoney: 4000000,
+        startingMoney: 2600000,
         terrain: {
             seed: 1789,
             baseAltitude: 1400,
@@ -387,7 +387,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Bleiche Felstürme über sanften Almwiesen.',
         description: 'Die Dolomiten: senkrechte helle Kalkwände und schroffe Zinnen ragen aus überraschend flachen, weiten Hängen. Perfektes Genussskifahren mit Aperitivo-Kultur zwischen den Felstürmen.',
         gridSize: 380,
-        startingMoney: 4200000,
+        startingMoney: 2900000,
         terrain: {
             seed: 1861,
             baseAltitude: 1500,
@@ -432,7 +432,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Schnee bis ans Wasser, Gletscher am Gipfel.',
         description: 'Hoch über den Fjorden: tiefer Schnee bis ins Tal, ein Gletscherfeld am Grat und lange, kalte Abfahrten. Deine Gäste bleiben über Nacht — baue Hotels.',
         gridSize: 388,
-        startingMoney: 4500000,
+        startingMoney: 3200000,
         terrain: {
             seed: 8841,
             baseAltitude: 300,
@@ -481,7 +481,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Big Mountain Skiing — steil, hoch, wild.',
         description: 'Schroffe Grate, hohe Gipfel und die ersten schwarzen Abfahrten. Amerikanische Gäste erwarten großes Kino: lange Lifte und breite Bowls.',
         gridSize: 404,
-        startingMoney: 5500000,
+        startingMoney: 3800000,
         terrain: {
             seed: 1776,
             baseAltitude: 2500,
@@ -526,7 +526,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Endlose Wälder, tiefverschneite Seen.',
         description: 'Powder ohne Ende zwischen riesigen Nadelwäldern und zugefrorenen Seen. Ein komplettes Resort mit Hotels, Gastronomie und Shopping ist gefragt.',
         gridSize: 420,
-        startingMoney: 6500000,
+        startingMoney: 4500000,
         terrain: {
             seed: 1867,
             baseAltitude: 900,
@@ -574,7 +574,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Skifahren am Ende der Welt.',
         description: 'Karge Grate, gewaltige Gletscher und Wind aus der Ferne des Pazifiks. Kaum Wald, dafür extreme Höhen — hier trennt sich die Spreu vom Pulverschnee.',
         gridSize: 452,
-        startingMoney: 8000000,
+        startingMoney: 5500000,
         terrain: {
             seed: 3333,
             baseAltitude: 1800,
@@ -622,7 +622,7 @@ export const CAMPAIGN_LEVELS = [
         tagline: 'Japow — der leichteste Schnee der Welt.',
         description: 'Ein perfekter Vulkankegel, Birkenwälder im Pulverschnee und Onsen im Tal. Das große Finale: ein Weltklasse-Resort mit allem, was dazugehört.',
         gridSize: 484,
-        startingMoney: 10000000,
+        startingMoney: 7000000,
         terrain: {
             seed: 7227,
             baseAltitude: 500,

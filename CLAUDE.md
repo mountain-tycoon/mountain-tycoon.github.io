@@ -46,9 +46,14 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - **Handy-Layout** in `World3D.jsx`: `useViewport()` liefert `compact` (kleiner Bildschirm → Leiste unten, Felder
   als Karten von unten) und `coarse` (Finger → andere Hinweistexte). Nichts darf nur per Drüberfahren
   erreichbar sein. Eigene Kamera-Knöpfe gibt es bewusst nicht – die Gesten genügen.
-- **Bildqualität** regelt sich selbst: Stufen `QUALITY` (0–4, Auflösung/Schatten/Glühen/Glättung) und
-  Messung `qualityFrame` in `Scene3D.js` (Stand je Gerät in `localStorage['mt.quality']`). Gerechnet wird in der
-  Anzeige-Auflösung, die Farbstufe schärft leicht nach. Neue teure Effekte dort an eine Stufe hängen.
+- **Bildqualität** regelt sich selbst: Stufen `QUALITY` (0–6: Auflösung, Schatten, Glühen, Glättung) und Messung
+  `qualityFrame` in `Scene3D.js` (Stand je Gerät in `localStorage['mt.quality2']`). Die beiden untersten Stufen sind
+  für alte Geräte (gröber als der Bildschirm, zuletzt ohne Schatten). Schatten werden nur in jedem `shEvery`-ten
+  Bild neu gerechnet (`sun.shadow.autoUpdate = false`, Anstoß in `animate`). Herunter geht es bei unter 30 Bildern/s
+  oder vielen langen Einzelbildern, hinauf selten und auf Probe; eine Stufe, die zweimal nicht hielt, bleibt für
+  die Sitzung gesperrt – jeder Wechsel ruckelt selbst. Neue teure Effekte an eine Stufe hängen.
+  Gemessen (Nov. 2026): die Spiellogik braucht unter 2 ms je Bild; Ruckeln kommt von der Grafikseite.
+  Messen: `__mtCam.noRender(true)` lässt das Zeichnen aus, dann zeigt ein CPU-Profil die reine Rechenzeit.
 - **Wasser** (`Water3D.js`): `prepareWater` gräbt Seebecken und Bachbetten ein (vor dem Geländenetz),
   `buildWater` legt eine Shader-Fläche darüber (Tiefe, Wellen, Spiegelung, Strömung). Wasserpunkte sind
   `landcover === 2`; die Bodenfarbe darunter kommt aus `waterBedColor`.
@@ -148,7 +153,9 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `Scene3D.js`, Material `makePisteMaterial` in `SnowSurface.js`). Der Zustand steht je Eckpunkt in `aState`
   (Schneedecke, Präparierzustand aus `bed.groom`) und wird in `repaintPisteBeds` fortgeschrieben: frisch gewalzt
   = Raupenbahnen und Rillen, verspurt = graue Fahrspuren, ausgeapert = Band blendet aus. Die Farbe der
-  Schwierigkeit ist aus der Ferne ein Farbband, aus der Nähe nur ein Hauch und eine Randlinie. Wer Gelände
+  Schwierigkeit ist aus der Ferne ein Farbband, aus der Nähe nur ein Hauch und eine Randlinie. Sie richtet sich
+  nach dem steilsten Fünftel der Strecke (`pisteDifficulty`: Stücke von sechs Kacheln, 80 %-Wert; ab 35 % rot,
+  ab 55 % schwarz), nicht nach dem Mittel – sonst macht jeder flache Auslauf die Abfahrt blau. Wer Gelände
   unter einer Piste ändert, ruft `bed.reseat` (macht `flattenUnderBuilding` schon).
 - **Startpunkt:** Talstation = tiefste Randkachel, von dort mindestens `BASE_IN` Kacheln ins Gebiet (sonst
   klemmt das Dorf am Rand und die Zufahrt findet keinen Weg). Bäche und Seen meiden die Linie Dorf–Gipfel.
@@ -173,6 +180,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   ihren Startpunkt gesetzt; zur Station gehen sie (`queueAt` in `planNext`), statt sich aus bis zu `R_LINK`
   Kacheln Entfernung direkt anzustellen. Prüfen: `__mtCam.fastForward(n, dt, each)` spult Gäste und Anlagen vor,
   `__mtCam.guests()` liefert die Figuren.
+- Freischaltung: `UNLOCK` in `World3D.jsx` nennt je Werkzeug den Index des Kampagnen-Levels, ab dem es wählbar ist
+  (`lockedUntil`); gesperrte Einträge zeigen im Baumenü das Level. Die Sandbox hat alles. Nur das Menü sperrt –
+  Spielstände bauen weiterhin alles nach. Neue Werkzeuge dort einsortieren und prüfen, dass die Aufgaben des
+  Levels erfüllbar bleiben. Startgeld je Level: `startingMoney` in `constants/campaign.js`.
 - Jede Liftart hat eine Höchstlänge (`max` in `LIFT_PARAMS`, in Kacheln; angezeigt in Metern, 30 Kacheln ≙ 100 m):
   Förderband 100 m, Tellerlift 200 m, Schlepplift 300 m, Sessel 450–800 m, Kabinenbahnen 900–1800 m, Pendelbahnen
   2500 bzw. 3000 m. Geprüft

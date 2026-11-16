@@ -3767,17 +3767,25 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // seinen dichten Displays besonders).
     // Hält ein Gerät die Bildrate nicht, geht es stufenweise herunter; läuft es flüssig,
     // geht es vorsichtig hinauf – bis zur vollen Schärfe (Stufe 4).
+    // shadow = Kantenlänge der Schattenkarte (0 = keine Schatten), shEvery = Schatten nur in jedem n-ten Bild neu
+    // rechnen (die Landschaft steht still – nur Kabinen und Gäste hinken dann ein, zwei Bilder nach).
+    // Die beiden untersten Stufen sind für ältere Geräte: weniger Bildpunkte, zuletzt ganz ohne Schatten.
     const QUALITY = [
-        { px: 1.0,  shadow: 1024, bloom: false, smaa: false, sharp: 0 },
-        { px: 1.25, shadow: 2048, bloom: false, smaa: true,  sharp: 0.30 },
-        { px: 1.5,  shadow: 2048, bloom: true,  smaa: true,  sharp: 0.30 },
-        { px: 1.75, shadow: smallTouch ? 2048 : 4096, bloom: true, smaa: true, sharp: 0.28 },
-        { px: 2.0,  shadow: smallTouch ? 2048 : 4096, bloom: true, smaa: true, sharp: 0.25 }
+        { px: 0.7,  shadow: 0,    shEvery: 1, bloom: false, smaa: false, sharp: 0.30 },
+        { px: 0.85, shadow: 1024, shEvery: 4, bloom: false, smaa: false, sharp: 0.20 },
+        { px: 1.0,  shadow: 1024, shEvery: 3, bloom: false, smaa: false, sharp: 0 },
+        { px: 1.25, shadow: 2048, shEvery: 2, bloom: false, smaa: true,  sharp: 0.30 },
+        { px: 1.5,  shadow: 2048, shEvery: 2, bloom: true,  smaa: true,  sharp: 0.30 },
+        { px: 1.75, shadow: smallTouch ? 2048 : 4096, shEvery: 1, bloom: true, smaa: true, sharp: 0.28 },
+        { px: 2.0,  shadow: smallTouch ? 2048 : 4096, shEvery: 1, bloom: true, smaa: true, sharp: 0.25 }
     ];
     const Q_MAX = QUALITY.length - 1;
-    let qTier = smallTouch ? 2 : 3;              // Startstufe: Handy vorsichtiger als Rechner
+    let qTier = smallTouch ? 4 : 5;              // Startstufe: Handy vorsichtiger als Rechner
     try {
-        const stored = parseInt(localStorage.getItem('mt.quality'), 10);
+        // 'mt.quality2': seit es zwei Stufen darunter gibt; der alte Wert zählte zwei Stufen höher
+        const old = parseInt(localStorage.getItem('mt.quality'), 10);
+        const now = parseInt(localStorage.getItem('mt.quality2'), 10);
+        const stored = Number.isFinite(now) ? now : Number.isFinite(old) ? old + 2 : NaN;
         if (stored >= 0 && stored <= Q_MAX) qTier = stored;      // letzter Stand dieses Geräts
     } catch { /* privater Modus */ }
     /** Bildgröße, Auflösung und Blickwinkel an Fenster und Qualitätsstufe anpassen. */
@@ -3788,7 +3796,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // Hochkant (Handy) ist das Bild schmal: ein weiterer Blickwinkel zeigt wieder genug vom Gebiet.
         camera.fov = camera.aspect >= 1 ? 50 : Math.min(66, 50 + (1 - camera.aspect) * 32);
         camera.updateProjectionMatrix();
-        const ratio = Math.min(dpr, q.px);
+        const ratio = q.px < 1 ? q.px : Math.min(dpr, q.px);       // unter 1: bewusst gröber als der Bildschirm (alte Geräte)
         renderer.setPixelRatio(ratio);
         renderer.setSize(w, h);
         if (composer) {
@@ -3804,13 +3812,16 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const q = QUALITY[qTier];
         if (bloomPass) bloomPass.enabled = q.bloom;
         if (smaaPass) smaaPass.enabled = q.smaa;
-        snowU.uDetail.value = qTier === 0 ? 0 : 1;          // Windrippen und Glitzern: auf der kleinsten Stufe aus
-        if (sun.shadow.mapSize.x !== q.shadow) {
+        snowU.uDetail.value = qTier <= 2 ? 0 : 1;           // Windrippen und Glitzern: auf den kleinen Stufen aus
+        sun.castShadow = q.shadow > 0;
+        sun.shadow.autoUpdate = false;                       // neu gerechnet wird im Bildtakt, siehe animate (shEvery)
+        sun.shadow.needsUpdate = true;
+        if (q.shadow > 0 && sun.shadow.mapSize.x !== q.shadow) {
             sun.shadow.mapSize.set(q.shadow, q.shadow);
             if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }   // wird in neuer Größe neu angelegt
         }
         applySize();
-        try { localStorage.setItem('mt.quality', String(qTier)); } catch { /* privater Modus */ }
+        try { localStorage.setItem('mt.quality2', String(qTier)); } catch { /* privater Modus */ }
     };
     applyQuality();
     // Messung: mittlere Bildrate je Zwei-Sekunden-Fenster. Pausen (Tab im Hintergrund)
@@ -3818,21 +3829,30 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     //   unter 26 Bilder/s           → eine Stufe herunter
     //   über 52 Bilder/s, mehrfach  → eine Stufe hinauf – auf Probe: fällt die Bildrate danach
     //                                 unter 45, geht es zurück und der nächste Versuch wartet länger
-    let qFrames = 0, qTime = 0, qGood = 0, qNeed = 2, qWarm = 0, qProbe = 0;
+    // Gezählt werden auch einzelne LANGE Bilder (Ruckler): viele davon gelten wie eine zu niedrige Bildrate.
+    // Jeder Stufenwechsel ruckelt selbst – deshalb wird selten hinauf probiert, und eine Stufe, die zweimal
+    // nicht gehalten hat, bleibt für diese Sitzung tabu.
+    let qFrames = 0, qTime = 0, qGood = 0, qNeed = 4, qWarm = 0, qProbe = 0, qLong = 0, qCap = Q_MAX;
+    const qFails = new Array(Q_MAX + 1).fill(0);
     const qualityFrame = (rawDt) => {
-        if (document.visibilityState !== 'visible' || rawDt > 0.4) { qFrames = 0; qTime = 0; return; }
+        if (document.visibilityState !== 'visible' || rawDt > 0.4) { qFrames = 0; qTime = 0; qLong = 0; return; }
         if (qWarm < 4) { qWarm += rawDt; return; }
         qFrames++; qTime += rawDt;
+        if (rawDt > 0.05) qLong++;
         if (qTime < 2) return;
-        const fps = qFrames / qTime; qFrames = 0; qTime = 0;
+        const fps = qFrames / qTime, jerky = qLong / qFrames > 0.2;
+        qFrames = 0; qTime = 0; qLong = 0;
         const probing = qProbe > 0;
         if (probing) qProbe--;
-        if (qTier > 0 && (fps < 26 || (probing && fps < 45))) {
-            if (probing) { qNeed = Math.min(64, qNeed * 3); qProbe = 0; }   // der Schritt hinauf war zu viel
+        if (qTier > 0 && (fps < 30 || jerky || (probing && fps < 45))) {
+            if (probing) {                                              // der Schritt hinauf war zu viel
+                qNeed = Math.min(150, qNeed * 4); qProbe = 0;
+                if (++qFails[qTier] >= 2) qCap = qTier - 1;
+            }
             qTier--; qGood = 0; qWarm = 3; applyQuality();
-        } else if (fps > 52 && qTier < Q_MAX && !probing) {
+        } else if (fps > 54 && qTier < Math.min(Q_MAX, qCap) && !probing) {
             if (++qGood >= qNeed) { qTier++; qGood = 0; qWarm = 3; qProbe = 3; applyQuality(); }
-        } else if (fps <= 52) qGood = 0;
+        } else if (fps <= 54) qGood = 0;
     };
 
     // Startblick auf das Resort: Ziel zwischen Talstation und Gipfel, Distanz nach Kartengröße
@@ -6375,10 +6395,12 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     };
 
     let raf=0; const clock=new THREE.Clock(); let lastT=0;
+    let shadowTick = 0;
+    let skipRender = false;   // nur beim Entwickeln: Bild auslassen, um die Rechenzeit je Bild zu messen
     if (import.meta.env.DEV && window.__mtCam) {   // nur beim Entwickeln: Tageszeit und Qualitätsstufe stellen
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
-            guests: () => guestPool, villagesNow: () => villages,
+            guests: () => guestPool, villagesNow: () => villages, noRender: (v) => { skipRender = !!v; },
             walkers: () => _dbgWalkers, buildPiste: (pts) => buildPistePath(pts),
             // Gäste und Anlagen vorspulen (Prüfungen): n Schritte zu je dt Sekunden; `each` wird nach jedem Schritt gerufen
             fastForward: (n, dt, each) => { let tt = clock.getElapsedTime(); for (let i = 0; i < n; i++) { tt += dt; for (const u of updaters) u(tt); updateGuests(tt, dt); if (each) each(i); } },
@@ -6394,6 +6416,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // Nie rückwärts: eine negative Zeitspanne ließe Gäste „vor" den Anfang ihrer Strecke laufen.
         const dt=Math.max(0, Math.min(0.1, rawDt)); lastT=t;
         qualityFrame(rawDt);   // Bildrate messen, Qualität bei Bedarf anpassen
+        if (sun.castShadow && (++shadowTick % QUALITY[qTier].shEvery === 0)) sun.shadow.needsUpdate = true;
         playSeconds += dt;
         const dayNow = applyDaylight(t);
         if (clouds.userData.update) clouds.userData.update(dt);
@@ -6444,7 +6467,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         }
         sp.needsUpdate=true;
         updateGustVeil(t);
-        if (composer) {
+        if (skipRender) { /* nur rechnen (Zeitmessung beim Entwickeln) */ }
+        else if (composer) {
             if (gradePass) gradePass.uniforms.uTime.value = t;
             if (bloomPass && bloomPass.enabled) {
                 // Nah am Gelände strahlten Schneekappen und Dächer als weiße Höfe aus. Das
@@ -6768,13 +6792,27 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         return rec;
     };
     /** Schwierigkeit einer Strecke aus ihrem Durchschnittsgefälle (wie im 2D-Spiel). */
+    /**
+     * Schwierigkeit einer Piste. Früher zählte das mittlere Gefälle der ganzen Strecke – ein langer flacher
+     * Auslauf machte dann jede Abfahrt blau, egal wie steil ihr Hang war. Jetzt entscheidet das steilste
+     * Fünftel: die Strecke wird in Stücke von rund sechs Kacheln zerlegt, und das Gefälle, das nur von den
+     * steilsten 20 % übertroffen wird, bestimmt die Farbe (Grenzen wie bisher: 35 % rot, 55 % schwarz).
+     */
     const pisteDifficulty = (pts) => {
-        let sumRun = 0, sumDrop = 0;
+        // Strecke in Schritten von einer Kachel abtasten
+        const hs = [];
         for (let k = 0; k < pts.length - 1; k++) {
-            sumDrop += Math.abs((yAtSmooth(pts[k].gx, pts[k].gy) - yAtSmooth(pts[k + 1].gx, pts[k + 1].gy)) / hScale);
-            sumRun += Math.hypot(pts[k].gx - pts[k + 1].gx, pts[k].gy - pts[k + 1].gy);
+            const a = pts[k], b = pts[k + 1], n = Math.max(1, Math.round(Math.hypot(a.gx - b.gx, a.gy - b.gy)));
+            for (let i = 0; i < n; i++) hs.push(yAtSmooth(a.gx + (b.gx - a.gx) * i / n, a.gy + (b.gy - a.gy) * i / n) / hScale);
         }
-        const grad = (sumDrop / (sumRun || 1)) * 10 / 1.5;
+        const last = pts[pts.length - 1];
+        hs.push(yAtSmooth(last.gx, last.gy) / hScale);
+        const W = Math.min(6, hs.length - 1);
+        if (W < 1) return 'blue';
+        const grads = [];
+        for (let i = 0; i + W < hs.length; i++) grads.push(Math.abs(hs[i] - hs[i + W]) / W * 10 / 1.5);
+        grads.sort((p, q) => p - q);
+        const grad = grads[Math.min(grads.length - 1, Math.floor(grads.length * 0.8))];
         return grad >= 55 ? 'black' : grad >= 35 ? 'red' : 'blue';
     };
     // Initiale Abfahrt = Piste 1 (läuft durchs selbe System wie gebaute Pisten)
