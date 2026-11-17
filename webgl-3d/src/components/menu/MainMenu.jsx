@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import Wardrobe from './Wardrobe.jsx';
 import { localSaveIndex, remoteSaveIndex, agoText } from '../../savegames';
 import {
     CAMPAIGN_LEVELS,
@@ -186,8 +187,7 @@ const MainMenu = ({ onStartLevel }) => {
 
     const updateSandbox = (key, value) => setSandbox(prev => ({ ...prev, [key]: value }));
 
-    // mode: '2d' oder '3d' – der 3D-Knopf startete bisher ebenfalls das 2D-Spiel, weil die Angabe verloren ging
-    const startSandbox = (mode = '2d') => {
+    const startSandbox = () => {
         onStartLevel({
             id: 'sandbox',
             name: 'Sandbox',
@@ -215,7 +215,7 @@ const MainMenu = ({ onStartLevel }) => {
             },
             theme: SANDBOX_DEFAULTS.theme,
             objectives: []
-        }, mode);
+        });
     };
 
     const slider = (label, key, min, max, step = 1, format = (v) => v) => (
@@ -253,6 +253,7 @@ const MainMenu = ({ onStartLevel }) => {
             <div className="mm-modes">
                 <button className={`mm-mode ${tab === 'campaign' ? 'on' : ''}`} onClick={() => setTab('campaign')}>Kampagne</button>
                 <button className={`mm-mode ${tab === 'sandbox' ? 'on' : ''}`} onClick={() => setTab('sandbox')}>Sandbox</button>
+                <button className={`mm-mode ${tab === 'rider' ? 'on' : ''}`} onClick={() => setTab('rider')}>Fahrer</button>
             </div>
 
             {tab === 'campaign' && (
@@ -317,20 +318,19 @@ const MainMenu = ({ onStartLevel }) => {
                                     <div className="mm-sign-actions">
                                         {saves[selectedLevel.id] ? (
                                             <>
-                                                <button className="mm-go" onClick={() => onStartLevel(selectedLevel, '3d')}>Fortsetzen</button>
+                                                <button className="mm-go" onClick={() => onStartLevel(selectedLevel)}>Fortsetzen</button>
                                                 {/* Erst nachfragen: der Stand wird dabei verworfen */}
                                                 <button className={`mm-go alt ${confirmFresh === selectedLevel.id ? 'warn' : ''}`}
                                                     onClick={() => {
-                                                        if (confirmFresh === selectedLevel.id) onStartLevel(selectedLevel, '3d', { fresh: true });
+                                                        if (confirmFresh === selectedLevel.id) onStartLevel(selectedLevel, { fresh: true });
                                                         else setConfirmFresh(selectedLevel.id);
                                                     }}>
                                                     {confirmFresh === selectedLevel.id ? 'Stand löschen?' : 'Neu beginnen'}
                                                 </button>
                                             </>
                                         ) : (
-                                            <button className="mm-go" onClick={() => onStartLevel(selectedLevel, '3d')}>Starten</button>
+                                            <button className="mm-go" onClick={() => onStartLevel(selectedLevel)}>Starten</button>
                                         )}
-                                        <button className="mm-go alt slim" onClick={() => onStartLevel(selectedLevel, '2d')}>2D</button>
                                     </div>
                                 </div>
                             </aside>
@@ -338,6 +338,8 @@ const MainMenu = ({ onStartLevel }) => {
                     })()}
                 </div>
             )}
+
+            {tab === 'rider' && <Wardrobe />}
 
             {tab === 'sandbox' && (
                 <div className="mm-sandbox-wrap">
@@ -407,14 +409,9 @@ const MainMenu = ({ onStartLevel }) => {
                             <div className="mm-sandbox-info">
                                 <p>Im Sandbox-Modus gibt es keine Aufgaben — baue frei dein Traum-Skigebiet in deiner selbst generierten Landschaft.</p>
                             </div>
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                                <button className="mm-start-btn" style={{ flex: 2 }} onClick={() => startSandbox('2d')}>
-                                    ▶ Spielen
-                                </button>
-                                <button className="mm-start-btn" style={{ flex: 1, background: 'linear-gradient(135deg, #7c3aed, #a855f7)', boxShadow: '0 6px 24px rgba(168,85,247,0.35)' }} onClick={() => startSandbox('3d')}>
-                                    🧊 3D
-                                </button>
-                            </div>
+                            <button className="mm-start-btn" onClick={() => startSandbox()}>
+                                ▶ Spielen
+                            </button>
                         </div>
                     </div>
                     </div>

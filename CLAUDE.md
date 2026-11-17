@@ -1,19 +1,18 @@
 # Mountain Tycoon – Hinweise für Claude-Sitzungen
 
-Skigebiets-Simulation im Browser (React 19 + Vite; 2D auf Canvas, 3D mit three.js).
+Skigebiets-Simulation im Browser (React 19 + Vite, 3D mit three.js). Den früheren 2D-Modus gibt es nicht mehr.
 Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
 
 ## Aufbau
-- `webgl-3d/` – **das aktuelle Spiel** (enthält den 2D- und den 3D-Modus). Hier wird entwickelt.
-  - `src/App.jsx` – App-Wurzel (Anmeldung → Hauptmenü ↔ Spiel), das 2D-Spiel (`Game`) und sein HUD
-  - `src/engine/SkiResortManager.js` – Simulation: Gäste-KI, Lifte, Pisten, Fahrzeuge, Wirtschaft
+- `webgl-3d/` – **das Spiel**. Hier wird entwickelt.
+  - `src/App.jsx` – App-Wurzel (Anmeldung → Hauptmenü → Ladebildschirm → Spiel)
   - `src/engine/terrainGen.js` – Landschaftserzeugung (Spielfeld samt Umland), siehe „Landschaft" unten
-  - `src/components/game/` – 2D-Renderer (`WorldCanvas.jsx`, `DrawingUtils.js`)
   - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `SnowSurface.js`, `Surround3D.js`,
-    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`, `SkiFigure.js`, `SkiSound.js`)
+    `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`, `SkiFigure.js`, `SkiOutfits.js`,
+    `SkiSound.js`). Die ganze Simulation (Gäste, Lifte, Wirtschaft) steckt in `Scene3D.js`.
   - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
-  - `src/components/menu/` – Hauptmenü und Ladebildschirm
-  - `src/constants/` – Gebäude, Gäste, Lifte, Pisten, Kampagne (`campaign.js`: Level, Aufgaben, Fortschritt)
+  - `src/components/menu/` – Hauptmenü (Kampagne, Sandbox, Fahrer-Garderobe `Wardrobe.jsx`) und Ladebildschirm
+  - `src/constants/campaign.js` – Level, Aufgaben, Fortschritt
   - `src/auth/` – Anmeldung: Anmeldeseite, Konto-Leiste, Verwaltung, Fortschritts-Abgleich
   - `worker/` – Anmeldeserver (Cloudflare Worker + KV), siehe `worker/README.md`
   - `tools/` – Prüfskripte für Node: `authtest.mjs` (Anmeldeserver), `relief.mjs` (Landschaft als Bild +
@@ -92,6 +91,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Oberkörper, Arme, `sit` für den Sessel) und hält dabei die Ski flach; `setCarry` schultert die Ski.
   `roll`/`twist` richten den Oberkörper gegen die Schräglage der Beine auf (Hüftknick in der Kurve). Aussehen:
   taillierte Jacke mit Schulterpolstern, dunkler Helm mit Zierstreifen, helle Skischuhe, kleiner Rucksack.
+- Outfits: `SkiOutfits.js` – je Outfit ein Satz Farben und Formschalter (Kopfbedeckung, Brille, Jacke/Pullover/
+  Einteiler, Streifen, Rucksack), von heute bis 1935. `makePlayerSkier(outfit)` baut die Figur daraus; gewählt wird
+  im Hauptmenü unter „Fahrer" (`Wardrobe.jsx`, drehende Vorschau), gespeichert in `localStorage['mt.outfit']`.
+  Ein neues Outfit ist nur ein weiterer Eintrag in `OUTFITS`.
 - Wer steht, bleibt stehen (auch am Hang) – los geht es erst mit „vorwärts".
 - Fahrgefühl: Schräglage und Kniebeuge wachsen mit dem Tempo, beim Kantenwechsel entlastet die Figur kurz
   (`hop`), nach Sprüngen federt sie ab und wirft eine Schneewolke (`burstDust`). Die Kamera weitet mit dem Tempo
@@ -225,7 +228,7 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (`GET/PUT /save`, Übersicht `GET /saves`). Es gilt der jüngere Stand; „Neu beginnen" hinterlässt einen
   Löschvermerk. Hochgeladen wird höchstens alle 90 s und beim Verlassen – das schont das Schreibkontingent.
 - Im Menü: „Fortsetzen" / „Neu beginnen" (`MainMenu.jsx`); geladen wird während des Ladebildschirms (`App.jsx`).
-- Die Sandbox und der 2D-Modus haben keinen Spielstand.
+- Die Sandbox hat keinen Spielstand.
 
 ## Veröffentlichen
 - Jeder Push auf `main` baut `webgl-3d` und veröffentlicht es über GitHub Actions auf GitHub Pages
@@ -248,6 +251,6 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Login (so ist es bei `npm run dev`). Die Adresse für die veröffentlichte Seite steht in `webgl-3d/.env.production`.
 - Gestaltung wie im Hauptmenü: dunkel und ruhig, Foto-Hintergründe, helle Schrift (`#e8eef6`), gesperrte Versalien
   für kleine Beschriftungen, flache Flächen – kein Leuchten, keine bunten Verläufe auf Bedienelementen.
-  Im Spiel-HUD Glas-Optik (`App.css`). Texte im Spiel auf Deutsch.
-- Große Dateien (`App.jsx`, `SkiResortManager.js`, `Scene3D.js`) gezielt ändern, nicht neu schreiben.
+  Im Spiel-HUD Glas-Optik. Texte im Spiel auf Deutsch.
+- Große Dateien (`Scene3D.js`, `Buildings3D.js`, `World3D.jsx`) gezielt ändern, nicht neu schreiben.
 - Keine Sicherungskopien wie `datei.js.bak` anlegen – dafür gibt es git.

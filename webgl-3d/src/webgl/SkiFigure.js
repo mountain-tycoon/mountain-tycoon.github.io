@@ -8,6 +8,7 @@
 // flach bleiben und die Füße unter der Hüfte stehen.
 // ============================================================
 import * as THREE from 'three';
+import { OUTFITS } from './SkiOutfits.js';
 
 const THIGH = 0.23, SHIN = 0.21, HIP_Y = 0.52;
 export const PLAYER_SCALE = 1.06;
@@ -21,24 +22,27 @@ const limb = (r, len, material) => {
     return m;
 };
 
-export function makePlayerSkier() {
+/** @param o Outfit aus SkiOutfits.js (Farben und Formschalter); ohne Angabe das erste. */
+export function makePlayerSkier(o = OUTFITS[0]) {
     const g = new THREE.Group();
     const body = new THREE.Group(); g.add(body);          // sinkt mit gebeugten Knien ab
+    const wool = o.torso === 'sweater';
     const M = {
-        jacket: mat(0xd9482b, 0.6), panel: mat(0x1d2530, 0.7), trim: mat(0xf3efe6, 0.55), pants: mat(0x222c3a, 0.78),
-        knee: mat(0x151b25, 0.8), boot: mat(0xe9e6df, 0.4, 0.1), bootDark: mat(0x1d2128, 0.5, 0.2), glove: mat(0x15181d, 0.8), skin: mat(0xe2b594, 0.6),
-        helmet: mat(0x20252d, 0.32, 0.15), helmetTrim: mat(0xd9482b, 0.45),
-        lens: new THREE.MeshStandardMaterial({ color: 0xf7a21b, roughness: 0.1, metalness: 0.75, emissive: 0x8a4f05, emissiveIntensity: 0.3 }),
-        strap: mat(0xf3efe6, 0.7), ski: mat(0x1f5fbf, 0.35, 0.1), skiTop: mat(0xf3efe6, 0.4), skiBase: mat(0x10131a, 0.5), pole: mat(0x9aa3ad, 0.35, 0.6), bind: mat(0x111318, 0.6),
-        pack: mat(0x2a3442, 0.8)
+        jacket: mat(o.jacket, wool ? 0.95 : 0.6), panel: mat(o.panel, 0.7), trim: mat(o.trim, wool ? 0.95 : 0.55), pants: mat(o.pants, 0.78),
+        knee: mat(o.knee, 0.8), boot: mat(o.boot, 0.4, 0.1), bootDark: mat(o.bootDark, 0.5, 0.2), glove: mat(o.glove, 0.8), skin: mat(0xe2b594, 0.6),
+        helmet: mat(o.headCol, o.head === 'helmet' ? 0.32 : 0.95, o.head === 'helmet' ? 0.15 : 0), helmetTrim: mat(o.headTrim, 0.45),
+        lens: new THREE.MeshStandardMaterial({ color: o.lens, roughness: 0.1, metalness: 0.75, emissive: new THREE.Color(o.lens).multiplyScalar(0.35), emissiveIntensity: 0.3 }),
+        strap: mat(o.strap, 0.7), ski: mat(o.ski, 0.35, 0.1), skiTop: mat(o.skiTop, 0.4), skiBase: mat(0x10131a, 0.5), pole: mat(o.pole, 0.35, 0.6), bind: mat(0x111318, 0.6),
+        pack: mat(o.packCol, 0.8), hair: mat(o.hair, 0.9)
     };
+    const fat = o.baggy ? 1.22 : o.torso === 'suit' ? 0.9 : 1;       // weite Parkhose … enger Rennanzug
 
     // ----- Beine: Hüfte -> Knie -> Knöchel (Schuh + Ski) -----
     const mkLeg = (x) => {
         const hip = new THREE.Group(); hip.position.set(x, HIP_Y, 0);
-        const thigh = limb(0.068, THIGH + 0.03, M.pants); thigh.scale.set(1, 1, 1.12); hip.add(thigh);
+        const thigh = limb(0.068 * fat, THIGH + 0.03, M.pants); thigh.scale.set(1, 1, 1.12); hip.add(thigh);
         const knee = new THREE.Group(); knee.position.y = -THIGH; hip.add(knee);
-        const shin = limb(0.054, SHIN, M.pants); shin.scale.set(1, 1, 1.1); knee.add(shin);
+        const shin = limb(0.054 * fat, SHIN, M.pants); shin.scale.set(1, 1, 1.1); knee.add(shin);
         const pad = new THREE.Mesh(new THREE.SphereGeometry(0.058, 10, 8), M.knee);
         pad.scale.set(1, 0.85, 0.75); pad.position.set(0, -0.005, 0.03); knee.add(pad);
         const ankle = new THREE.Group(); ankle.position.y = -SHIN + 0.075; knee.add(ankle);
@@ -88,39 +92,86 @@ export function makePlayerSkier() {
     chest.scale.set(1.3, 1, 0.84); chest.castShadow = true; torso.add(chest);
     const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.092, 0.094, 0.05, 18), M.panel);       // dunkler Saum
     hem.position.y = 0.055; hem.scale.set(1.31, 1, 0.85); torso.add(hem);
-    const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.101, 0.03, 18), M.trim);     // Bruststreifen
-    stripe.position.y = 0.2; stripe.scale.set(1.305, 1, 0.845); torso.add(stripe);
-    for (const sx of [-1, 1]) {                                                                   // Schulterpolster
+    // Querstreifen auf der Brust (Norwegermuster, Rennstreifen …)
+    for (let b = 0; b < (o.bands || 0); b++) {
+        const y = 0.2 - (b - ((o.bands - 1) / 2)) * 0.05;
+        const rr = 0.098 + (y - 0.17) * 0.12 + 0.004;
+        const stripe = new THREE.Mesh(new THREE.CylinderGeometry(rr + 0.002, rr, o.bands > 1 ? 0.02 : 0.03, 18), M.trim);
+        stripe.position.y = y; stripe.scale.set(1.305, 1, 0.845); torso.add(stripe);
+    }
+    if (o.torso === 'jacket') for (const sx of [-1, 1]) {                                         // Schulterpolster
         const cap = new THREE.Mesh(new THREE.SphereGeometry(0.058, 12, 10), M.panel);
         cap.scale.set(1.05, 0.8, 0.95); cap.position.set(sx * 0.15, 0.292, 0); torso.add(cap);
     }
-    const zip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.25, 0.01), M.panel);
-    zip.position.set(0, 0.19, 0.089); torso.add(zip);
-    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.056, 0.066, 0.06, 12), M.panel);
-    collar.position.y = 0.335; torso.add(collar);
-    const pack = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.1, 4, 10), M.pack);             // kleiner Rucksack
-    pack.scale.set(1.25, 1, 0.6); pack.position.set(0, 0.2, -0.105); pack.castShadow = true; torso.add(pack);
-    for (const sx of [-1, 1]) {
-        const strapP = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.2, 0.012), M.pack);
-        strapP.position.set(sx * 0.07, 0.24, 0.083); strapP.rotation.x = -0.12; torso.add(strapP);
+    if (o.torso !== 'sweater') {
+        const zip = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.25, 0.01), M.panel);
+        zip.position.set(0, 0.19, 0.089); torso.add(zip);
+    }
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(wool ? 0.06 : 0.056, 0.066, wool ? 0.075 : 0.06, 12), wool ? M.trim : M.panel);
+    collar.position.y = 0.335; torso.add(collar);                                                 // Kragen bzw. Rollkragen
+    if (o.pack) {
+        const pack = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.1, 4, 10), M.pack);         // kleiner Rucksack
+        pack.scale.set(1.25, 1, 0.6); pack.position.set(0, 0.2, -0.105); pack.castShadow = true; torso.add(pack);
+        for (const sx of [-1, 1]) {
+            const strapP = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.2, 0.012), M.pack);
+            strapP.position.set(sx * 0.07, 0.24, 0.083); strapP.rotation.x = -0.12; torso.add(strapP);
+        }
     }
     const head = new THREE.Group(); head.position.y = 0.415; torso.add(head);
     const face = new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 12), M.skin); face.scale.set(0.95, 1.05, 1); head.add(face);
-    // Helm: Schale bis über die Ohren, vorn offen fürs Gesicht; Zierstreifen und Lüftungsschlitze
-    const shell = new THREE.Mesh(new THREE.SphereGeometry(0.086, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.6), M.helmet);
-    shell.position.y = 0.008; shell.castShadow = true; head.add(shell);
-    const back = new THREE.Mesh(new THREE.SphereGeometry(0.0855, 20, 10, Math.PI * 0.62, Math.PI * 1.76, Math.PI * 0.5, Math.PI * 0.3), M.helmet);
-    back.position.y = 0.008; head.add(back);                                                      // Nacken und Ohren, Gesicht bleibt frei
-    const ridge = new THREE.Mesh(new THREE.TorusGeometry(0.087, 0.008, 6, 20, Math.PI), M.helmetTrim);
-    ridge.rotation.y = Math.PI / 2; ridge.position.y = 0.008; head.add(ridge);                    // Streifen über den Scheitel
-    const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.0875, 0.0875, 0.03, 20), M.strap);
-    strap.position.y = 0.012; head.add(strap);                                                    // Brillenband
-    const frame = new THREE.Mesh(new THREE.SphereGeometry(0.0745, 14, 8, Math.PI * 0.17, Math.PI * 0.66, Math.PI * 0.33, Math.PI * 0.26), M.panel);
-    frame.position.set(0, 0.004, 0.012); head.add(frame);                                         // Brillenrahmen
-    const lens = new THREE.Mesh(new THREE.SphereGeometry(0.076, 14, 8, Math.PI * 0.2, Math.PI * 0.6, Math.PI * 0.36, Math.PI * 0.2), M.lens);
-    lens.position.set(0, 0.004, 0.013); head.add(lens);
-    const chin = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.06, 0.012), M.panel);              // Kinnriemen
-    for (const sx of [-1, 1]) { const c = chin.clone(); c.position.set(sx * 0.06, -0.045, 0.02); c.rotation.z = sx * 0.35; head.add(c); }
+    if (o.head === 'helmet') {
+        // Helm: Schale bis über die Ohren, vorn offen fürs Gesicht; Zierstreifen und Kinnriemen
+        const shell = new THREE.Mesh(new THREE.SphereGeometry(0.086, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.6), M.helmet);
+        shell.position.y = 0.008; shell.castShadow = true; head.add(shell);
+        const back = new THREE.Mesh(new THREE.SphereGeometry(0.0855, 20, 10, Math.PI * 0.62, Math.PI * 1.76, Math.PI * 0.5, Math.PI * 0.3), M.helmet);
+        back.position.y = 0.008; head.add(back);
+        const ridge = new THREE.Mesh(new THREE.TorusGeometry(0.087, 0.008, 6, 20, Math.PI), M.helmetTrim);
+        ridge.rotation.y = Math.PI / 2; ridge.position.y = 0.008; head.add(ridge);
+        const chin = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.06, 0.012), M.panel);
+        for (const sx of [-1, 1]) { const c = chin.clone(); c.position.set(sx * 0.06, -0.045, 0.02); c.rotation.z = sx * 0.35; head.add(c); }
+    } else {
+        // Haare unter Mütze oder Stirnband
+        const hair = new THREE.Mesh(new THREE.SphereGeometry(0.076, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.56), M.hair);
+        hair.position.set(0, 0.004, -0.008); head.add(hair);
+        if (o.head === 'beanie' || o.head === 'bobble') {
+            const cap = new THREE.Mesh(new THREE.SphereGeometry(0.082, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), M.helmet);
+            cap.scale.set(1, o.head === 'beanie' ? 1.2 : 1.05, 1); cap.position.y = 0.02; cap.castShadow = true; head.add(cap);
+            const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.085, 0.035, 16), M.helmetTrim);
+            brim.position.y = 0.03; head.add(brim);
+            if (o.head === 'bobble') {
+                const pom = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), M.helmetTrim);
+                pom.position.y = 0.118; head.add(pom);
+            }
+        } else if (o.head === 'headband') {
+            const band = new THREE.Mesh(new THREE.CylinderGeometry(0.079, 0.079, 0.04, 16), M.helmet);
+            band.position.y = 0.03; head.add(band);
+        } else {
+            // Schirmmütze mit Ohrenklappen
+            const cap = new THREE.Mesh(new THREE.SphereGeometry(0.08, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.45), M.helmet);
+            cap.position.y = 0.022; cap.castShadow = true; head.add(cap);
+            const peak = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.008, 12, 1, false, -Math.PI / 2, Math.PI), M.helmetTrim);
+            peak.position.set(0, 0.03, 0.055); head.add(peak);
+            for (const sx of [-1, 1]) { const flap = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.06, 0.06), M.helmet); flap.position.set(sx * 0.074, -0.005, -0.005); head.add(flap); }
+        }
+    }
+    if (o.eyes === 'goggles') {
+        const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.0875, 0.0875, 0.03, 20), M.strap);
+        strap.position.y = 0.012; head.add(strap);                                                // Brillenband
+        const frame = new THREE.Mesh(new THREE.SphereGeometry(0.0745, 14, 8, Math.PI * 0.17, Math.PI * 0.66, Math.PI * 0.33, Math.PI * 0.26), M.panel);
+        frame.position.set(0, 0.004, 0.012); head.add(frame);
+        const lens = new THREE.Mesh(new THREE.SphereGeometry(0.076, 14, 8, Math.PI * 0.2, Math.PI * 0.6, Math.PI * 0.36, Math.PI * 0.2), M.lens);
+        lens.position.set(0, 0.004, 0.013); head.add(lens);
+    } else if (o.eyes === 'shades') {
+        // Sonnenbrille: zwei Gläser, Steg, Bügel
+        for (const sx of [-1, 1]) {
+            const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.008, 10), M.lens);
+            glass.rotation.x = Math.PI / 2; glass.scale.set(1.25, 1, 1); glass.position.set(sx * 0.028, 0.008, 0.066); head.add(glass);
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.006, 0.07), M.strap);
+            arm.position.set(sx * 0.066, 0.01, 0.028); head.add(arm);
+        }
+        const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.005, 0.005), M.strap);
+        bridge.position.set(0, 0.012, 0.068); head.add(bridge);
+    }
 
     const mkArm = (x) => {
         const sh = new THREE.Group(); sh.position.set(x, 0.285, 0);

@@ -1,13 +1,13 @@
 # Mountain Tycoon
 
 Skigebiets-Simulation im Browser: Lifte und Pisten planen, Hütten und Hotels bauen, Gäste glücklich
-machen – als Kampagne durch neun Länder oder frei im Sandbox-Modus, wahlweise in 2D oder 3D.
+machen – als Kampagne durch elf Gebiete oder frei im Sandbox-Modus, in 3D.
 
 **Spielen:** https://mountain-tycoon.github.io/ (mit Konto – registrieren, freischalten lassen, anmelden)
 
 ## Am Handy spielen
 
-Der 3D-Modus läuft auch auf dem Handy und dem Tablet:
+Das Spiel läuft auch auf dem Handy und dem Tablet:
 
 - **Ein Finger** verschiebt die Karte, **zwei Finger** zoomen und drehen, beide gemeinsam hoch oder runter
   neigt den Blick.
@@ -23,7 +23,8 @@ anklicken oder antippen, an der es losgehen soll. Am Rechner lenken A/D oder die
 bremsen, und wer das Bild gedrückt hält, fährt Schuss oder geht. Unten an einer Talstation steigt man per Knopf
 in die nächste Kabine und kann sich während der Bergfahrt umsehen. Kicker, Funpark und Halfpipe lassen sich
 selbst befahren – in der Luft drehen die Lenktasten, „vorwärts" und Bremsen sind Salto vorwärts und rückwärts, auf der Rennstrecke läuft die Zeit mit, und an einer Hütte kann man
-einkehren (E) und die Aussicht genießen. Dazu gibt es Fahrgeräusche – abschaltbar über „Ton an/aus". „Beenden" (oder Esc) führt zurück zum Bauen.
+einkehren (E) und die Aussicht genießen. Im Hauptmenü unter „Fahrer" wählt man das Outfit – vom Skipionier
+von 1935 über den Neon-Einteiler bis zur heutigen Ausrüstung. Dazu gibt es Fahrgeräusche – abschaltbar über „Ton an/aus". „Beenden" (oder Esc) führt zurück zum Bauen.
 
 ## Spielstand
 
@@ -44,7 +45,7 @@ Schneegrenze wandert mit dem Wetter; Sonnenhänge apern früher aus, an Steilfla
 
 | Ordner | Inhalt |
 | --- | --- |
-| `webgl-3d/` | Das aktuelle Spiel (React + Vite + three.js), inklusive Anmeldung (`src/auth/`) und Anmeldeserver (`worker/`) |
+| `webgl-3d/` | Das Spiel (React + Vite + three.js), inklusive Anmeldung (`src/auth/`) und Anmeldeserver (`worker/`) |
 | Projektwurzel (`src/` …) | Ältere 2D-Fassung, nur noch Archiv |
 | `.github/workflows/` | Automatisches Bauen und Veröffentlichen |
 

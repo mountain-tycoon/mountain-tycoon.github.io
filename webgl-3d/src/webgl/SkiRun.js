@@ -9,6 +9,7 @@
 // ============================================================
 import * as THREE from 'three';
 import { makePlayerSkier, PLAYER_SCALE } from './SkiFigure.js';
+import { getOutfitId, outfitById } from './SkiOutfits.js';
 import { createSkiSound } from './SkiSound.js';
 
 const G = 8.4;              // Hangabtrieb
@@ -38,7 +39,7 @@ export function createSkiRun(deps) {
     let onState = deps.onState || null;
 
     let on = false;
-    let mesh = null;
+    let mesh = null, meshOutfit = '';
     const pos = new THREE.Vector3();
     let th = 0;                 // Fahrtrichtung: (sin th, cos th) in der Ebene
     let v = 0;                  // Tempo entlang der Fahrtrichtung
@@ -726,7 +727,8 @@ export function createSkiRun(deps) {
             const x = clamp(wx, -half + 3, half - 3), z = clamp(wz, -half + 3, half - 3);
             const why = blockedAt(x, z);
             if (why) return why === 'water' ? 'Im Wasser kann man nicht starten' : why === 'building' ? 'Hier steht ein Gebäude' : 'Hier ist kein Platz – such dir eine freie Stelle';
-            if (!mesh) mesh = makePlayerSkier();
+            // Figur im gewählten Outfit (Garderobe im Hauptmenü)
+            if (!mesh || meshOutfit !== getOutfitId()) { meshOutfit = getOutfitId(); mesh = makePlayerSkier(outfitById(meshOutfit)); }
             resetPose();
             place(x, z, 0); th = camTh = fallLine(x, z);
             const dx = Math.sin(th), dz = Math.cos(th);
