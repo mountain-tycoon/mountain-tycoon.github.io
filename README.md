@@ -23,8 +23,8 @@ anklicken oder antippen, an der es losgehen soll. Am Rechner lenken A/D oder die
 bremsen, und wer das Bild gedrückt hält, fährt Schuss oder geht. Unten an einer Talstation steigt man per Knopf
 in die nächste Kabine und kann sich während der Bergfahrt umsehen. Kicker, Funpark und Halfpipe lassen sich
 selbst befahren – in der Luft drehen die Lenktasten, „vorwärts" und Bremsen sind Salto vorwärts und rückwärts, auf der Rennstrecke läuft die Zeit mit, und an einer Hütte kann man
-einkehren (E) und die Aussicht genießen. Im Hauptmenü unter „Fahrer" wählt man das Outfit – vom Skipionier
-von 1935 über den Neon-Einteiler bis zur heutigen Ausrüstung. Dazu gibt es Fahrgeräusche – abschaltbar über „Ton an/aus". „Beenden" (oder Esc) führt zurück zum Bauen.
+einkehren (E) und die Aussicht genießen. Im Hauptmenü unter „Fahrer" kleidet man die Figur ein – ganze Outfits vom
+Skipionier von 1935 über den Neon-Einteiler bis heute, oder Kopf, Oberteil, Hose, Schuhe und Ski frei gemischt. Dazu gibt es Fahrgeräusche – abschaltbar über „Ton an/aus". „Beenden" (oder Esc) führt zurück zum Bauen.
 
 ## Spielstand
 

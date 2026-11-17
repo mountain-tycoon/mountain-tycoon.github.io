@@ -1,17 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { makePlayerSkier } from '../../webgl/SkiFigure.js';
-import { OUTFITS, getOutfitId, setOutfitId, outfitById } from '../../webgl/SkiOutfits.js';
+import { OUTFITS, SLOTS, getSelection, setSelection, presetSelection, composeOutfit, selectionKey, outfitById } from '../../webgl/SkiOutfits.js';
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
+/** Farbfelder, die ein Teil am besten zeigen. */
+const SWATCH = {
+    head: (o) => [o.headCol, o.headTrim], top: (o) => [o.jacket, o.trim], pants: (o) => [o.pants, o.knee],
+    boots: (o) => [o.boot, o.bootDark], ski: (o) => [o.ski, o.skiTop]
+};
+const FIT = { loose: 'weit', tight: 'eng' };
 
 /**
- * Garderobe: Outfit des eigenen Fahrers wählen (für „Selbst fahren").
- * Links dreht sich die Figur im gewählten Outfit, rechts stehen die Outfits von heute bis 1935.
+ * Garderobe: den eigenen Fahrer einkleiden (für „Selbst fahren").
+ * Oben ganze Outfits von heute bis 1935, darunter jedes Teil einzeln – alles frei kombinierbar.
+ * Links dreht sich die Figur; der Fahrtwind zeigt, wie weit die Kleidung sitzt.
  */
 const Wardrobe = () => {
     const canvasRef = useRef(null);
-    const [sel, setSel] = useState(() => getOutfitId());
+    const [sel, setSel] = useState(() => getSelection());
     const selRef = useRef(sel);
 
     useEffect(() => {
@@ -39,17 +46,19 @@ const Wardrobe = () => {
         window.addEventListener('resize', size);
         const t0 = performance.now();
         const frame = () => {
-            if (shown !== selRef.current) {
-                shown = selRef.current;
+            const key = selectionKey(selRef.current);
+            if (shown !== key) {
+                shown = key;
                 if (figure) { pivot.remove(figure); figure.traverse(o => { o.geometry?.dispose?.(); o.material?.dispose?.(); }); }
-                figure = makePlayerSkier(outfitById(shown));
+                figure = makePlayerSkier(composeOutfit(selRef.current));
                 pivot.add(figure);
             }
             const t = (performance.now() - t0) / 1000;
             pivot.rotation.y = 0.6 + t * 0.6;
-            // leichtes Wippen in Fahrhaltung – die Figur steht nicht steif da
+            // leichtes Wippen in Fahrhaltung, dazu Fahrtwind in Böen – weite Kleidung flattert sichtbar
             const b = 0.32 + Math.sin(t * 1.6) * 0.06;
             figure.userData.setPose({ bendL: b, bendR: b, lean: 0.22, armX: -0.42, elbow: -0.65, armOut: 0.2, pole: 0.7 });
+            figure.userData.setWind(0.55 + 0.4 * Math.sin(t * 0.9), t);
             renderer.render(scene, camera);
             raf = requestAnimationFrame(frame);
         };
@@ -57,8 +66,11 @@ const Wardrobe = () => {
         return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', size); renderer.dispose(); };
     }, []);
 
-    const choose = (id) => { selRef.current = id; setSel(id); setOutfitId(id); };
-    const cur = outfitById(sel);
+    const apply = (next) => { selRef.current = next; setSel(next); setSelection(next); };
+    const whole = OUTFITS.find(o => SLOTS.every(sl => sel[sl.key] === o.id)) || null;
+    const eras = SLOTS.map(sl => outfitById(sel[sl.key]).era);
+    const title = whole ? whole.name : 'Eigene Mischung';
+    const sub = whole ? whole.era : [...new Set(eras)].join(' · ');
 
     return (
         <div className="mm-wardrobe-wrap">
@@ -66,16 +78,15 @@ const Wardrobe = () => {
             <div className="mm-wardrobe-stage">
                 <canvas ref={canvasRef} />
                 <div className="mm-wardrobe-name">
-                    <span>{cur.era}</span>
-                    <b>{cur.name}</b>
+                    <span>{sub}</span>
+                    <b>{title}</b>
                 </div>
             </div>
             <div className="mm-wardrobe-list">
-                <h3>Dein Fahrer</h3>
-                <p>So bist du unterwegs, wenn du im Spiel auf „Fahren" gehst.</p>
+                <h3>Ganzes Outfit</h3>
                 <div className="mm-wardrobe-grid">
                     {OUTFITS.map(o => (
-                        <button key={o.id} className={`mm-outfit ${o.id === sel ? 'on' : ''}`} onClick={() => choose(o.id)}>
+                        <button key={o.id} className={`mm-outfit ${whole?.id === o.id ? 'on' : ''}`} onClick={() => apply(presetSelection(o.id))}>
                             <span className="mm-outfit-swatch">
                                 <i style={{ background: hex(o.headCol) }} />
                                 <i style={{ background: hex(o.jacket) }} />
@@ -89,6 +100,27 @@ const Wardrobe = () => {
                         </button>
                     ))}
                 </div>
+                <h3 className="mm-wardrobe-h">Einzelteile</h3>
+                <p>Jedes Teil lässt sich einzeln tauschen. Weite Kleidung flattert im Fahrtwind, enge nicht.</p>
+                {SLOTS.map(sl => (
+                    <div className="mm-slot" key={sl.key}>
+                        <span className="mm-slot-label">{sl.label}</span>
+                        <div className="mm-slot-row">
+                            {OUTFITS.map(o => {
+                                const [c1, c2] = SWATCH[sl.key](o);
+                                const fit = sl.fit && FIT[o.fit];
+                                return (
+                                    <button key={o.id} className={`mm-chip ${sel[sl.key] === o.id ? 'on' : ''}`}
+                                            title={`${sl.label}: ${o.name} (${o.era})${fit ? ' · ' + fit : ''}`}
+                                            onClick={() => apply({ ...sel, [sl.key]: o.id })}>
+                                        <i style={{ background: `linear-gradient(135deg, ${hex(c1)} 0 58%, ${hex(c2)} 58% 100%)` }} />
+                                        <small>{o.era}</small>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                ))}
             </div>
         </div>
         </div>

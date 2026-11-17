@@ -92,9 +92,13 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `roll`/`twist` richten den Oberkörper gegen die Schräglage der Beine auf (Hüftknick in der Kurve). Aussehen:
   taillierte Jacke mit Schulterpolstern, dunkler Helm mit Zierstreifen, helle Skischuhe, kleiner Rucksack.
 - Outfits: `SkiOutfits.js` – je Outfit ein Satz Farben und Formschalter (Kopfbedeckung, Brille, Jacke/Pullover/
-  Einteiler, Streifen, Rucksack), von heute bis 1935. `makePlayerSkier(outfit)` baut die Figur daraus; gewählt wird
-  im Hauptmenü unter „Fahrer" (`Wardrobe.jsx`, drehende Vorschau), gespeichert in `localStorage['mt.outfit']`.
-  Ein neues Outfit ist nur ein weiterer Eintrag in `OUTFITS`.
+  Einteiler, Streifen, Rucksack, Passform `fit`), jedes mit Jahreszahl von heute bis 1935. Die Teile sind einzeln
+  kombinierbar: `SLOTS` (Kopf, Oberteil, Hose, Schuhe, Ski) nennt je Teil die Felder, die es mitbringt;
+  `composeOutfit(auswahl)` setzt daraus das Outfit zusammen, das `makePlayerSkier` baut. Gewählt wird im Hauptmenü
+  unter „Fahrer" (`Wardrobe.jsx`: ganze Outfits und Einzelteile, drehende Vorschau), gespeichert als JSON in
+  `localStorage['mt.outfit']`. Ein neues Outfit ist nur ein weiterer Eintrag in `OUTFITS`.
+- Stoff im Fahrtwind: `userData.setWind(tempo 0…1, t)` lässt weite Teile flattern (Maßstab von Jacke und
+  Hosenbeinen, dazu ein Jackenschoß), normale leicht, enge (`fit: 'tight'`, Einteiler) gar nicht.
 - Wer steht, bleibt stehen (auch am Hang) – los geht es erst mit „vorwärts".
 - Fahrgefühl: Schräglage und Kniebeuge wachsen mit dem Tempo, beim Kantenwechsel entlastet die Figur kurz
   (`hop`), nach Sprüngen federt sie ab und wirft eine Schneewolke (`burstDust`). Die Kamera weitet mit dem Tempo

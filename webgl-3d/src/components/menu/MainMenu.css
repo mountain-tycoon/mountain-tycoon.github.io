@@ -400,15 +400,15 @@
 /* ===== Garderobe: Outfit des eigenen Fahrers ===== */
 .mm-wardrobe-wrap {
     position: absolute; inset: 0; z-index: 20; overflow-y: auto;
-    display: flex; align-items: center; justify-content: center; padding: 110px 24px 40px; box-sizing: border-box;
+    display: flex; align-items: center; justify-content: center; padding: 150px 24px 30px; box-sizing: border-box;
 }
-.mm-wardrobe { display: flex; gap: 22px; align-items: stretch; justify-content: center; width: min(980px, 100%); margin: auto; }
+.mm-wardrobe { display: flex; gap: 22px; align-items: stretch; justify-content: center; width: min(1080px, 100%); margin: auto; }
 .mm-wardrobe-stage {
     position: relative; flex: 0 0 300px; min-height: 380px; border-radius: 6px; overflow: hidden;
     background: rgba(10,16,26,0.62); border: 1px solid rgba(232,238,246,0.14);
 }
 .mm-wardrobe-stage canvas { display: block; width: 100%; height: 100%; }
-.mm-wardrobe-name { position: absolute; left: 16px; top: 14px; display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
+.mm-wardrobe-name { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 16px 13px; background: linear-gradient(180deg, rgba(10,16,26,0) 0%, rgba(10,16,26,0.86) 55%); display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
 .mm-wardrobe-name span { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: #9aa6b6; }
 .mm-wardrobe-name b { font-size: 19px; color: #e8eef6; letter-spacing: 0.02em; }
 .mm-wardrobe-list {
@@ -417,7 +417,7 @@
 }
 .mm-wardrobe-list h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: #9aa6b6; }
 .mm-wardrobe-list p { margin: 0 0 14px; font-size: 13px; color: #c3ccd8; }
-.mm-wardrobe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.mm-wardrobe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
 .mm-outfit {
     display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: 4px; cursor: pointer; text-align: left;
     background: rgba(232,238,246,0.05); border: 1px solid rgba(232,238,246,0.12); color: #e8eef6; font: inherit;
@@ -435,4 +435,19 @@
     .mm-wardrobe-wrap { align-items: flex-start; padding: 96px 12px 24px; }
     .mm-wardrobe { flex-direction: column; }
     .mm-wardrobe-stage { flex: 0 0 240px; min-height: 240px; }
+}
+.mm-wardrobe-h { margin-top: 18px !important; }
+.mm-slot { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.mm-slot-label { flex: 0 0 66px; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: #9aa6b6; }
+.mm-slot-row { display: flex; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.mm-chip {
+    display: flex; flex-direction: column; align-items: center; gap: 3px; width: 46px; padding: 5px 0 4px; border-radius: 4px; cursor: pointer;
+    background: rgba(232,238,246,0.05); border: 1px solid rgba(232,238,246,0.12); color: #c3ccd8; font: inherit;
+}
+.mm-chip:hover { background: rgba(232,238,246,0.1); }
+.mm-chip.on { background: rgba(232,238,246,0.16); border-color: rgba(232,238,246,0.85); color: #e8eef6; }
+.mm-chip i { display: block; width: 26px; height: 18px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.4); }
+.mm-chip small { font-size: 9px; letter-spacing: 0.06em; }
+@media (max-width: 720px) {
+    .mm-slot { flex-direction: column; align-items: flex-start; gap: 4px; }
 }

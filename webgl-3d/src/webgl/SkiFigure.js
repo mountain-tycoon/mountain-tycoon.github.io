@@ -8,7 +8,7 @@
 // flach bleiben und die Füße unter der Hüfte stehen.
 // ============================================================
 import * as THREE from 'three';
-import { OUTFITS } from './SkiOutfits.js';
+import { composeOutfit } from './SkiOutfits.js';
 
 const THIGH = 0.23, SHIN = 0.21, HIP_Y = 0.52;
 export const PLAYER_SCALE = 1.06;
@@ -22,8 +22,8 @@ const limb = (r, len, material) => {
     return m;
 };
 
-/** @param o Outfit aus SkiOutfits.js (Farben und Formschalter); ohne Angabe das erste. */
-export function makePlayerSkier(o = OUTFITS[0]) {
+/** @param o zusammengesetztes Outfit (composeOutfit in SkiOutfits.js); ohne Angabe die gespeicherte Auswahl. */
+export function makePlayerSkier(o = composeOutfit()) {
     const g = new THREE.Group();
     const body = new THREE.Group(); g.add(body);          // sinkt mit gebeugten Knien ab
     const wool = o.torso === 'sweater';
@@ -35,14 +35,21 @@ export function makePlayerSkier(o = OUTFITS[0]) {
         strap: mat(o.strap, 0.7), ski: mat(o.ski, 0.35, 0.1), skiTop: mat(o.skiTop, 0.4), skiBase: mat(0x10131a, 0.5), pole: mat(o.pole, 0.35, 0.6), bind: mat(0x111318, 0.6),
         pack: mat(o.packCol, 0.8), hair: mat(o.hair, 0.9)
     };
-    const fat = o.baggy ? 1.22 : o.torso === 'suit' ? 0.9 : 1;       // weite Parkhose … enger Rennanzug
+    // Passform: weite Hose … enger Rennanzug. Daraus folgt auch, wie stark der Stoff im Fahrtwind flattert.
+    const FAT = { loose: 1.22, normal: 1, tight: 0.9 }, FLAP = { loose: 1, normal: 0.4, tight: 0 };
+    const fat = FAT[o.pantsFit] || 1, topFat = o.torso === 'suit' ? 0.94 : (FAT[o.topFit] || 1) > 1 ? 1.08 : 1;
+    const flapPants = FLAP[o.pantsFit] ?? 0.4;
+    const flapTop = o.torso === 'suit' ? 0 : o.torso === 'sweater' ? Math.min(0.3, FLAP[o.topFit] ?? 0.4) : (FLAP[o.topFit] ?? 0.4);
+    const cloth = [];           // Stoffteile, die flattern: { mesh, sx, sz, amp, phase }
 
     // ----- Beine: Hüfte -> Knie -> Knöchel (Schuh + Ski) -----
     const mkLeg = (x) => {
         const hip = new THREE.Group(); hip.position.set(x, HIP_Y, 0);
         const thigh = limb(0.068 * fat, THIGH + 0.03, M.pants); thigh.scale.set(1, 1, 1.12); hip.add(thigh);
+        cloth.push({ mesh: thigh, sx: 1, sz: 1.12, amp: flapPants * 0.16, phase: x * 40 });
         const knee = new THREE.Group(); knee.position.y = -THIGH; hip.add(knee);
         const shin = limb(0.054 * fat, SHIN, M.pants); shin.scale.set(1, 1, 1.1); knee.add(shin);
+        cloth.push({ mesh: shin, sx: 1, sz: 1.1, amp: flapPants * 0.22, phase: x * 40 + 1.7 });
         const pad = new THREE.Mesh(new THREE.SphereGeometry(0.058, 10, 8), M.knee);
         pad.scale.set(1, 0.85, 0.75); pad.position.set(0, -0.005, 0.03); knee.add(pad);
         const ankle = new THREE.Group(); ankle.position.y = -SHIN + 0.075; knee.add(ankle);
@@ -89,7 +96,16 @@ export function makePlayerSkier(o = OUTFITS[0]) {
     const prof = [[0.0, 0.03], [0.088, 0.035], [0.092, 0.09], [0.098, 0.17], [0.108, 0.235], [0.104, 0.285], [0.07, 0.325], [0.05, 0.335], [0.0, 0.335]]
         .map(([r, y]) => new THREE.Vector2(r, y));
     const chest = new THREE.Mesh(new THREE.LatheGeometry(prof, 18), M.jacket);
-    chest.scale.set(1.3, 1, 0.84); chest.castShadow = true; torso.add(chest);
+    chest.scale.set(1.3 * topFat, 1, 0.84 * topFat); chest.castShadow = true; torso.add(chest);
+    cloth.push({ mesh: chest, sx: 1.3 * topFat, sz: 0.84 * topFat, amp: flapTop * 0.07, phase: 0.6 });
+    // Jackenschoß hinten: hängt lose und schlägt im Fahrtwind (nur bei Jacken, die nicht eng anliegen)
+    let tail = null;
+    if (flapTop > 0.2 && o.torso === 'jacket') {
+        tail = new THREE.Group(); tail.position.set(0, 0.07, -0.074 * topFat);
+        const flap = new THREE.Mesh(new THREE.BoxGeometry(0.2 * topFat, 0.075, 0.012), M.jacket);
+        flap.position.y = -0.03; tail.add(flap);
+        torso.add(tail);
+    }
     const hem = new THREE.Mesh(new THREE.CylinderGeometry(0.092, 0.094, 0.05, 18), M.panel);       // dunkler Saum
     hem.position.y = 0.055; hem.scale.set(1.31, 1, 0.85); torso.add(hem);
     // Querstreifen auf der Brust (Norwegermuster, Rennstreifen …)
@@ -261,6 +277,20 @@ export function makePlayerSkier(o = OUTFITS[0]) {
     };
     /** Höhe der Hüfte über den Füßen (für das Sitzen im Sessel). */
     ud.hipY = HIP_Y;
+    /**
+     * Fahrtwind: `speed` 0…1, `t` Zeit in Sekunden. Weite Kleidung flattert kräftig, normale leicht, ein
+     * Rennanzug gar nicht. Bewegt werden nur Maßstäbe weniger Teile – das kostet nichts.
+     */
+    ud.setWind = (speed, t) => {
+        const k = Math.max(0, Math.min(1, speed));
+        for (const c of cloth) {
+            if (!c.amp) continue;
+            const w = Math.sin(t * 31 + c.phase) * 0.6 + Math.sin(t * 47 + c.phase * 2.3) * 0.4;      // unruhig, nicht gleichmäßig
+            c.mesh.scale.x = c.sx * (1 + c.amp * k * w * 0.6);
+            c.mesh.scale.z = c.sz * (1 + c.amp * k * (0.5 + 0.5 * w));                                // der Stoff bläht sich nach hinten
+        }
+        if (tail) tail.rotation.x = -k * flapTop * (0.55 + 0.45 * Math.sin(t * 27) + 0.25 * Math.sin(t * 43 + 1));
+    };
     ud.setPose({});
     g.scale.setScalar(PLAYER_SCALE);
     return g;

@@ -9,7 +9,7 @@
 // ============================================================
 import * as THREE from 'three';
 import { makePlayerSkier, PLAYER_SCALE } from './SkiFigure.js';
-import { getOutfitId, outfitById } from './SkiOutfits.js';
+import { selectionKey } from './SkiOutfits.js';
 import { createSkiSound } from './SkiSound.js';
 
 const G = 8.4;              // Hangabtrieb
@@ -728,7 +728,7 @@ export function createSkiRun(deps) {
             const why = blockedAt(x, z);
             if (why) return why === 'water' ? 'Im Wasser kann man nicht starten' : why === 'building' ? 'Hier steht ein Gebäude' : 'Hier ist kein Platz – such dir eine freie Stelle';
             // Figur im gewählten Outfit (Garderobe im Hauptmenü)
-            if (!mesh || meshOutfit !== getOutfitId()) { meshOutfit = getOutfitId(); mesh = makePlayerSkier(outfitById(meshOutfit)); }
+            if (!mesh || meshOutfit !== selectionKey()) { meshOutfit = selectionKey(); mesh = makePlayerSkier(); }
             resetPose();
             place(x, z, 0); th = camTh = fallLine(x, z);
             const dx = Math.sin(th), dz = Math.cos(th);
@@ -818,6 +818,7 @@ export function createSkiRun(deps) {
             else if (ride) stepRide(dt); else s = stepSki(dt, readInput());
             sound.update({ v, carve: Math.abs(steerS) + brakeS, air, snow: !walking, ride: !!ride, cabin: !!(ride && ride.inside) });
             poseSkier(t, s, dt);
+            mesh.userData.setWind(ride || rest ? 0 : v / 16, t);       // Kleidung flattert im Fahrtwind
             stepCamera(dt);
             hintT -= dt; emitT -= dt;
             if (emitT <= 0) { emitT = 0.15; emit(); }
