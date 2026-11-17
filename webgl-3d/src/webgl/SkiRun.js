@@ -633,7 +633,9 @@ export function createSkiRun(deps) {
             lean: 0.3 + tuckS * 0.75 + Math.min(0.12, v * 0.008),
             armX: -0.5 - tuckS * 0.75 + (air ? 0.35 : 0), elbow: -0.75 - tuckS * 0.5,
             armOut: 0.2 + brakeS * 0.25 + (air ? 0.35 : 0) - tuckS * 0.12, armOutL: -lean * 0.5, armOutR: lean * 0.5,
-            pole: 0.75 + tuckS * 0.75
+            pole: 0.75 + tuckS * 0.75 - hop * 0.35,
+            // Hüftknick: die Beine liegen in der Kurve, der Oberkörper bleibt aufrechter und schaut ins Tal
+            roll: -lean * 0.55, twist: lean * 0.35
         });
     };
 

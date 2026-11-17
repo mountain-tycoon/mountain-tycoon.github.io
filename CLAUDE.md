@@ -90,6 +90,8 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - Figur: `SkiFigure.js` (`makePlayerSkier`) – runde Gliedmaßen mit Knie- und Ellbogengelenk, Ski an den
   Füßen, Stöcke in den Händen. `userData.setPose({...})` stellt die ganze Haltung (Kniebeuge je Bein, Pflug,
   Oberkörper, Arme, `sit` für den Sessel) und hält dabei die Ski flach; `setCarry` schultert die Ski.
+  `roll`/`twist` richten den Oberkörper gegen die Schräglage der Beine auf (Hüftknick in der Kurve). Aussehen:
+  taillierte Jacke mit Schulterpolstern, dunkler Helm mit Zierstreifen, helle Skischuhe, kleiner Rucksack.
 - Wer steht, bleibt stehen (auch am Hang) – los geht es erst mit „vorwärts".
 - Fahrgefühl: Schräglage und Kniebeuge wachsen mit dem Tempo, beim Kantenwechsel entlastet die Figur kurz
   (`hop`), nach Sprüngen federt sie ab und wirft eine Schneewolke (`burstDust`). Die Kamera weitet mit dem Tempo
