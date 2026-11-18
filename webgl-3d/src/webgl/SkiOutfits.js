@@ -7,9 +7,14 @@
 //   torso  'jacket' | 'sweater' (ohne Schulterpolster, mit Bündchen) | 'suit' (Einteiler, eng)
 //   bands  Zahl der Querstreifen auf der Brust (0–3)
 //   fit    'loose' | 'tight' | (ohne Angabe: normal) – weite Kleidung flattert im Fahrtwind, ein Rennanzug gar nicht
-// Die Wahl liegt je Gerät in localStorage['mt.outfit'].
+// Die Wahl liegt je Gerät und Konto in localStorage (siehe key()).
 // ============================================================
-const KEY = 'mt.outfit';
+// Je Konto eine eigene Auswahl (wie bei den Spielständen): ein neu angemeldeter Spieler kleidet seine Figur selbst
+// ein, auch wenn auf dem Gerät schon jemand anders gespielt hat. Ohne Anmeldung gilt der gemeinsame Schlüssel.
+const BASE_KEY = 'mt.outfit';
+const key = () => {
+    try { const u = localStorage.getItem('mt.user'); return u ? `${BASE_KEY}:${u}` : BASE_KEY; } catch { return BASE_KEY; }
+};
 
 export const OUTFITS = [
     { id: 'modern', name: 'Pistenprofi', era: 'Heute', head: 'helmet', eyes: 'goggles', torso: 'jacket', bands: 1, pack: true,
@@ -44,6 +49,25 @@ export const OUTFITS = [
       headCol: 0x5a4632, headTrim: 0x3a2c1e, lens: 0x16130f, strap: 0x3a2c1e, ski: 0x9a6a3a, skiTop: 0x7a4f26, pole: 0x8a6a3e, packCol: 0x6a5234, hair: 0x4a3222 }
 ];
 
+// ===== SKIMARKEN =====
+// Ski bekannter Hersteller, in deren typischen Farben. Nur der Name als Schrift – keine Logos, keine
+// nachgebauten Dekore. (Öffentliches Fanprojekt: die Namen gehören den jeweiligen Herstellern.)
+export const SKI_BRANDS = [
+    { id: 'ski_atomic',    name: 'Atomic',    ski: 0xd8232a, skiTop: 0xf4f4f2, pole: 0xd8232a },
+    { id: 'ski_head',      name: 'Head',      ski: 0x16181c, skiTop: 0xf4f4f2, pole: 0xe2e4e8 },
+    { id: 'ski_rossignol', name: 'Rossignol', ski: 0xf2f2f0, skiTop: 0xd21f2b, pole: 0x1f3f8f },
+    { id: 'ski_fischer',   name: 'Fischer',   ski: 0xf2d21a, skiTop: 0x15171a, pole: 0x15171a },
+    { id: 'ski_voelkl',    name: 'Völkl',     ski: 0x1a1c20, skiTop: 0xf2d21a, pole: 0xf2d21a },
+    { id: 'ski_salomon',   name: 'Salomon',   ski: 0x1b62b8, skiTop: 0xf4f4f2, pole: 0x15171a },
+    { id: 'ski_blizzard',  name: 'Blizzard',  ski: 0xf06a1c, skiTop: 0x15171a, pole: 0xf06a1c },
+    { id: 'ski_nordica',   name: 'Nordica',   ski: 0xc81e28, skiTop: 0x15171a, pole: 0x8a8f96 },
+    { id: 'ski_elan',      name: 'Elan',      ski: 0x2fa64a, skiTop: 0x15171a, pole: 0x2fa64a },
+    { id: 'ski_k2',        name: 'K2',        ski: 0x15171a, skiTop: 0xd8232a, pole: 0xd8232a },
+    { id: 'ski_stoeckli',  name: 'Stöckli',   ski: 0xc9ced4, skiTop: 0x1f4f9f, pole: 0x1f4f9f },
+    { id: 'ski_dynastar',  name: 'Dynastar',  ski: 0x1f4fb5, skiTop: 0xf2d21a, pole: 0xf2d21a }
+];
+const partById = (id) => SKI_BRANDS.find(b => b.id === id) || OUTFITS.find(o => o.id === id) || null;
+
 // ===== EINZELTEILE =====
 // Jedes Teil lässt sich einzeln aus einem der Outfits nehmen. Ein Teil = die Felder, die es mitbringt.
 export const SLOTS = [
@@ -59,17 +83,18 @@ export const outfitById = (id) => OUTFITS.find(o => o.id === id) || OUTFITS[0];
 export function getSelection() {
     const sel = {};
     let raw = null;
-    try { raw = localStorage.getItem(KEY); } catch { /* privater Modus */ }
+    try { raw = localStorage.getItem(key()); } catch { /* privater Modus */ }
     let data = null;
     if (raw && raw[0] === '{') { try { data = JSON.parse(raw); } catch { data = null; } }
     for (const sl of SLOTS) {
         const id = data ? data[sl.key] : raw;                 // früher stand hier nur die Id eines ganzen Outfits
-        sel[sl.key] = OUTFITS.some(o => o.id === id) ? id : OUTFITS[0].id;
+        const ok = OUTFITS.some(o => o.id === id) || (sl.key === 'ski' && SKI_BRANDS.some(b => b.id === id));
+        sel[sl.key] = ok ? id : OUTFITS[0].id;
     }
     return sel;
 }
 export function setSelection(sel) {
-    try { localStorage.setItem(KEY, JSON.stringify(sel)); } catch { /* privater Modus */ }
+    try { localStorage.setItem(key(), JSON.stringify(sel)); } catch { /* privater Modus */ }
 }
 /** Auswahl für alle Teile aus einem Outfit. */
 export const presetSelection = (id) => Object.fromEntries(SLOTS.map(sl => [sl.key, id]));
@@ -77,7 +102,7 @@ export const presetSelection = (id) => Object.fromEntries(SLOTS.map(sl => [sl.ke
 export function composeOutfit(sel = getSelection()) {
     const out = {};
     for (const sl of SLOTS) {
-        const src = outfitById(sel[sl.key]);
+        const src = (sl.key === 'ski' && partById(sel[sl.key])) || outfitById(sel[sl.key]);
         for (const f of sl.fields) out[f] = src[f];
         if (sl.fit) out[sl.fit] = src.fit || 'normal';
     }
@@ -85,3 +110,8 @@ export function composeOutfit(sel = getSelection()) {
 }
 /** Kurzer Schlüssel der Auswahl (ändert er sich, wird die Figur neu gebaut). */
 export const selectionKey = (sel = getSelection()) => SLOTS.map(sl => sel[sl.key]).join('|');
+
+/** Hat dieser Spieler seine Figur schon einmal eingekleidet? (Sonst zeigt das Spiel beim ersten Start die Garderobe.) */
+export function hasChosenOutfit() {
+    try { return !!localStorage.getItem(key()); } catch { return true; }
+}

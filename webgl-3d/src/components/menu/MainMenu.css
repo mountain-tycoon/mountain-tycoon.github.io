@@ -400,11 +400,11 @@
 /* ===== Garderobe: Outfit des eigenen Fahrers ===== */
 .mm-wardrobe-wrap {
     position: absolute; inset: 0; z-index: 20; overflow-y: auto;
-    display: flex; align-items: center; justify-content: center; padding: 150px 24px 30px; box-sizing: border-box;
+    display: flex; align-items: flex-start; justify-content: center; padding: 150px 24px 30px; box-sizing: border-box;
 }
 .mm-wardrobe { display: flex; gap: 22px; align-items: stretch; justify-content: center; width: min(1080px, 100%); margin: auto; }
 .mm-wardrobe-stage {
-    position: relative; flex: 0 0 300px; min-height: 380px; border-radius: 6px; overflow: hidden;
+    position: sticky; top: 0; align-self: flex-start; flex: 0 0 300px; height: 430px; border-radius: 6px; overflow: hidden;
     background: rgba(10,16,26,0.62); border: 1px solid rgba(232,238,246,0.14);
 }
 .mm-wardrobe-stage canvas { display: block; width: 100%; height: 100%; }
@@ -434,7 +434,7 @@
 @media (max-width: 720px) {
     .mm-wardrobe-wrap { align-items: flex-start; padding: 96px 12px 24px; }
     .mm-wardrobe { flex-direction: column; }
-    .mm-wardrobe-stage { flex: 0 0 240px; min-height: 240px; }
+    .mm-wardrobe-stage { position: relative; align-self: stretch; flex: 0 0 240px; height: 240px; }
 }
 .mm-wardrobe-h { margin-top: 18px !important; }
 .mm-slot { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
@@ -451,3 +451,9 @@
 @media (max-width: 720px) {
     .mm-slot { flex-direction: column; align-items: flex-start; gap: 4px; }
 }
+.mm-chip.wide { width: 62px; }
+.mm-wardrobe-welcome { display: flex; flex-direction: column; gap: 4px; margin: 0 0 16px; padding: 12px 14px; border-radius: 4px;
+    background: rgba(232,238,246,0.08); border: 1px solid rgba(232,238,246,0.2); }
+.mm-wardrobe-welcome b { font-size: 16px; color: #e8eef6; }
+.mm-wardrobe-welcome span { font-size: 13px; color: #c3ccd8; line-height: 1.45; }
+.mm-wardrobe-go { margin-top: 16px; width: 100%; }

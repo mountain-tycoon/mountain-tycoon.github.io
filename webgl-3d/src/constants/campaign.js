@@ -793,10 +793,12 @@ export function markLevelCompleted(levelId) {
 }
 
 export function isLevelUnlocked(levelIndex, progress) {
-    // TEST-MODUS: alle Level freigeschaltet, damit man frei reinschauen kann.
-    // (Zum Reaktivieren der Kampagnen-Sperre die nächste Zeile entfernen.)
-    return true;
-    if (levelIndex === 0) return true;
-    const prevLevel = CAMPAIGN_LEVELS[levelIndex - 1];
-    return progress.completed.includes(prevLevel.id);
+    // Das nächste Level gibt es erst, wenn das davor geschafft ist. Wer früher schon weiter war (die Reihenfolge
+    // der Kampagne hat sich geändert), behält alles bis dorthin. Beim Entwickeln und für Admins ist alles frei.
+    if (levelIndex === 0 || import.meta.env?.DEV) return true;
+    try { if (localStorage.getItem('mt.role') === 'admin') return true; } catch { /* privater Modus */ }
+    // offen ist alles bis einschließlich des Levels NACH dem weitesten, das schon geschafft wurde
+    let furthest = -1;
+    CAMPAIGN_LEVELS.forEach((l, i) => { if (progress.completed.includes(l.id)) furthest = i; });
+    return levelIndex <= furthest + 1;
 }

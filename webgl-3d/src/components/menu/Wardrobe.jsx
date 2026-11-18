@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { makePlayerSkier } from '../../webgl/SkiFigure.js';
-import { OUTFITS, SLOTS, getSelection, setSelection, presetSelection, composeOutfit, selectionKey, outfitById } from '../../webgl/SkiOutfits.js';
+import { OUTFITS, SLOTS, SKI_BRANDS, getSelection, setSelection, presetSelection, composeOutfit, selectionKey, outfitById } from '../../webgl/SkiOutfits.js';
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
 /** Farbfelder, die ein Teil am besten zeigen. */
@@ -16,7 +16,7 @@ const FIT = { loose: 'weit', tight: 'eng' };
  * Oben ganze Outfits von heute bis 1935, darunter jedes Teil einzeln – alles frei kombinierbar.
  * Links dreht sich die Figur; der Fahrtwind zeigt, wie weit die Kleidung sitzt.
  */
-const Wardrobe = () => {
+const Wardrobe = ({ welcome = false, onDone = null }) => {
     const canvasRef = useRef(null);
     const [sel, setSel] = useState(() => getSelection());
     const selRef = useRef(sel);
@@ -68,9 +68,10 @@ const Wardrobe = () => {
 
     const apply = (next) => { selRef.current = next; setSel(next); setSelection(next); };
     const whole = OUTFITS.find(o => SLOTS.every(sl => sel[sl.key] === o.id)) || null;
-    const eras = SLOTS.map(sl => outfitById(sel[sl.key]).era);
+    const brand = SKI_BRANDS.find(b => b.id === sel.ski) || null;
+    const eras = SLOTS.filter(sl => !(sl.key === 'ski' && brand)).map(sl => outfitById(sel[sl.key]).era);
     const title = whole ? whole.name : 'Eigene Mischung';
-    const sub = whole ? whole.era : [...new Set(eras)].join(' · ');
+    const sub = (whole ? whole.era : [...new Set(eras)].join(' · ')) + (brand ? ` · ${brand.name}` : '');
 
     return (
         <div className="mm-wardrobe-wrap">
@@ -83,6 +84,12 @@ const Wardrobe = () => {
                 </div>
             </div>
             <div className="mm-wardrobe-list">
+                {welcome && (
+                    <div className="mm-wardrobe-welcome">
+                        <b>Willkommen am Berg!</b>
+                        <span>Kleide zuerst deinen Fahrer ein – mit ihm fährst du später selbst durch dein Skigebiet. Ändern kannst du das jederzeit im Menü unter „Fahrer".</span>
+                    </div>
+                )}
                 <h3>Ganzes Outfit</h3>
                 <div className="mm-wardrobe-grid">
                     {OUTFITS.map(o => (
@@ -121,6 +128,23 @@ const Wardrobe = () => {
                         </div>
                     </div>
                 ))}
+                <div className="mm-slot">
+                    <span className="mm-slot-label">Skimarke</span>
+                    <div className="mm-slot-row">
+                        {SKI_BRANDS.map(b => (
+                            <button key={b.id} className={`mm-chip wide ${sel.ski === b.id ? 'on' : ''}`} title={`Ski: ${b.name}`}
+                                    onClick={() => apply({ ...sel, ski: b.id })}>
+                                <i style={{ background: `linear-gradient(135deg, ${hex(b.ski)} 0 58%, ${hex(b.skiTop)} 58% 100%)` }} />
+                                <small>{b.name}</small>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+                {welcome && (
+                    <button className="mm-start-btn mm-wardrobe-go" onClick={() => { setSelection(selRef.current); onDone?.(); }}>
+                        So fahre ich – los geht’s
+                    </button>
+                )}
             </div>
         </div>
         </div>

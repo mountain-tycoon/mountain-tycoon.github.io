@@ -96,7 +96,11 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   kombinierbar: `SLOTS` (Kopf, Oberteil, Hose, Schuhe, Ski) nennt je Teil die Felder, die es mitbringt;
   `composeOutfit(auswahl)` setzt daraus das Outfit zusammen, das `makePlayerSkier` baut. Gewählt wird im Hauptmenü
   unter „Fahrer" (`Wardrobe.jsx`: ganze Outfits und Einzelteile, drehende Vorschau), gespeichert als JSON in
-  `localStorage['mt.outfit']`. Ein neues Outfit ist nur ein weiterer Eintrag in `OUTFITS`.
+  `localStorage['mt.outfit']` bzw. je Konto `mt.outfit:<Name>`. Ein neues Outfit ist nur ein weiterer Eintrag in
+  `OUTFITS`. Für die Ski gibt es zusätzlich `SKI_BRANDS` (bekannte Hersteller in ihren typischen Farben – nur der
+  Name als Schrift, keine Logos oder nachgebauten Dekore).
+- Erster Besuch: hat das Konto noch keine Auswahl (`hasChosenOutfit`), zeigt das Hauptmenü zuerst nur die
+  Garderobe mit Begrüßung; erst nach „los geht's" erscheinen die Reiter.
 - Stoff im Fahrtwind: `userData.setWind(tempo 0…1, t)` lässt weite Teile flattern (Maßstab von Jacke und
   Hosenbeinen, dazu ein Jackenschoß), normale leicht, enge (`fit: 'tight'`, Einteiler) gar nicht.
 - Wer steht, bleibt stehen (auch am Hang) – los geht es erst mit „vorwärts".
@@ -201,6 +205,8 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (`lockedUntil`); gesperrte Einträge zeigen im Baumenü das Level. Die Sandbox hat alles. Nur das Menü sperrt –
   Spielstände bauen weiterhin alles nach. Neue Werkzeuge dort einsortieren und prüfen, dass die Aufgaben des
   Levels erfüllbar bleiben. Startgeld je Level: `startingMoney` in `constants/campaign.js`.
+- Level-Sperre (`isLevelUnlocked`): offen ist alles bis zum Level nach dem weitesten geschafften; ein Level mit
+  eigenem Spielstand bleibt spielbar. Beim Entwickeln (`npm run dev`) und für Admins ist alles frei.
 - Kampagne: die Reihenfolge im Feld `CAMPAIGN_LEVELS` ist die Reihenfolge der Level (`index` wird daraus gesetzt):
   Schwarzwald, Alpenvorland (`vorland`), Wallis, Savoyen, Tirol (`alpen`), Dolomiten … Die Ids bleiben, Spielstände
   und Fortschritt hängen daran. Ein neues Level braucht Einträge in `MASSIFS`, den Tabellen je Level-Id

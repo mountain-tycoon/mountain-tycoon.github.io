@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Wardrobe from './Wardrobe.jsx';
+import { hasChosenOutfit } from '../../webgl/SkiOutfits.js';
 import { localSaveIndex, remoteSaveIndex, agoText } from '../../savegames';
 import {
     CAMPAIGN_LEVELS,
@@ -142,7 +143,9 @@ const LevelArt = ({ level, height = 96 }) => {
  * mit frei einstellbarem Landschaftsgenerator.
  */
 const MainMenu = ({ onStartLevel }) => {
-    const [tab, setTab] = useState('campaign'); // 'campaign' | 'sandbox'
+    // Wer zum ersten Mal hier ist, kleidet zuerst seinen Fahrer ein
+    const [firstVisit, setFirstVisit] = useState(() => !hasChosenOutfit());
+    const [tab, setTab] = useState(() => (hasChosenOutfit() ? 'campaign' : 'rider')); // 'campaign' | 'sandbox' | 'rider'
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [hoveredLevel, setHoveredLevel] = useState(null);
     const [progress] = useState(() => loadProgress());
@@ -250,18 +253,22 @@ const MainMenu = ({ onStartLevel }) => {
             <img className="mm-logo" src={LOGO} alt="Mountain Tycoon" />
 
             {/* Moduswahl dezent oben rechts */}
+            {/* Beim ersten Besuch gibt es nur die Garderobe – erst einkleiden, dann geht es ins Menü */}
+            {!firstVisit && (
             <div className="mm-modes">
                 <button className={`mm-mode ${tab === 'campaign' ? 'on' : ''}`} onClick={() => setTab('campaign')}>Kampagne</button>
                 <button className={`mm-mode ${tab === 'sandbox' ? 'on' : ''}`} onClick={() => setTab('sandbox')}>Sandbox</button>
                 <button className={`mm-mode ${tab === 'rider' ? 'on' : ''}`} onClick={() => setTab('rider')}>Fahrer</button>
             </div>
+            )}
 
             {tab === 'campaign' && (
                 <div className="mm-stage">
                     {/* ===== LEVEL-SCROLLER: Hero-Grafiken untereinander, mittig ===== */}
                     <div className="mm-scroller">
                         {CAMPAIGN_LEVELS.map((level) => {
-                            const unlocked = isLevelUnlocked(level.index, progress);
+                            // Ein Level mit eigenem Spielstand bleibt spielbar, auch wenn das davor (noch) nicht als geschafft gilt
+                            const unlocked = isLevelUnlocked(level.index, progress) || !!saves[level.id];
                             const completed = progress.completed.includes(level.id);
                             const selected = selectedLevel?.id === level.id;
                             return (
@@ -339,7 +346,7 @@ const MainMenu = ({ onStartLevel }) => {
                 </div>
             )}
 
-            {tab === 'rider' && <Wardrobe />}
+            {tab === 'rider' && <Wardrobe welcome={firstVisit} onDone={() => { setFirstVisit(false); setTab('campaign'); }} />}
 
             {tab === 'sandbox' && (
                 <div className="mm-sandbox-wrap">
