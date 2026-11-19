@@ -101,6 +101,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Name als Schrift, keine Logos oder nachgebauten Dekore).
 - Erster Besuch: hat das Konto noch keine Auswahl (`hasChosenOutfit`), zeigt das Hauptmenü zuerst nur die
   Garderobe mit Begrüßung; erst nach „los geht's" erscheinen die Reiter.
+- Anleitung: `components/menu/Guide.jsx` – drei Blätter (Ablauf, Bedienung, Installation als App auf iPhone/iPad
+  und Android; das eigene Gerät steht vorn). Beim allerersten Besuch kommt sie VOR der Garderobe (`hasSeenGuide`
+  in `guideSeen.js`, gemerkt in `localStorage['mt.guideSeen']` bzw. je Konto), danach liegt sie im Menü unter
+  „Anleitung" (am Handy „?"). Ändert sich Ablauf oder Bedienung, die Texte dort nachziehen.
 - Stoff im Fahrtwind: `userData.setWind(tempo 0…1, t)` lässt weite Teile flattern (Maßstab von Jacke und
   Hosenbeinen, dazu ein Jackenschoß), normale leicht, enge (`fit: 'tight'`, Einteiler) gar nicht.
 - Wer steht, bleibt stehen (auch am Hang) – los geht es erst mit „vorwärts".

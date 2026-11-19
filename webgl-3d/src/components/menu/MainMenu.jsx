@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Wardrobe from './Wardrobe.jsx';
+import Guide from './Guide.jsx';
+import { hasSeenGuide, markGuideSeen } from './guideSeen.js';
 import { hasChosenOutfit } from '../../webgl/SkiOutfits.js';
 import { localSaveIndex, remoteSaveIndex, agoText } from '../../savegames';
 import {
@@ -145,7 +147,9 @@ const LevelArt = ({ level, height = 96 }) => {
 const MainMenu = ({ onStartLevel }) => {
     // Wer zum ersten Mal hier ist, kleidet zuerst seinen Fahrer ein
     const [firstVisit, setFirstVisit] = useState(() => !hasChosenOutfit());
-    const [tab, setTab] = useState(() => (hasChosenOutfit() ? 'campaign' : 'rider')); // 'campaign' | 'sandbox' | 'rider'
+    // … und noch davor steht einmalig die Anleitung
+    const [intro, setIntro] = useState(() => !hasSeenGuide());
+    const [tab, setTab] = useState(() => (!hasSeenGuide() ? 'guide' : hasChosenOutfit() ? 'campaign' : 'rider')); // 'campaign' | 'sandbox' | 'rider' | 'guide'
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [hoveredLevel, setHoveredLevel] = useState(null);
     const [progress] = useState(() => loadProgress());
@@ -254,11 +258,12 @@ const MainMenu = ({ onStartLevel }) => {
 
             {/* Moduswahl dezent oben rechts */}
             {/* Beim ersten Besuch gibt es nur die Garderobe – erst einkleiden, dann geht es ins Menü */}
-            {!firstVisit && (
+            {!firstVisit && !intro && (
             <div className="mm-modes">
                 <button className={`mm-mode ${tab === 'campaign' ? 'on' : ''}`} onClick={() => setTab('campaign')}>Kampagne</button>
                 <button className={`mm-mode ${tab === 'sandbox' ? 'on' : ''}`} onClick={() => setTab('sandbox')}>Sandbox</button>
                 <button className={`mm-mode ${tab === 'rider' ? 'on' : ''}`} onClick={() => setTab('rider')}>Fahrer</button>
+                <button className={`mm-mode ${tab === 'guide' ? 'on' : ''}`} onClick={() => setTab('guide')} aria-label="Anleitung"><span className="mm-mode-long">Anleitung</span><span className="mm-mode-short">?</span></button>
             </div>
             )}
 
@@ -344,6 +349,10 @@ const MainMenu = ({ onStartLevel }) => {
                         );
                     })()}
                 </div>
+            )}
+
+            {tab === 'guide' && (
+                <Guide intro={intro} onDone={() => { markGuideSeen(); setIntro(false); setTab(firstVisit ? 'rider' : 'campaign'); }} />
             )}
 
             {tab === 'rider' && <Wardrobe welcome={firstVisit} onDone={() => { setFirstVisit(false); setTab('campaign'); }} />}

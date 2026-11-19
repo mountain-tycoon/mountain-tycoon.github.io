@@ -457,3 +457,86 @@
 .mm-wardrobe-welcome b { font-size: 16px; color: #e8eef6; }
 .mm-wardrobe-welcome span { font-size: 13px; color: #c3ccd8; line-height: 1.45; }
 .mm-wardrobe-go { margin-top: 16px; width: 100%; }
+
+/* ---------- Anleitung (erster Besuch und Reiter „Anleitung") ---------- */
+.mm-guide-wrap {
+    position: absolute; inset: 0; z-index: 20; overflow-y: auto;
+    display: flex; align-items: flex-start; justify-content: center; padding: 130px 24px 30px; box-sizing: border-box;
+}
+.mm-guide {
+    width: min(860px, 100%); margin: auto; padding: 22px 24px 20px; box-sizing: border-box; border-radius: 6px;
+    background: rgba(10,16,26,0.72); border: 1px solid rgba(232,238,246,0.14); backdrop-filter: blur(10px);
+    color: #e8eef6;
+}
+.mm-guide-head { display: flex; flex-direction: column; gap: 3px; margin-bottom: 14px; }
+.mm-guide-head span { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: #9aa6b6; }
+.mm-guide-head b { font-size: 22px; letter-spacing: 0.02em; }
+.mm-guide-tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.mm-guide-tab {
+    display: flex; align-items: center; gap: 8px; padding: 7px 13px 7px 8px; border-radius: 999px; cursor: pointer;
+    background: transparent; border: 1px solid rgba(190,214,240,0.2); color: #9fb4cc;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+}
+.mm-guide-tab i, .mm-guide-flow li > i {
+    display: flex; align-items: center; justify-content: center; flex: 0 0 auto; font-style: normal; font-weight: 700;
+    border-radius: 50%; background: rgba(232,238,246,0.12); color: #e8eef6;
+}
+.mm-guide-tab i { width: 18px; height: 18px; font-size: 10px; }
+.mm-guide-tab.on { background: rgba(232,238,246,0.94); color: #0b1220; border-color: transparent; }
+.mm-guide-tab.on i { background: #0b1220; color: #e8eef6; }
+.mm-guide-flow { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mm-guide-flow li, .mm-guide-card {
+    padding: 12px 14px; border-radius: 4px; background: rgba(232,238,246,0.06); border: 1px solid rgba(232,238,246,0.12);
+}
+.mm-guide-flow li { display: flex; gap: 12px; align-items: flex-start; }
+.mm-guide-flow li > i { width: 26px; height: 26px; font-size: 12.5px; }
+.mm-guide-flow b { display: block; font-size: 14.5px; margin-bottom: 3px; }
+.mm-guide-flow span, .mm-guide-card span, .mm-guide-card li, .mm-guide-lead, .mm-guide-note { font-size: 13px; line-height: 1.5; color: #c3ccd8; }
+.mm-guide-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mm-guide-cols.two { grid-template-columns: 1fr 1fr; }
+.mm-guide-card h3 {
+    margin: 0 0 9px; display: flex; align-items: center; gap: 8px;
+    font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: #9aa6b6; font-weight: 600;
+}
+.mm-guide-card h3 em {
+    font-style: normal; letter-spacing: 0.12em; font-size: 9.5px; padding: 2px 7px; border-radius: 999px;
+    background: #e8eef6; color: #0b1220;
+}
+.mm-guide-card.mine { border-color: rgba(232,238,246,0.42); background: rgba(232,238,246,0.1); }
+.mm-guide-card p { margin: 0 0 8px; display: flex; flex-direction: column; gap: 1px; }
+.mm-guide-card p:last-child { margin-bottom: 0; }
+.mm-guide-card p b { font-size: 13.5px; }
+.mm-guide-card ol { margin: 0; padding-left: 19px; }
+.mm-guide-card ol li { margin-bottom: 6px; padding-left: 2px; }
+.mm-guide-card ol li:last-child { margin-bottom: 0; }
+.mm-guide-lead { margin: 0 0 12px; color: #e8eef6; }
+.mm-guide-note { margin: 12px 0 0; }
+.mm-guide-foot { display: flex; gap: 8px; align-items: center; margin-top: 18px; }
+.mm-guide-foot .mm-go { flex: 0 0 auto; padding-left: 28px; padding-right: 28px; }
+.mm-guide-skip {
+    margin-left: auto; padding: 8px 4px; background: none; border: 0; cursor: pointer; color: #9aa6b6;
+    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+}
+.mm-guide-skip:hover { color: #e8eef6; }
+/* Neben dem Logo Platz lassen: breit daneben, mittelbreit darunter */
+/* Reiter „Anleitung": am Handy nur ein Fragezeichen */
+.mm-mode-short { display: none; }
+@media (min-width: 1081px) { .mm-guide-wrap { padding: 110px 24px 30px 340px; } }
+@media (min-width: 761px) and (max-width: 1080px) and (min-height: 521px) { .mm-guide-wrap { padding-top: 215px; } }
+@media (max-width: 760px) {
+    .mm-guide-wrap { padding: calc(96px + env(safe-area-inset-top, 0px)) 12px calc(24px + env(safe-area-inset-bottom, 0px)); }
+    .mm-guide { padding: 16px 14px; }
+    .mm-guide-head b { font-size: 19px; }
+    .mm-guide-flow, .mm-guide-cols, .mm-guide-cols.two { grid-template-columns: 1fr; }
+    .mm-guide-foot .mm-go { flex: 1; padding-left: 0; padding-right: 0; }
+    /* Am Handy ist neben dem Logo kein Platz für ein viertes Wort */
+    .mm-mode-long { display: none; }
+    .mm-mode-short { display: inline; }
+    .mm-mode { padding: 8px 9px; font-size: 11px; letter-spacing: 0.05em; }
+    .mm-mode:last-child { padding: 8px 12px; }
+}
+@media (max-height: 520px) and (max-width: 1080px) {
+    .mm-guide-wrap { padding-top: 70px; }
+    .mm-guide-flow, .mm-guide-cols.two { grid-template-columns: 1fr 1fr; }
+    .mm-guide-cols { grid-template-columns: repeat(3, 1fr); }
+}
