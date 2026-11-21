@@ -46,7 +46,8 @@ const CONTROLS = [
         ['Schuss / gehen', 'Bild gedrückt halten – am Rechner W'],
         ['In der Luft', 'Lenken dreht, vorwärts und bremsen sind die Salti'],
         ['Loipe', 'vorwärts = Skatingschritt; der Puls steigt mit Tempo und Steigung'],
-        ['Schießstand', 'ziehen = zielen, „Schuss" löst aus – hoher Puls lässt das Visier wackeln']
+        ['Schießstand', 'ziehen = zielen, „Schuss" löst aus – hoher Puls lässt das Visier wackeln'],
+        ['Eisbahn', 'durch den Eingang aufs Eis: laufen, mit „bremsen" springen – am Puck wird daraus der Schuss aufs Tor']
     ]]
 ];
 

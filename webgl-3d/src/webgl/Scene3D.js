@@ -10,7 +10,7 @@ import { buildSurround } from './Surround3D.js';
 import { prepareWater, buildWater } from './Water3D.js';
 import { MATS, makeChalet, makeHotel, makeRestaurant, makeTicketOffice, makeLift, makeChairlift, makeChairlift2, makeChairlift6, makePlatterLift, makeMagicCarpet, makeSurfaceLift, makeAerialTram, makeAerialTramXL, makeGondola8, makeGondola4, makeMegaGondola, makeVillage, makeParking, makeParkingGarage, makeSnowCannon, makeFunpark, makeSummitCross, makeBench, makeSignpost, makeTextSprite, makeFloodlight, findTopPeaks, makeSkiSchool, makeSkiRental, makeShop, makeImbiss, makeBusStop, makeSnowcatGarage, makeToilet, makeRunDressing, makeHalfpipeShell,
     makeHotelClass, HOTEL_BEDS, makeChaletClass, makeGastro, makeMedicalStation, makeHospital, makeWorkshop,
-    makeReservoir, makeBigReservoir, makeKicker, makeHalfpipe, makeRaceCourse, makeApresSkiBar, makePartyTent, makeDisco, makeSauna, makeThermalBath, makeIceRink,
+    makeReservoir, makeBigReservoir, makeKicker, makeHalfpipe, makeRaceCourse, makeApresSkiBar, makePartyTent, makeDisco, makeSauna, makeThermalBath,
     setLevelCountry, setWindGust } from './Buildings3D.js';
 import { PEAK_NAMES } from './PeakNames.js';
 import { M0 as VMATS, makeCar, makeBus, makeSnowcat, makeSkier, makeSkiInstructor, makePisteMarker, makeWalker, makeAlertMark, makeSadMark, makeRescueSled, makeRescueHeli, makeCargoHeli } from './Vehicles3D.js';
@@ -19,6 +19,7 @@ import { planVillageAccess, findPath, smoothPath } from './AccessPlanner.js';
 import { createSkiRun } from './SkiRun.js';
 import { createLoipen, LOIPE_W } from './Loipe3D.js';
 import { makeBiathlonRange, BIATHLON_R } from './Biathlon3D.js';
+import { makeIceRink } from './IceRink3D.js';
 // ===== POSTPROCESSING =====
 // Hebt die Bildqualität deutlich: weiches Glühen an hellen Kanten (Schnee,
 // Sonne, Lichter), Kantenglättung und ein abschließendes Color-Grading.
@@ -5588,15 +5589,15 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                     const a = t * sp * dir + (g.seed % 17) * 0.37;
                     // Ellipse passend zur rechteckigen Bahn, leicht nach vorn versetzt
                     const ex = Math.cos(a) * lane * 1.5, ey = Math.sin(a) * lane;
-                    const px2 = g.walkTo.gx + ex - fx * 0.2;
-                    const py2 = g.walkTo.gy + ey - fy * 0.2;
+                    // die Bahn kann gedreht stehen: Längsachse = lokales x des Gebäudes
+                    const px2 = g.walkTo.gx + ex * fy + ey * fx;
+                    const py2 = g.walkTo.gy - ex * fx + ey * fy;
                     const pos2 = worldPosSmooth(px2, py2);
                     g.mesh.visible = true;
-                    g.mesh.position.lerp(new THREE.Vector3(pos2.x, pos2.y + 0.12, pos2.z), 0.25);
+                    g.mesh.position.lerp(new THREE.Vector3(pos2.x, pos2.y + 0.2, pos2.z), 0.25);
                     // in Fahrtrichtung schauen + Kurvenlage
-                    const ah = worldPosSmooth(
-                        g.walkTo.gx + Math.cos(a + 0.25 * dir) * lane * 1.5 - fx * 0.2,
-                        g.walkTo.gy + Math.sin(a + 0.25 * dir) * lane - fy * 0.2);
+                    const ax2 = Math.cos(a + 0.25 * dir) * lane * 1.5, ay2 = Math.sin(a + 0.25 * dir) * lane;
+                    const ah = worldPosSmooth(g.walkTo.gx + ax2 * fy + ay2 * fx, g.walkTo.gy - ax2 * fx + ay2 * fy);
                     g.mesh.lookAt(ah.x, g.mesh.position.y, ah.z);
                     g.mesh.rotation.z = -dir * 0.16;
                     const ud2 = g.mesh.userData;
@@ -8905,6 +8906,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         g.position.set(wx, placeY + 0.05, wz);   // knapp über Grund, nie darin
         g.rotation.y = placeRot; // Planungs-Rotation bzw. Falllinie übernehmen
         scene.add(g); applyGlassEnv(g);
+        if (g.userData.setNight) nightLit.push(g);       // eigenes Flutlicht (Eisbahn, Schießstand)
         // Durchfahrts-Anlagen: jedes Ausstattungselement auf seine eigene
         // Geländehöhe setzen (userData.ground) — so steht nichts in der Luft
         // oder im Schnee, auch wenn der Hang gewölbt ist.
@@ -9330,8 +9332,27 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     };
     // Fahrfläche für den Spieler: in der Halfpipe die SCHALE (wie bei den Gästen), nicht die tiefer
     // ausgehobene Mulde darunter.
+    /**
+     * Eisbahn an dieser Stelle: Lage in den Koordinaten der Bahn (lx längs, lz quer, vorn = +z), `inside` = auf
+     * dem Eis, `zone` = Eis samt Vorplatz (dort darf die Spielfigur trotz Baufläche hin).
+     */
+    const rinkAt = (wx, wz) => {
+        for (const b of placedBuildings) {
+            if (b.type !== 'eisbahn' || !b.mesh.userData.rink) continue;
+            const dx = wx - b.rec.x, dz = wz - b.rec.z;
+            if (Math.abs(dx) > 16 || Math.abs(dz) > 16) continue;
+            const rk = b.mesh.userData.rink, rot = b.mesh.rotation.y, c = Math.cos(rot), s = Math.sin(rot);
+            const lx = dx * c - dz * s, lz = dx * s + dz * c;
+            const zone = Math.abs(lx) < rk.hw + 0.4 && lz > -rk.hd - 0.4 && lz < rk.hd + 10;
+            if (!zone) continue;
+            return { rink: rk, lx, lz, c, s, zone, inside: Math.abs(lx) < rk.hw - 0.12 && Math.abs(lz) < rk.hd - 0.12, y: b.mesh.position.y + rk.iceY };
+        }
+        return null;
+    };
     const skiSurfaceAt = (wx, wz) => {
         const base = surfaceAt(wx, wz);
+        const ri = rinkAt(wx, wz);
+        if (ri && Math.abs(ri.lx) < ri.rink.hw && Math.abs(ri.lz) < ri.rink.hd) return ri.y;
         const q = skiRunAt(wx, wz);
         if (!q || q.type !== 'halfpipe' || !q.rn.strip) return base;
         const u = Math.abs(q.along / q.hl), x = Math.abs(q.across) / tile;
@@ -9349,6 +9370,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         huts: () => placedBuildings.filter(b => HUT_NAMES[b.type] && b.rec).map(b => ({ x: b.rec.x, z: b.rec.z, name: HUT_NAMES[b.type] })),
         isBuilt: (gx, gy) => occAt(gx, gy) === OCC_BUILD,
         routes: () => guestRoutes,
+        rinkAt,
         loipeAt: (wx, wz) => !!loipen.at((wx + half) / tile, (wz + half) / tile),
         loipeDir: (wx, wz) => loipen.dirAt((wx + half) / tile, (wz + half) / tile),
         ranges: () => placedBuildings.filter(b => b.type === 'biathlon' && b.mesh.userData.shoot).map(b => ({ x: b.rec.x, z: b.rec.z, obj: b.mesh })),

@@ -9,7 +9,7 @@ Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
   - `src/engine/terrainGen.js` – Landschaftserzeugung (Spielfeld samt Umland), siehe „Landschaft" unten
   - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `SnowSurface.js`, `Surround3D.js`,
     `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`, `SkiFigure.js`, `SkiOutfits.js`,
-    `SkiSound.js`, `Loipe3D.js`, `Biathlon3D.js`). Die ganze Simulation (Gäste, Lifte, Wirtschaft) steckt in `Scene3D.js`.
+    `SkiSound.js`, `Loipe3D.js`, `Biathlon3D.js`, `IceRink3D.js`). Die ganze Simulation (Gäste, Lifte, Wirtschaft) steckt in `Scene3D.js`.
   - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
   - `src/components/menu/` – Hauptmenü (Kampagne, Sandbox, Fahrer-Garderobe `Wardrobe.jsx`) und Ladebildschirm
   - `src/constants/campaign.js` – Level, Aufgaben, Fortschritt
@@ -163,6 +163,22 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (`fire`). Es schwankt das ganze Bild – Grundunruhe, Atem und ein Ruck je Herzschlag, alles mit dem Puls
   stärker; im Anschlag sinkt der Puls langsam. Getroffen ist die Scheibe unter der Bildmitte im Augenblick des
   Schusses. Der Diopterring im HUD bekommt seine Größe aus der Szene (`shooting.ring`).
+- **Flutlicht an Gebäuden:** Schießstand und Eisbahn haben `userData.setNight(dark)` (Strahler, Eigenlicht der
+  angestrahlten Flächen, Lichtkegel nur als Hauch und erst bei Dunkelheit – kräftige Kegel wirken aus der Nähe
+  wie gelbe Flächen). `placeBuildingAt` hängt jedes Gebäude mit `setNight` an `nightLit`.
+
+## Eisbahn (Eishockey)
+- `IceRink3D.js` (`makeIceRink`, Gebäude `eisbahn`): Feld mit Linien, Bande mit Eingang vorn in der Mitte (lokal
+  +z), zwei Tore, Torhüter, Puck. Das Spiel steckt in `userData.rink` (`step`, `touch`, `shoot`, `onGoal`), alles in
+  Koordinaten der Bahn; `userData.update` treibt Puck und Torhüter auch ohne Spieler an.
+- Szene: `rinkAt(wx, wz)` rechnet Weltpunkte in die Bahn um (`inside` = auf dem Eis, `zone` = Eis samt Vorplatz,
+  dort darf die Spielfigur trotz Baufläche hin); `skiSurfaceAt` liefert auf dem Eis dessen Höhe. Die Gäste laufen
+  ihre Ellipse jetzt in der Ausrichtung des Gebäudes.
+- Spielfigur (`ice` in `SkiRun.js`): Schlittschuhe und Schläger statt Ski und Stöcken (`setIce` in `SkiFigure.js`),
+  „vorwärts" läuft, ohne Eingabe gleitet sie aus. „Bremsen" ist am Puck der Schuss, in Fahrt ein kleiner Sprung
+  (links/rechts dreht, anderthalbfache Drehrate, keine Salti – gewertet wie die anderen Tricks), im Stand die
+  Bremse. Der Puck wird durch Berühren geführt. Aufs Eis und herunter geht es nur durch den Eingang; an der Bande
+  prallt man ab.
 
 ## Landschaft, Umland, Schnee
 - **Erzeugung** (`engine/terrainGen.js`): kein Aufaddieren breiter Kuppeln mehr (das ergab in jedem Level einen

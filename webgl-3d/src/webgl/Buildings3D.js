@@ -3292,61 +3292,6 @@ export function makeThermalBath() {
     spa.position.set(4.0, 0.6, 1.6); g.add(spa);
     return g;
 }
-/** Eislaufbahn (2D: eislaufbahn) — Eisfläche mit Bande und Flutlicht. */
-export function makeIceRink() {
-    const g = new THREE.Group();
-    const W = 11, D = 8;                                   // deutlich größere Bahn
-    const ice = new THREE.Mesh(new THREE.BoxGeometry(W, 0.14, D),
-        new THREE.MeshStandardMaterial({ color: 0xd7ecf7, roughness: 0.05, metalness: 0.3 }));
-    ice.position.y = 0.1; ice.receiveShadow = true; g.add(ice);
-    // Bande ringsum (mit Werbebande unten)
-    const bandeMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.7 });
-    const adMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.6 });
-    for (const sz of [1, -1]) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(W + 0.3, 0.5, 0.18), bandeMat);
-        b.position.set(0, 0.35, sz * (D / 2 + 0.05)); g.add(b);
-        const ad = new THREE.Mesh(new THREE.BoxGeometry(W * 0.8, 0.2, 0.05), adMat);
-        ad.position.set(0, 0.25, sz * (D / 2 + 0.14)); g.add(ad);
-    }
-    for (const sx of [-1, 1]) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.5, D + 0.4), bandeMat);
-        b.position.set(sx * (W / 2 + 0.05), 0.35, 0); g.add(b);
-    }
-    // Spielfeldmarkierungen: Mittelkreis, Mittellinie, zwei Zonenkreise
-    const lineMat = new THREE.MeshStandardMaterial({ color: 0x2563eb });
-    const circ = new THREE.Mesh(new THREE.TorusGeometry(1.5, 0.04, 6, 30), lineMat);
-    circ.rotation.x = Math.PI / 2; circ.position.y = 0.18; g.add(circ);
-    const mid = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, D - 0.4), lineMat);
-    mid.position.y = 0.18; g.add(mid);
-    for (const sx of [-3.4, 3.4]) {
-        const c2 = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.03, 6, 22),
-            new THREE.MeshStandardMaterial({ color: 0xdc2626 }));
-        c2.rotation.x = Math.PI / 2; c2.position.set(sx, 0.18, 0); g.add(c2);
-    }
-    // Flutlichtmasten an allen Ecken
-    for (const [px, pz] of [[-W / 2 - 0.5, -D / 2 - 0.5], [W / 2 + 0.5, -D / 2 - 0.5],
-                            [-W / 2 - 0.5, D / 2 + 0.5], [W / 2 + 0.5, D / 2 + 0.5]]) {
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 3.4, 8), M.metal);
-        pole.position.set(px, 1.7, pz); pole.castShadow = true; g.add(pole);
-        const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.28), M.winGlow);
-        lamp.position.set(px, 3.45, pz); g.add(lamp);
-    }
-    // Kleines Verleihhäuschen für Schlittschuhe
-    const hut = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.2, 1.4), M.wood);
-    hut.position.set(-W / 2 - 1.6, 0.6, D / 2 - 1.0); hut.castShadow = true; g.add(hut);
-    const hutRoof = makePrismRoof(2.1, 1.7, 0.5);
-    hutRoof.position.set(-W / 2 - 1.6, 1.2, D / 2 - 1.0); g.add(hutRoof);
-    // Bänke zum Anschnallen
-    for (let i = 0; i < 3; i++) {
-        const bench = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.1, 0.4), M.woodDark);
-        bench.position.set(-2 + i * 2.2, 0.45, D / 2 + 1.1); g.add(bench);
-        for (const lx of [-0.6, 0.6]) {
-            const leg = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.1), M.woodDark);
-            leg.position.set(-2 + i * 2.2 + lx, 0.2, D / 2 + 1.1); g.add(leg);
-        }
-    }
-    return g;
-}
 /** Toilettenhäuschen (2D: toilettenhauschen) — kleines Servicegebäude mit WC-Schildern. */
 export function makeToilet() {
     const g = new THREE.Group();

@@ -767,7 +767,9 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                 )}
                 {!ski.riding && !ski.resting && !aim && !ski.hint && (touch ? ski.kmh < 4 : true) && (
                     <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5, lineHeight: 1.45 }}>
-                        {ski.nordic
+                        {ski.ice
+                            ? (touch ? 'Eisbahn: Bild halten = laufen · beide Tasten = Sprung, am Puck = Schuss' : 'Eisbahn: W laufen · A / D lenken · S = Sprung, am Puck = Schuss')
+                            : ski.nordic
                             ? (touch ? 'Loipe: Bild gedrückt halten = Skatingschritt · Seitentasten lenken' : 'Loipe: W halten = Skatingschritt · A / D lenken · S bremsen')
                             : touch ? 'Seitentasten lenken · beide zugleich bremsen · Bild gedrückt halten: Schuss und gehen'
                                : 'A / D oder ← / → lenken · W Schuss und gehen · S bremsen · Esc beenden'}

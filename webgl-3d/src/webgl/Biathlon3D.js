@@ -27,6 +27,9 @@ export function makeBiathlonRange() {
         red: new THREE.MeshStandardMaterial({ color: 0xc8322c, roughness: 0.7 }),
         blue: new THREE.MeshStandardMaterial({ color: 0x2b62b8, roughness: 0.7 })
     };
+    // nachts strahlt das Flutlicht Scheibenkästen und Matten an: sie bekommen dann Eigenlicht
+    mats.white.emissive = new THREE.Color(0xfff2d8); mats.white.emissiveIntensity = 0;
+    mats.snow.emissive = new THREE.Color(0x8fa3c4); mats.snow.emissiveIntensity = 0;
     const discOff = new THREE.MeshStandardMaterial({ color: 0x14171b, roughness: 0.6 });
     const discHit = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, emissive: 0x555555 });
     const parts = {};
@@ -74,6 +77,33 @@ export function makeBiathlonRange() {
         boxAt('dark', 0.03, 1.1, 0.03, 3.9, 0.55, z);
         boxAt('red', 0.3, 0.12, 0.02, 4.06, 1.03, z);
     }
+    // Flutlicht: zwei Masten neben der Schützenlinie strahlen die Bahn hinunter, zwei kleine neben den Scheiben
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff4d0, emissive: 0xffe08a, emissiveIntensity: 0.2, roughness: 0.4 });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0, depthWrite: false, side: THREE.FrontSide, blending: THREE.AdditiveBlending });
+    const lamps = [], glows = [];
+    for (const [sx, z, h, aim] of [[-1, FIRE_Z - 1.6, 5.2, -1], [1, FIRE_Z - 1.6, 5.2, -1], [-1, TARGET_Z + 1.4, 3.2, -1], [1, TARGET_Z + 1.4, 3.2, -1]]) {
+        const px = sx * 4.9;
+        add('dark', new THREE.CylinderGeometry(0.07, 0.11, h, 8), px, h / 2, z);
+        boxAt('dark', 0.08, 0.08, 0.9, px - sx * 0.2, h, z + aim * 0.3);
+        lamps.push(new THREE.BoxGeometry(0.7, 0.24, 0.3).rotateX(0.5).translate(px - sx * 0.3, h - 0.14, z + aim * 0.6).toNonIndexed());
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(h * 0.5, h + 0.4, 18, 1, true), glowMat);
+        cone.position.set(px - sx * 2.0, h / 2, z + aim * 1.6);
+        cone.rotation.set(-0.5, 0, -sx * 0.42);
+        cone.visible = false; g.add(cone); glows.push(cone);
+    }
+    g.add(new THREE.Mesh(mergeGeometries(lamps), lampMat));
+    // Lichtfleck auf den Scheiben: ein heller Schein vor dem Kugelfang
+    const spot = new THREE.Mesh(new THREE.PlaneGeometry(9.4, 2.2), new THREE.MeshBasicMaterial({ color: 0xfff0c8, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending }));
+    spot.position.set(0, 1.05, TARGET_Z - 0.72); spot.visible = false; g.add(spot);
+    g.userData.setNight = (dark) => {
+        const n = Math.max(0, Math.min(1, dark * 1.4 - 0.15));
+        lampMat.emissiveIntensity = 0.2 + n * 2.4;
+        mats.white.emissiveIntensity = n * 0.62; mats.snow.emissiveIntensity = n * 0.3;
+        discHit.emissiveIntensity = 1 + n * 0.8;
+        for (const c of glows) c.visible = n > 0.35;           // erst wenn es wirklich dunkel ist, und nur als Hauch
+        glowMat.opacity = n * 0.07;
+        spot.visible = n > 0.1; spot.material.opacity = n * 0.16;
+    };
     for (const k of Object.keys(parts)) {
         const m = new THREE.Mesh(mergeGeometries(parts[k].map(q => (q.index ? q.toNonIndexed() : q))), mats[k]);
         m.castShadow = k !== 'snow'; m.receiveShadow = true;

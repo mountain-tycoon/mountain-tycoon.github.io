@@ -83,8 +83,11 @@ export function makePlayerSkier(o = composeOutfit()) {
             bind.position.set(0, 0.022, bz); ski.add(bind);
         }
         ankle.add(ski);
+        // Kufe für die Eisbahn (statt des Skis)
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.03, 0.3), M.pole);
+        blade.position.set(0, -0.092, 0.03); blade.visible = false; ankle.add(blade);
         body.add(hip);
-        return { hip, knee, ankle, ski };
+        return { hip, knee, ankle, ski, blade };
     };
     const L = mkLeg(-0.068), R = mkLeg(0.068);
 
@@ -207,7 +210,7 @@ export function makePlayerSkier(o = composeOutfit()) {
         const basket = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.008, 8), M.glove);
         basket.position.y = -0.53; pole.add(basket);
         torso.add(sh);
-        return { sh, elbow, pole };
+        return { sh, elbow, pole, stick: null };
     };
     const AL = mkArm(-0.172), AR = mkArm(0.172);
 
@@ -226,8 +229,8 @@ export function makePlayerSkier(o = composeOutfit()) {
     /** Ski schultern (zu Fuß) oder wieder anschnallen. */
     ud.setCarry = (on) => {
         ud.carrying = !!on;
-        L.ski.visible = R.ski.visible = !on; carried.visible = !!on;
-        AL.pole.visible = AR.pole.visible = !on;
+        L.ski.visible = R.ski.visible = !on && !ud.onIce; carried.visible = !!on && !ud.onIce;
+        AL.pole.visible = AR.pole.visible = !on && !ud.onIce;
     };
     /**
      * Bein stellen: bend = Kniebeuge (0 gestreckt … 1.4 tief), swing = Vor-/Rückschwung der
@@ -246,6 +249,7 @@ export function makePlayerSkier(o = composeOutfit()) {
         arm.sh.rotation.set(shoulder, 0, sign * out);
         arm.elbow.rotation.x = elbow;
         arm.pole.rotation.x = pole - shoulder - elbow - lean;
+        if (arm.stick) arm.stick.rotation.x = -0.95 - shoulder - elbow - lean;       // Schläger nach vorn unten aufs Eis
     };
     /**
      * Ganze Haltung in einem Aufruf.
@@ -263,8 +267,8 @@ export function makePlayerSkier(o = composeOutfit()) {
             }
             body.position.y = 0;
         } else {
-            const dl = setLeg(L, p.bendL ?? 0, p.swingL ?? 0, -(p.plough ?? 0) * 0.16 - (p.outL ?? 0), -1);
-            const dr = setLeg(R, p.bendR ?? 0, p.swingR ?? 0, -(p.plough ?? 0) * 0.16 - (p.outR ?? 0), 1);
+            const dl = setLeg(L, p.bendL ?? 0, p.swingL ?? 0, -(p.plough ?? 0) * 0.16 + (p.outL ?? 0), -1);
+            const dr = setLeg(R, p.bendR ?? 0, p.swingR ?? 0, -(p.plough ?? 0) * 0.16 + (p.outR ?? 0), 1);
             // Pflug: Skispitzen zusammen – Skating (splay): Spitzen auseinander
             const tips = (p.plough ?? 0) - (p.splay ?? 0);
             L.ankle.rotation.y = -tips * 0.3; R.ankle.rotation.y = tips * 0.3;
@@ -276,6 +280,19 @@ export function makePlayerSkier(o = composeOutfit()) {
         head.rotation.set(-lean * 0.75, -(p.twist ?? 0) * 0.5, -(p.roll ?? 0) * 0.6);   // der Blick bleibt nach vorn gerichtet, der Kopf waagerecht
         setArm(AL, p.armX ?? 0, p.elbow ?? 0, (p.armOut ?? 0.12) + (p.armOutL ?? 0), -1, p.pole ?? 0.5, lean);
         setArm(AR, p.armXR ?? p.armX ?? 0, p.elbow ?? 0, (p.armOut ?? 0.12) + (p.armOutR ?? 0), 1, p.pole ?? 0.5, lean);
+    };
+    // Eisbahn: Schlittschuhe statt Ski, ein Hockeyschläger statt der Stöcke
+    {
+        const stick = new THREE.Group(); stick.position.y = -0.18; stick.visible = false;
+        const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.86, 0.028), M.bind); shaft.position.y = -0.4; stick.add(shaft);
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.06, 0.24), M.bind); blade.position.set(0, -0.82, 0.1); blade.rotation.x = 0.95; stick.add(blade);
+        AR.elbow.add(stick); AR.stick = stick;
+    }
+    ud.onIce = false;
+    ud.setIce = (on) => {
+        ud.onIce = !!on;
+        L.blade.visible = R.blade.visible = AR.stick.visible = ud.onIce;
+        ud.setCarry(ud.carrying && !ud.onIce);
     };
     /** Höhe der Hüfte über den Füßen (für das Sitzen im Sessel). */
     ud.hipY = HIP_Y;

@@ -34,6 +34,11 @@ langsam wieder fällt. Unter „Extras" steht der **Biathlon-Schießstand**: dav
 durch Ziehen auf die fünf Scheiben richten und schießen. Bei hohem Puls schwankt das Visier stark – wer kurz
 wartet, trifft besser.
 
+## Eisbahn
+Die Eislaufbahn (unter „Wellness") ist ein kleines Eishockeyfeld mit Toren, Torhütern, Puck und Flutlicht. Die eigene
+Figur kommt durch den Eingang bei den Bänken aufs Eis, läuft Schlittschuh, springt (mit Drehung gibt es Punkte) und
+spielt Hockey: den Puck anlaufen und führen, mit „bremsen" aufs Tor schießen.
+
 ## Spielstand
 
 Das Spiel sichert von selbst: nach jedem Bauen, regelmäßig zwischendurch und beim Verlassen. Der Stand
