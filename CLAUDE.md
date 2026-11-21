@@ -66,9 +66,13 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   abgestimmt. Nicht nebenbei auf den direkten Renderpfad oder eine Ausgabestufe umstellen.
 - **Fallstrick:** `vertexColors: true` nur setzen, wenn die Geometrie ein Farbattribut hat – sonst wird das
   Material schwarz. Farben je Instanz (`setColorAt`) brauchen den Schalter nicht.
-- **Bäume** stehen zu Zehntausenden: Geometrie sparsam halten (`coneGeo` in `TerrainMesh.js`, offene Stämme,
-  Hauben ohne Unterseite). Standorte sind gewürfelt und in der Zelle versetzt (`treeCell`, `treeJitter`) –
-  kein Raster, keine Reihen.
+- **Bäume** stehen zu Zehntausenden: Geometrie sparsam halten. Nadelbäume bestehen aus Stern-Kränzen
+  (`treeTier` in `TerrainMesh.js`: lange, leicht hängende Astspitzen mit Einschnitten dazwischen – zackige
+  Silhouette bei rund 50 Dreiecken je Fichte, Unterseite nur am untersten Kranz, Stamm dreikantig und offen).
+  Eckfarben schattieren von innen (dunkel) nach außen (hell); deshalb trägt das Baum-Material jetzt
+  `vertexColors` und ALLE drei Baumformen ein Farbattribut. Die Schneehauben sind dieselben Sterne, nur der
+  obere Teil (`cap`). Das Umland nutzt `treeTier` ebenfalls. Standorte sind gewürfelt und in der Zelle versetzt
+  (`treeCell`, `treeJitter`) – kein Raster, keine Reihen.
 - **Ausprobieren:** nur bei `npm run dev` gibt es `window.__mtCam` (Kamera stellen: `orbit.setState`,
   Tageszeit: `clock`/`CYCLE`, Qualitätsstufe: `quality.set`, Wetter: `weather`, Geländepunkt unter einem
   Bildpunkt: `raycastTerrain`) und den Direktstart `http://localhost:5180/?level=<id>` (z. B. `schweiz`).
@@ -94,6 +98,11 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Oberkörper, Arme, `sit` für den Sessel) und hält dabei die Ski flach; `setCarry` schultert die Ski.
   `roll`/`twist` richten den Oberkörper gegen die Schräglage der Beine auf (Hüftknick in der Kurve). Aussehen:
   taillierte Jacke mit Schulterpolstern, dunkler Helm mit Zierstreifen, helle Skischuhe, kleiner Rucksack.
+  Gliedmaßen verjüngen sich (`limb` mit `taper`), Jacke und Hose tragen eine erzeugte Normalenkarte (`fabricNormal`:
+  Falten, nur ein Hauch Gewebe – kräftiger wirkt es wie ein Netz), das Gesicht hat Kinn, Nase, Mund, Ohren und –
+  ohne Brille – Augen. Faltenringe an Knie und Ellbogen wurden ausprobiert und verworfen (sahen aus wie Schlaufen).
+- Gäste (`makeSkier` in `Vehicles3D.js`): Oberschenkel, Rumpf, Arme und Schuhe sind geteilte Kapseln (`GUEST_GEO`)
+  statt Kisten – gleiche Zahl an Netzen, nur runder.
 - Outfits: `SkiOutfits.js` – je Outfit ein Satz Farben und Formschalter (Kopfbedeckung, Brille, Jacke/Pullover/
   Einteiler, Streifen, Rucksack, Passform `fit`), jedes mit Jahreszahl von heute bis 1935. Die Teile sind einzeln
   kombinierbar: `SLOTS` (Kopf, Oberteil, Hose, Schuhe, Ski) nennt je Teil die Felder, die es mitbringt;

@@ -92,6 +92,45 @@ export function buildTerrainMesh(world, gridSize, theme = {}, opts = {}) {
  * Steht in dieser Waldzelle ein Baum? Etwa jede zweite – gewürfelt. (Früher entschied die
  * Parität von gx und gy: ein Schachbrett, das als schnurgerade Baumreihen zu sehen war.)
  */
+/**
+ * Ein Astkranz als Stern: `pts` lange Astspitzen (Radius r, leicht hängend), dazwischen Einschnitte.
+ * yb = Unterkante, h = Höhe bis zur Spitze des Kranzes.
+ *   rot    Verdrehung gegen die anderen Kränze        notch  Tiefe der Einschnitte (Anteil von r)
+ *   shade  Helligkeit des Kranzes (Eckfarbe)          base   Unterseite mit anlegen
+ *   cap    Schneehaube: nur der obere Teil ab diesem Anteil der Höhe, leicht vergrößert, ohne Farbe
+ * Liefert eine BufferGeometry mit position, normal (je Fläche) und – außer bei cap – color.
+ */
+export function treeTier(r, h, yb, pts, o = {}) {
+    const notch = o.notch ?? 0.5, rot = o.rot || 0, shade = o.shade ?? 1, cap = o.cap || 0;
+    const n = pts * 2, rim = [];
+    for (let i = 0; i < n; i++) {
+        const a = rot + (i / n) * Math.PI * 2, tip = i % 2 === 0;
+        let rr = r * (tip ? 1 : notch), y = yb + (tip ? -h * 0.07 : h * 0.1);
+        if (cap) { const f = 1 - cap; rr = rr * f * 1.07; y = yb + h * cap + (tip ? -h * 0.03 : h * 0.03) + 0.02; }
+        rim.push([Math.sin(a) * rr, y, Math.cos(a) * rr, tip]);
+    }
+    const top = [0, yb + h + (cap ? 0.03 : 0), 0];
+    const pos = [], nor = [], col = [];
+    const tri = (A, B, C, ca, cb, cc) => {
+        pos.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2]);
+        const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1;
+        nx /= l; ny /= l; nz /= l;
+        nor.push(nx, ny, nz, nx, ny, nz, nx, ny, nz);
+        for (const c of [ca, cb, cc]) col.push(c, c, c);
+    };
+    for (let i = 0; i < n; i++) {
+        const a = rim[i], b = rim[(i + 1) % n];
+        tri(top, a, b, 0.8 * shade, (a[3] ? 1.22 : 0.94) * shade, (b[3] ? 1.22 : 0.94) * shade);
+        if (o.base) tri([0, yb + h * 0.16, 0], b, a, 0.58 * shade, 0.72 * shade, 0.72 * shade);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+    if (!cap) g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    return g;
+}
+
 export function treeCell(gx, gy) {
     let n = (Math.imul(gx, 374761393) + Math.imul(gy, 668265263)) | 0;
     n = Math.imul(n ^ (n >>> 13), 1274126177);
@@ -155,6 +194,16 @@ export function buildForest(world, gridSize, opts = {}) {
         const out = new THREE.BufferGeometry();
         out.setAttribute('position', new THREE.BufferAttribute(pos2, 3));
         out.setAttribute('normal', new THREE.BufferAttribute(norm2, 3));
+        // Eckfarben (Schattierung im Baum): hat sie ein Teil, bekommen alle welche – Teile ohne gelten als Weiß
+        if (parts.some(g2 => g2.attributes.color)) {
+            const col2 = new Float32Array(vCount * 3).fill(1);
+            let oc = 0;
+            for (const g2 of parts) {
+                if (g2.attributes.color) col2.set(g2.attributes.color.array, oc * 3);
+                oc += g2.attributes.position.count;
+            }
+            out.setAttribute('color', new THREE.BufferAttribute(col2, 3));
+        }
         return out;
     };
     // SPARSAME GEOMETRIE: Auf einer Karte stehen Zehntausende Bäume – jedes Dreieck zählt
@@ -181,21 +230,31 @@ export function buildForest(world, gridSize, opts = {}) {
         g2.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
         return g2;
     };
-    const cone = (r, h, y, seg = 6) => { const c = coneGeo(r, h, seg); c.translate(0, y, 0); return c; };
-    const stem = (r1, r2, h, y) => { const c = new THREE.CylinderGeometry(r1, r2, h, 4, 1, true); c.translate(0, y, 0); return c; };
-    // Fichte: drei gestaffelte Kränze + Spitze + kurzer Stammansatz
+    void coneGeo;
+    // ===== NADELBÄUME MIT ECHTER SILHOUETTE =====
+    // Statt glatter Kegel besteht jeder Astkranz aus einem STERN: lange Astspitzen, die leicht hängen, dazwischen
+    // Einschnitte bis nah an den Stamm. Der Umriss wird dadurch zackig wie bei einer Fichte, und weil jeder Baum
+    // anders gedreht steht, sieht keiner aus wie der andere. Eckfarben schattieren den Baum von innen nach außen
+    // (am Stamm dunkel, an den Spitzen hell) – das ersetzt die fehlende Tiefe zwischen den Ästen.
+    // Die Dreieckszahl bleibt die alte (rund 50 je Fichte): die Unterseite hat nur der unterste Kranz.
+    const stem = (r1, r2, h, y) => {
+        const c = new THREE.CylinderGeometry(r1, r2, h, 3, 1, true).toNonIndexed(); c.translate(0, y, 0);
+        c.setAttribute('color', new THREE.BufferAttribute(new Float32Array(c.attributes.position.count * 3).map((_, i) => [0.5, 0.4, 0.33][i % 3]), 3));
+        return c;
+    };
     const spruceGeo = mergeGeos([
-        stem(0.07, 0.1, 0.5, 0.25),
-        cone(0.62, 1.0, 0.85, 6),
-        cone(0.5, 0.95, 1.45, 6),
-        cone(0.36, 0.85, 2.0, 5),
-        cone(0.18, 0.55, 2.55, 4)
+        stem(0.07, 0.1, 0.55, 0.27),
+        treeTier(0.68, 1.05, 0.42, 5, { rot: 0.0, shade: 0.84, base: true }),
+        treeTier(0.56, 1.0, 0.95, 5, { rot: 0.7, shade: 0.92 }),
+        treeTier(0.43, 0.95, 1.45, 4, { rot: 1.5, shade: 1.0 }),
+        treeTier(0.28, 0.88, 1.95, 4, { rot: 2.1, shade: 1.06 })
     ]);
-    // Tanne: breiter, zwei Etagen + Stammansatz
+    // Tanne: breiter und voller, drei Etagen
     const firGeo = mergeGeos([
-        stem(0.08, 0.12, 0.45, 0.22),
-        cone(0.95, 1.1, 0.85, 7),
-        cone(0.66, 0.95, 1.5, 6)
+        stem(0.08, 0.12, 0.5, 0.25),
+        treeTier(0.95, 1.05, 0.4, 6, { rot: 0.3, shade: 0.84, base: true, notch: 0.62 }),
+        treeTier(0.72, 1.0, 0.95, 6, { rot: 0.9, shade: 0.94, notch: 0.62 }),
+        treeTier(0.45, 0.95, 1.5, 5, { rot: 1.6, shade: 1.04, notch: 0.62 })
     ]);
     // Laubbaum: unregelmäßige Krone aus drei versetzten Kugeln
     const blob = (r, x, y, z, ws = 6, hs = 4) => { const b = new THREE.SphereGeometry(r, ws, hs); b.scale(1, 0.85, 1); b.translate(x, y, z); return b; };
@@ -204,6 +263,11 @@ export function buildForest(world, gridSize, opts = {}) {
         blob(0.42, 0.34, 1.42, 0.12, 5, 3),
         blob(0.38, -0.3, 1.35, -0.14, 5, 3)
     ]);
+    {   // Krone unten dunkler, oben heller (dasselbe Material wie die Nadelbäume verlangt ein Farbattribut)
+        const p = broadGeo.attributes.position, c = new Float32Array(p.count * 3);
+        for (let i = 0; i < p.count; i++) { const k = 0.74 + 0.34 * Math.max(0, Math.min(1, (p.getY(i) - 0.7) / 1.1)); c[i * 3] = k; c[i * 3 + 1] = k; c[i * 3 + 2] = k; }
+        broadGeo.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    }
     const trunkGeo  = new THREE.CylinderGeometry(0.08, 0.11, 0.7, 4, 1, true); trunkGeo.translate(0, 0.35, 0);
 
     // Damit die Bäume in Schatten und Dämmerung nicht ins Schwarze absaufen,
@@ -215,8 +279,9 @@ export function buildForest(world, gridSize, opts = {}) {
     // zusätzlich ein Farbattribut an der Geometrie – das gibt es hier nicht, es zählt
     // dann als Schwarz. Genau deshalb standen alle Bäume als fast schwarze Kegel im
     // Schnee, egal wie hell die Farbtöne oben in der Tabelle gewählt wurden.
+    // (Seit die Bäume schattiert sind, tragen ALLE drei Baumformen ein Farbattribut – deshalb jetzt mit Schalter.)
     const mat = new THREE.MeshStandardMaterial({
-        roughness: 0.86,
+        roughness: 0.86, vertexColors: true,
         emissive: 0x1c2a22, emissiveIntensity: 0.75
     });
     const trunkMat = new THREE.MeshStandardMaterial({
@@ -308,15 +373,19 @@ export function buildForest(world, gridSize, opts = {}) {
     // Die Hauben sind dünne Schalen ÜBER den Kränzen – ihre Unterseite steckt im Baum und
     // braucht keine Fläche (offene Kegel); das Kügelchen auf der Spitze ist ein kleiner Kegel.
     const capCone = (r, h, y, seg = 6) => { const c2 = coneGeo(r, h, seg, false); c2.translate(0, y, 0); return c2; };
+    void capCone;
+    // Der Schnee liegt auf dem oberen Teil jedes Kranzes (dieselbe Sternform, etwas größer) – die hängenden
+    // Astspitzen darunter bleiben grün.
     const capGeoSpruce = mergeGeos([
-        capCone(0.66, 0.34, 1.02),
-        capCone(0.52, 0.3, 1.62),
-        capCone(0.36, 0.28, 2.16, 5),
-        capCone(0.17, 0.3, 2.66, 4)
+        treeTier(0.68, 1.05, 0.42, 5, { rot: 0.0, cap: 0.42 }),
+        treeTier(0.56, 1.0, 0.95, 5, { rot: 0.7, cap: 0.4 }),
+        treeTier(0.43, 0.95, 1.45, 4, { rot: 1.5, cap: 0.36 }),
+        treeTier(0.28, 0.88, 1.95, 4, { rot: 2.1, cap: 0.3 })
     ]);
     const capGeoFir = mergeGeos([
-        capCone(0.98, 0.34, 1.42, 7),
-        capCone(0.68, 0.3, 1.98)
+        treeTier(0.95, 1.05, 0.4, 6, { rot: 0.3, cap: 0.42, notch: 0.62 }),
+        treeTier(0.72, 1.0, 0.95, 6, { rot: 0.9, cap: 0.4, notch: 0.62 }),
+        treeTier(0.45, 0.95, 1.5, 5, { rot: 1.6, cap: 0.34, notch: 0.62 })
     ]);
     // Laubbaum: kleinere Haube nur auf dem Scheitel – darunter bleibt ein grüner Rand
     // (vorher saß sie wie ein Helm über der ganzen Krone).

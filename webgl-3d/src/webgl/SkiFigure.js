@@ -15,11 +15,43 @@ export const PLAYER_SCALE = 1.06;
 
 const mat = (color, roughness = 0.7, metalness = 0) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
 
-/** Glied von oben (Gelenk) nach unten: Kapsel der Länge len. */
-const limb = (r, len, material) => {
-    const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, Math.max(0.01, len - r * 2), 4, 10), material);
-    m.position.y = -len / 2; m.castShadow = true;
+/**
+ * Glied von oben (Gelenk) nach unten: oben kräftig, nach unten schlanker (`taper`), beide Enden gerundet –
+ * so haben Oberschenkel, Waden und Arme eine Form statt überall gleich dicker Röhren.
+ */
+const limb = (r, len, material, taper = 0.82) => {
+    const rb = r * taper, pts = [];
+    for (let k = 0; k <= 4; k++) { const a = k / 4 * Math.PI / 2; pts.push(new THREE.Vector2(Math.sin(a) * r, -r + Math.cos(a) * r)); }
+    pts.push(new THREE.Vector2((r + rb) / 2 * 1.03, -len * 0.42));                    // leichter Bauch (Muskel)
+    for (let k = 0; k <= 4; k++) { const a = k / 4 * Math.PI / 2; pts.push(new THREE.Vector2(Math.cos(a) * rb, -len + rb - Math.sin(a) * rb)); }
+    const m = new THREE.Mesh(new THREE.LatheGeometry(pts.reverse(), 12), material);
+    m.castShadow = true;
     return m;
+};
+
+/** Stoffstruktur als Normalenkarte: feines Gewebe und ein paar schräge Falten – einmal erzeugt, von allen Figuren geteilt. */
+let fabricTex = null;
+const fabricNormal = () => {
+    if (fabricTex) return fabricTex;
+    const N = 128, h = new Float32Array(N * N);
+    const rnd = (i) => { const x = Math.sin(i * 127.1) * 43758.5453; return x - Math.floor(x); };
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const u = x / N * Math.PI * 2, v = y / N * Math.PI * 2;
+        const folds = Math.sin(u * 2 + Math.sin(v * 3) * 0.9 + v) * 0.5 + Math.sin(u * 5 - v * 2 + Math.sin(u * 2) * 1.2) * 0.25;
+        const weave = (Math.sin(x * 1.57) * Math.sin(y * 1.57)) * 0.025 + (rnd(x * 131 + y * 17) - 0.5) * 0.05;      // nur ein Hauch – sonst wirkt der Stoff wie ein Netz
+        h[y * N + x] = folds * 0.55 + weave;
+    }
+    const c = document.createElement('canvas'); c.width = c.height = N;
+    const ctx = c.getContext('2d'), img = ctx.createImageData(N, N);
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const dx = h[y * N + (x + 1) % N] - h[y * N + (x + N - 1) % N], dy = h[((y + 1) % N) * N + x] - h[((y + N - 1) % N) * N + x];
+        const nx = -dx * 2.2, ny = -dy * 2.2, l = Math.hypot(nx, ny, 1), o = (y * N + x) * 4;
+        img.data[o] = (nx / l * 0.5 + 0.5) * 255; img.data[o + 1] = (ny / l * 0.5 + 0.5) * 255; img.data[o + 2] = (1 / l * 0.5 + 0.5) * 255; img.data[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    fabricTex = new THREE.CanvasTexture(c);
+    fabricTex.wrapS = fabricTex.wrapT = THREE.RepeatWrapping; fabricTex.repeat.set(1, 2);
+    return fabricTex;
 };
 
 /** @param o zusammengesetztes Outfit (composeOutfit in SkiOutfits.js); ohne Angabe die gespeicherte Auswahl. */
@@ -35,6 +67,11 @@ export function makePlayerSkier(o = composeOutfit()) {
         strap: mat(o.strap, 0.7), ski: mat(o.ski, 0.35, 0.1), skiTop: mat(o.skiTop, 0.4), skiBase: mat(0x10131a, 0.5), pole: mat(o.pole, 0.35, 0.6), bind: mat(0x111318, 0.6),
         pack: mat(o.packCol, 0.8), hair: mat(o.hair, 0.9)
     };
+    // Stoff: Jacke und Hose bekommen Gewebe und Falten (Normalenkarte) – weite Kleidung kräftiger als ein Rennanzug
+    if (typeof document !== 'undefined') {
+        const nm = fabricNormal(), tight = o.torso === 'suit';
+        for (const k of ['jacket', 'pants', 'panel', 'knee']) { M[k].normalMap = nm; M[k].normalScale = new THREE.Vector2(tight ? 0.25 : 0.7, tight ? 0.25 : 0.7); }
+    }
     // Passform: weite Hose … enger Rennanzug. Daraus folgt auch, wie stark der Stoff im Fahrtwind flattert.
     const FAT = { loose: 1.22, normal: 1, tight: 0.9 }, FLAP = { loose: 1, normal: 0.4, tight: 0 };
     const fat = FAT[o.pantsFit] || 1, topFat = o.torso === 'suit' ? 0.94 : (FAT[o.topFit] || 1) > 1 ? 1.08 : 1;
@@ -45,10 +82,13 @@ export function makePlayerSkier(o = composeOutfit()) {
     // ----- Beine: Hüfte -> Knie -> Knöchel (Schuh + Ski) -----
     const mkLeg = (x) => {
         const hip = new THREE.Group(); hip.position.set(x, HIP_Y, 0);
-        const thigh = limb(0.068 * fat, THIGH + 0.03, M.pants); thigh.scale.set(1, 1, 1.12); hip.add(thigh);
+        const thigh = limb(0.072 * fat, THIGH + 0.03, M.pants, 0.78); thigh.scale.set(1, 1, 1.12); hip.add(thigh);
         cloth.push({ mesh: thigh, sx: 1, sz: 1.12, amp: flapPants * 0.16, phase: x * 40 });
         const knee = new THREE.Group(); knee.position.y = -THIGH; hip.add(knee);
-        const shin = limb(0.054 * fat, SHIN, M.pants); shin.scale.set(1, 1, 1.1); knee.add(shin);
+        const shin = limb(0.058 * fat, SHIN, M.pants, 0.84); shin.scale.set(1, 1, 1.1); knee.add(shin);
+        // Hosensaum, der über dem Schuh aufliegt
+        const cuffP = new THREE.Mesh(new THREE.CylinderGeometry(0.056 * fat, 0.068 * fat, 0.05, 12), M.pants);
+        cuffP.position.y = -SHIN + 0.115; knee.add(cuffP);
         cloth.push({ mesh: shin, sx: 1, sz: 1.1, amp: flapPants * 0.22, phase: x * 40 + 1.7 });
         const pad = new THREE.Mesh(new THREE.SphereGeometry(0.058, 10, 8), M.knee);
         pad.scale.set(1, 0.85, 0.75); pad.position.set(0, -0.005, 0.03); knee.add(pad);
@@ -136,8 +176,37 @@ export function makePlayerSkier(o = composeOutfit()) {
             strapP.position.set(sx * 0.07, 0.24, 0.083); strapP.rotation.x = -0.12; torso.add(strapP);
         }
     }
+    // Schultern (auch ohne Polster rund), Hals und – bei Jacken – eine Kapuze im Nacken
+    if (o.torso !== 'jacket') for (const sx of [-1, 1]) {
+        const delt = new THREE.Mesh(new THREE.SphereGeometry(0.046, 12, 10), M.jacket);
+        delt.scale.set(1.0, 0.8, 0.95); delt.position.set(sx * 0.158, 0.288, 0); torso.add(delt);
+    }
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.033, 0.038, 0.06, 10), M.skin); neck.position.y = 0.365; torso.add(neck);
+    if (o.torso === 'jacket' && !o.gear) {
+        const hood = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), M.jacket);
+        hood.scale.set(1.1, 0.55, 0.8); hood.rotation.x = -1.9; hood.position.set(0, 0.315, -0.075); torso.add(hood);
+        for (const sx of [-1, 1]) {                                                              // Brusttaschen
+            const pocket = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.012, 0.012), M.panel);
+            pocket.position.set(sx * 0.07, 0.215, 0.09 * topFat); pocket.rotation.y = sx * 0.5; torso.add(pocket);
+        }
+    }
     const head = new THREE.Group(); head.position.y = 0.415; torso.add(head);
-    const face = new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 12), M.skin); face.scale.set(0.95, 1.05, 1); head.add(face);
+    const face = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 14), M.skin); face.scale.set(0.93, 1.06, 1); head.add(face);
+    // Gesicht: Kinnpartie, Nase, Mund, Ohren – und Augen, wo keine Brille davor sitzt
+    {
+        const dark = mat(0x2a1c16, 0.8), white = mat(0xf2f2ee, 0.4), lip = mat(0xa85a4c, 0.7);
+        const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.052, 12, 10), M.skin); jaw.scale.set(0.95, 0.8, 0.95); jaw.position.set(0, -0.034, 0.012); head.add(jaw);
+        const nose = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.03, 6), M.skin); nose.rotation.x = Math.PI / 2 - 0.5; nose.position.set(0, -0.008, 0.07); head.add(nose);
+        const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.006, 0.006), lip); mouth.position.set(0, -0.036, 0.062); head.add(mouth);
+        for (const sx of [-1, 1]) {
+            const ear = new THREE.Mesh(new THREE.SphereGeometry(0.016, 8, 6), M.skin); ear.scale.set(0.5, 1, 0.8); ear.position.set(sx * 0.066, -0.004, -0.004); head.add(ear);
+            if (o.eyes === 'none' || o.eyes === 'cage') {
+                const eye = new THREE.Mesh(new THREE.SphereGeometry(0.0095, 8, 6), white); eye.position.set(sx * 0.026, 0.012, 0.061); head.add(eye);
+                const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.0052, 6, 5), dark); pupil.position.set(sx * 0.026, 0.012, 0.0685); head.add(pupil);
+                const brow = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.005, 0.006), M.hair); brow.position.set(sx * 0.026, 0.028, 0.064); brow.rotation.z = -sx * 0.12; head.add(brow);
+            }
+        }
+    }
     if (o.head === 'helmet') {
         // Helm: Schale bis über die Ohren, vorn offen fürs Gesicht; Zierstreifen und Kinnriemen
         const shell = new THREE.Mesh(new THREE.SphereGeometry(0.086, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.6), M.helmet);
@@ -205,13 +274,15 @@ export function makePlayerSkier(o = composeOutfit()) {
 
     const mkArm = (x) => {
         const sh = new THREE.Group(); sh.position.set(x, 0.285, 0);
-        sh.add(limb(0.05, 0.19, M.jacket));
+        sh.add(limb(0.052, 0.19, M.jacket, 0.84));
         const elbow = new THREE.Group(); elbow.position.y = -0.17; sh.add(elbow);
-        elbow.add(limb(0.042, 0.16, M.jacket));
+        elbow.add(limb(0.045, 0.16, M.jacket, 0.84));
         const cuffA = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.048, 0.045, 10), M.glove);
         cuffA.position.y = -0.145; elbow.add(cuffA);
         const hand = new THREE.Mesh(new THREE.SphereGeometry(0.044, 10, 8), M.glove);
         hand.scale.set(0.9, 1.15, 1); hand.position.y = -0.185; elbow.add(hand);
+        const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(0.014, 0.03, 3, 6), M.glove);
+        thumb.position.set(-Math.sign(x) * 0.03, -0.175, 0.022); thumb.rotation.z = -Math.sign(x) * 0.7; elbow.add(thumb);
         // Stock: Griff in der Hand, Teller kurz vor der Spitze
         const pole = new THREE.Group(); pole.position.y = -0.18; elbow.add(pole);
         const shaftP = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.006, 0.62, 6), M.pole);
@@ -221,7 +292,7 @@ export function makePlayerSkier(o = composeOutfit()) {
         const basket = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.008, 8), M.glove);
         basket.position.y = -0.53; pole.add(basket);
         torso.add(sh);
-        return { sh, elbow, pole, stick: null };
+        return { sh, elbow, pole, hand, stick: null };
     };
     const AL = mkArm(-0.172), AR = mkArm(0.172);
 
@@ -231,7 +302,7 @@ export function makePlayerSkier(o = composeOutfit()) {
         for (const leg of [L, R]) leg.ski.scale.set(0.6, 0.8, 1.06);
         for (const arm of [AL, AR]) arm.pole.scale.y = 1.34;
     }
-    if (o.gear === 'hockey') for (const arm of [AL, AR]) arm.elbow.children[2].scale.set(1.25, 1.35, 1.3);      // dicke Handschuhe
+    if (o.gear === 'hockey') for (const arm of [AL, AR]) arm.hand.scale.set(1.15, 1.5, 1.3);      // dicke Handschuhe
     if (o.gear === 'glider') {
         // Gurtzeug: Sitzschale am Rücken, Beingurte
         const seat = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.14, 4, 10), M.pack);

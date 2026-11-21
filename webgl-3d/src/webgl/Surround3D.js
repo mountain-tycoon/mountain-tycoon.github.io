@@ -14,7 +14,7 @@
 import * as THREE from 'three';
 import { makeSnowMaterial, groundColor, groundNoise, groundPalette, SOFT_FOG } from './SnowSurface.js';
 import { waterBedColor } from './Water3D.js';
-import { treeCell } from './TerrainMesh.js';
+import { treeCell, treeTier } from './TerrainMesh.js';
 
 const sm01 = (x) => { x = x < 0 ? 0 : x > 1 ? 1 : x; return x * x * (3 - 2 * x); };
 const isForest = (c) => c === 1 || c === 5 || c === 6;
@@ -367,16 +367,12 @@ export function buildSurround(world, gridSize, opts = {}) {
     if (trees.length) {
         // Nadelbaum: drei gestaffelte Kränze. aTop markiert die Oberseite jedes Kranzes – dort liegt der Schnee.
         const conifer = (() => {
-            const parts = [[0.64, 1.05, 0.9, 6], [0.48, 0.95, 1.55, 6], [0.30, 0.9, 2.2, 5]];
+            // dieselbe Sternform wie die Bäume im Spielfeld (treeTier), etwas sparsamer: drei Kränze
+            const tiers = [treeTier(0.68, 1.1, 0.4, 5, { rot: 0 }), treeTier(0.52, 1.05, 1.0, 5, { rot: 0.7 }), treeTier(0.33, 1.0, 1.75, 4, { rot: 1.5 })];
             const pos = [], nor = [], top = [];
-            for (const [r, h, y, seg] of parts) {
-                const len = Math.hypot(r, h), ny = r / len, nr = h / len;
-                for (let i = 0; i < seg; i++) {
-                    const a0 = (i / seg) * Math.PI * 2, a1 = ((i + 1) / seg) * Math.PI * 2, am = (a0 + a1) / 2;
-                    pos.push(0, y + h / 2, 0, Math.sin(a0) * r, y - h / 2, Math.cos(a0) * r, Math.sin(a1) * r, y - h / 2, Math.cos(a1) * r);
-                    nor.push(Math.sin(am) * nr, ny, Math.cos(am) * nr, Math.sin(a0) * nr, ny, Math.cos(a0) * nr, Math.sin(a1) * nr, ny, Math.cos(a1) * nr);
-                    top.push(1, 0, 0);
-                }
+            for (const t of tiers) {
+                pos.push(...t.attributes.position.array); nor.push(...t.attributes.normal.array);
+                for (let i = 0; i < t.attributes.position.count; i += 3) top.push(1, 0, 0);
             }
             const g = new THREE.BufferGeometry();
             g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

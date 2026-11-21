@@ -611,6 +611,14 @@ export function makeSkiInstructor(idx = 0) {
     return g;
 }
 
+// Gemeinsame, gerundete Körperteile der Gäste (einmal angelegt, von allen Figuren geteilt):
+// Oberschenkel, Rumpf und Arme sind Kapseln statt Kisten – aus der Nähe wirken die Leute nicht mehr eckig.
+const GUEST_GEO = {
+    thigh: new THREE.CapsuleGeometry(0.052, 0.18, 3, 8).scale(1, 1, 1.2),
+    torso: new THREE.CapsuleGeometry(0.1, 0.11, 3, 10).scale(1.12, 1, 0.88),
+    arm: new THREE.CapsuleGeometry(0.038, 0.23, 3, 7),
+    boot: new THREE.CapsuleGeometry(0.05, 0.08, 3, 7).rotateX(Math.PI / 2).scale(1, 0.8, 1)
+};
 export function makeSkier(colorIdx = 0) {
     const g = new THREE.Group();
     // Deterministisch, aber je Gast anders: aus dem Index werden mehrere
@@ -635,9 +643,9 @@ export function makeSkier(colorIdx = 0) {
     const mkLeg = (x) => {
         const hip = new THREE.Group();
         hip.position.set(x, 0.38, 0);
-        const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.095, 0.28, 0.13), pants);
+        const thigh = new THREE.Mesh(GUEST_GEO.thigh, pants);
         thigh.position.y = -0.15; thigh.castShadow = true; hip.add(thigh);
-        const boot = new THREE.Mesh(new THREE.BoxGeometry(0.105, 0.08, 0.17), bootMat);
+        const boot = new THREE.Mesh(GUEST_GEO.boot, bootMat);
         boot.position.set(0, -0.31, 0.02); hip.add(boot);   // Sohle bei y = 0.03
         return hip;
     };
@@ -648,7 +656,7 @@ export function makeSkier(colorIdx = 0) {
     const torsoPivot = new THREE.Group();
     torsoPivot.position.y = 0.36; g.add(torsoPivot);
     g.userData.torso = torsoPivot;
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.28, 0.18), jacket);
+    const torso = new THREE.Mesh(GUEST_GEO.torso, jacket);
     torso.position.y = 0.10; torso.castShadow = true; torsoPivot.add(torso);
     // Kopf mit Helm
     // ===== KOPF & AUSSTATTUNG =====
@@ -741,7 +749,7 @@ export function makeSkier(colorIdx = 0) {
     const mkArm = (x) => {
         const sh = new THREE.Group();
         sh.position.set(x, 0.56, 0);
-        const a = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.3, 0.08), armMat);
+        const a = new THREE.Mesh(GUEST_GEO.arm, armMat);
         a.position.y = -0.15; sh.add(a);
         const hand = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), skin);
         hand.position.y = -0.31; sh.add(hand);
