@@ -9,7 +9,7 @@
 // ============================================================
 import * as THREE from 'three';
 import { makePlayerSkier, PLAYER_SCALE } from './SkiFigure.js';
-import { selectionKey } from './SkiOutfits.js';
+import { selectionKey, composeOutfit } from './SkiOutfits.js';
 import { createSkiSound } from './SkiSound.js';
 import { makeCanopy } from './Paraglider3D.js';
 
@@ -46,6 +46,21 @@ export function createSkiRun(deps) {
 
     let on = false;
     let mesh = null, meshOutfit = '';
+    // Kleidung und Ausrüstung richten sich nach der Sportart: Alpin, Langlauf (Loipe, Schießstand),
+    // Eishockey (Eisbahn), Gleitschirm. Gewechselt wird, sobald die Figur die Sportart wechselt.
+    let sport = 'alpin', sportT = 0;
+    const dress = (sp) => {
+        const key = sp + ':' + selectionKey(undefined, sp);
+        if (mesh && meshOutfit === key) return;
+        const old = mesh;
+        mesh = makePlayerSkier(composeOutfit(undefined, sp)); meshOutfit = key;
+        mesh.scale.setScalar(PLAYER_SCALE);
+        if (old) {
+            mesh.position.copy(old.position); mesh.rotation.copy(old.rotation); mesh.visible = old.visible;
+            if (old.parent) { old.parent.add(mesh); old.removeFromParent(); }
+            old.traverse(o => { o.geometry?.dispose?.(); });
+        }
+    };
     const pos = new THREE.Vector3();
     let th = 0;                 // Fahrtrichtung: (sin th, cos th) in der Ebene
     let v = 0;                  // Tempo entlang der Fahrtrichtung
@@ -725,13 +740,53 @@ export function createSkiRun(deps) {
     /** Gleitschirm: gemächlich ins Tal. Links/rechts lenkt, „vorwärts" = schneller und steiler, Bremsen = langsamer. */
     const stepGlide = (dt, inp) => {
         const q = glide; q.t += dt;
-        steerS += (((inp.right ? 1 : 0) - (inp.left ? 1 : 0)) - steerS) * ease(3, dt);
-        th -= steerS * 0.95 * dt;
-        const fast = inp.tuck && !inp.brake, slow = inp.brake;
+        const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+        steerS += (steer - steerS) * ease(3, dt);
+        // ----- Manöver -----
+        // Wingover: im Takt links–rechts umlenken, der Schirm pendelt immer höher auf
+        q.sinceRev += dt;
+        if (steer !== 0 && steer !== q.last) {
+            if (q.last !== 0) {
+                q.wing = q.sinceRev > 0.45 && q.sinceRev < 2.6 ? q.wing + 1 : 1;
+                if (q.wing >= 2) { const pts = 40 * q.wing; score += pts; say(`Wingover ×${q.wing} · +${pts} Punkte`, 2.2); }
+            }
+            q.last = steer; q.sinceRev = 0; q.holdT = 0;
+        }
+        if (q.sinceRev > 3.2) q.wing = 0;
+        q.swing += (Math.min(1, q.wing * 0.3) - q.swing) * ease(1.5, dt);
+        // Steilspirale: lange in eine Richtung ziehen – enger, schneller, steil nach unten
+        q.holdT = steer !== 0 ? q.holdT + dt : Math.max(0, q.holdT - dt * 2);
+        const spir = clamp((q.holdT - 1.4) / 2.2, 0, 1);
+        const rate = steerS * (0.95 + spir * 1.9);
+        th -= rate * dt;
+        if (spir > 0.5) {
+            q.turned += Math.abs(rate) * dt;
+            if (q.turned >= Math.PI * 2 * (q.rounds + 1)) { q.rounds++; score += 80; say(`Steilspirale · ${q.rounds}. Umdrehung · +80 Punkte`, 2.2); }
+        } else { q.turned = 0; q.rounds = 0; }
+        q.roll = steerS * (0.5 + 0.45 * q.swing + 0.65 * spir);
+        // Looping: mit viel Fahrt kräftig anbremsen – der Pilot schwingt einmal über die Kappe
+        if (q.loop === null && inp.brake && !q.brakeHeld && v > 9) {
+            if (q.alt > 7) { q.loop = 0; q.lift = 0; } else say('Zu tief für einen Looping', 2);
+        }
+        q.brakeHeld = inp.brake;
+        if (q.loop !== null) {
+            q.loop += dt / 1.7 * Math.PI * 2;
+            const up = Math.pow(Math.sin(Math.min(q.loop, Math.PI * 2) / 2), 2) * 3;       // Bogen nach oben und zurück
+            pos.y += up - q.lift; q.lift = up;
+            if (q.loop >= Math.PI * 2) { q.loop = null; v = 6.5; score += 300; say('Looping · +300 Punkte', 3); sound.thump(0.3); }
+        }
+        const fast = inp.tuck && !inp.brake, slow = inp.brake && q.loop === null;
         v += (7.2 + (fast ? 3 : 0) - (slow ? 2.4 : 0) - v) * ease(1.2, dt);
         // Gleitzahl rund 10: auch über sanftem Gelände kommt man weit ins Tal
-        let sink = 0.72 + (fast ? 0.9 : 0) - (slow ? 0.17 : 0) + Math.abs(steerS) * 0.5;
-        if (q.t < 2.5) sink -= 4.5 * (1 - q.t / 2.5);                 // beim Start hebt der Schirm die Figur erst an
+        let sink = (q.loop !== null ? 0.4 : 0.72 + (fast ? 0.9 : 0) - (slow ? 0.17 : 0) + Math.abs(steerS) * 0.5) + spir * 2.4;
+        if (!q.tip && q.t > 7) { q.tip = true; say('Manöver: lange einlenken = Steilspirale · links–rechts im Takt = Wingover · schnell, dann bremsen = Looping', 6); }
+        if (q.t < 4) sink -= 6 * (1 - q.t / 4);                       // beim Start hebt der Schirm die Figur erst an
+        // Hangaufwind: wo das Gelände unter der Flugbahn steil abfällt, trägt die Luft – über dem Hang gewinnt
+        // man Höhe für Manöver, über dem flachen Talboden geht es hinunter zur Landung
+        if (q.alt < 45 && q.loop === null) {
+            const fall = (surfaceAt(pos.x, pos.z) - surfaceAt(pos.x + Math.sin(th) * 8, pos.z + Math.cos(th) * 8)) / 8;
+            sink -= clamp(fall * 3.2, 0, 1.25) * (1 - spir);
+        }
         // Kartenrand: sanft zurück zur Mitte
         if (Math.abs(pos.x) > half - 10 || Math.abs(pos.z) > half - 10) {
             let d = Math.atan2(-pos.x, -pos.z) - th; d = Math.atan2(Math.sin(d), Math.cos(d));
@@ -802,10 +857,11 @@ export function createSkiRun(deps) {
         if (glide) {
             // am Schirm: Beine leicht angezogen, Hände oben an den Steuerleinen, in der Kurve geneigt
             mesh.position.copy(pos);
-            mesh.rotation.set(0.1, th, steerS * 0.4);
+            const loopA = glide.loop === null ? 0 : glide.loop;
+            mesh.rotation.set(0.1 - loopA, th, glide.roll);
             ud.setPose({ bendL: 0.5, bendR: 0.4, lean: -0.08, armX: -2.5 + steerS * 0.35, armXR: -2.5 - steerS * 0.35, elbow: -0.45, armOut: 0.3 });
             canopy.position.copy(pos); canopy.rotation.order = 'YXZ';
-            canopy.rotation.set(Math.sin(t * 0.9) * 0.03, th, steerS * 0.5);
+            canopy.rotation.set(Math.sin(t * 0.9) * 0.03 - loopA, th, glide.roll * 1.15);
             return;
         }
         mesh.position.set(pos.x, pos.y + 0.02, pos.z);
@@ -999,7 +1055,8 @@ export function createSkiRun(deps) {
             const why = blockedAt(x, z);
             if (why) return why === 'water' ? 'Im Wasser kann man nicht starten' : why === 'building' ? 'Hier steht ein Gebäude' : 'Hier ist kein Platz – such dir eine freie Stelle';
             // Figur im gewählten Outfit (Garderobe im Hauptmenü)
-            if (!mesh || meshOutfit !== selectionKey()) { meshOutfit = selectionKey(); mesh = makePlayerSkier(); }
+            sport = deps.loipeAt?.(x, z) ? 'nordic' : 'alpin'; sportT = 0;
+            dress(sport);
             resetPose();
             place(x, z, 0); th = camTh = deps.loipeDir?.(x, z) ?? fallLine(x, z);       // auf der Loipe gleich in Laufrichtung
             const dx = Math.sin(th), dz = Math.cos(th);
@@ -1104,13 +1161,14 @@ export function createSkiRun(deps) {
         launchGlider() {
             if (!on || ride || rest || shoot || glide || !launchOffer) return false;
             const L = launchOffer, dir = fallLine(L.x, L.z);
+            sport = 'glider'; sportT = 0; dress(sport);
             pos.x = L.x + Math.sin(dir) * 2.4; pos.z = L.z + Math.cos(dir) * 2.4; pos.y = surfaceAt(pos.x, pos.z) + 0.9;
             th = camTh = dir; v = 5.5; vy = 0; air = false; jump = null; race = null; crashT = 0; steerS = 0;
             walking = false; striding = false; skating = false; autoSk = false; ice = false;
             mesh.userData.setCarry(false); mesh.userData.setIce(false); mesh.userData.setPoles(false);
             if (!canopy) canopy = makeCanopy();
             scene.add(canopy); canopy.visible = true;
-            glide = { t: 0, alt: 0.9 };
+            glide = { t: 0, alt: 0.9, roll: 0, last: 0, sinceRev: 9, wing: 0, swing: 0, holdT: 0, turned: 0, rounds: 0, loop: null, lift: 0, brakeHeld: false, tip: false };
             camPos.set(pos.x - Math.sin(dir) * 9, pos.y + 3.4, pos.z - Math.cos(dir) * 9); camLook.set(pos.x, pos.y + 1.2, pos.z);
             trGap = true; launchOffer = null;
             say(deps.touch?.() ? 'Gleitschirm: Seitentasten lenken · Bild halten = schneller · beide Tasten = bremsen'
@@ -1146,14 +1204,21 @@ export function createSkiRun(deps) {
             else if (ride) stepRide(dt); else s = stepSki(dt, readInput());
             sound.update({ v, carve: glide ? 0 : Math.abs(steerS) + brakeS, air: air || !!glide, snow: !walking, ride: !!ride, cabin: !!(ride && ride.inside) });
             stepPulse(dt, s);
+            // Ausrüstung der Sportart anlegen (kurze Verzögerung, damit sie am Loipenrand nicht hin- und herspringt)
+            const wantSport = glide ? 'glider' : ride ? 'alpin' : ice ? 'hockey'
+                : (nordic || autoSk || shoot || (sport === 'nordic' && rangeOffer)) ? 'nordic' : 'alpin';
+            if (wantSport === sport) sportT = 0;
+            else if ((sportT += dt) > (wantSport === 'alpin' ? 2.5 : 0.25)) { sport = wantSport; sportT = 0; dress(sport); }
             poseSkier(t, s, dt);
             mesh.userData.setWind(ride || rest || shoot ? 0 : v / 16, t);       // Kleidung flattert im Fahrtwind
             stepCamera(dt);
             hintT -= dt; emitT -= dt;
             if (emitT <= 0) { emitT = 0.15; emit(); }
         },
+        /** Ort der Figur (die Szene richtet den Schatten darauf aus). */
+        where: () => pos,
         /** Nur für Prüfungen beim Entwickeln. */
-        __state: () => ({ power, spent, autoSk, glide: glide && { alt: glide.alt }, launch: !!launchOffer, ice, pulse, skating, nordic, shoot: shoot && { ax: shoot.ax, ay: shoot.ay, shots: shoot.shots, hits: shoot.hits }, range: !!rangeOffer, x: pos.x, y: pos.y, z: pos.z, th, v, air, score, crash: crashT > 0, trick: !!jump, ride: !!ride, offer: !!offer, hint: hintT > 0 ? hint : '', ahead: blockedAt(pos.x + Math.sin(th), pos.z + Math.cos(th)), forest: isForest(pos.x, pos.z) }),
+        __state: () => ({ sport, power, spent, autoSk, glide: glide && { alt: glide.alt }, launch: !!launchOffer, ice, pulse, skating, nordic, shoot: shoot && { ax: shoot.ax, ay: shoot.ay, shots: shoot.shots, hits: shoot.hits }, range: !!rangeOffer, x: pos.x, y: pos.y, z: pos.z, th, v, air, score, crash: crashT > 0, trick: !!jump, ride: !!ride, offer: !!offer, hint: hintT > 0 ? hint : '', ahead: blockedAt(pos.x + Math.sin(th), pos.z + Math.cos(th)), forest: isForest(pos.x, pos.z) }),
         /** Abstand Kamera–Figur (für den Dunst). */
         viewDist: () => 8,
         dispose() { sound.dispose(); dustTex.dispose(); ac?.abort(); if (mesh) scene.remove(mesh); scene.remove(dust); scene.remove(tow); camera.near = NEAR0; on = false; }

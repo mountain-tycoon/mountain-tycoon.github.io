@@ -20,7 +20,7 @@ function device() {
 }
 
 const FLOW = [
-    ['Fahrer einkleiden', 'Such dir Outfit und Ski aus – mit dieser Figur fährst du später selbst durch dein Gebiet.'],
+    ['Fahrer einkleiden', 'Such dir je Sportart Outfit und Ausrüstung aus – mit dieser Figur bist du später selbst im Gebiet unterwegs.'],
     ['Level wählen', 'Die Kampagne beginnt im Schwarzwald. Jedes Level hat Aufgaben; das nächste öffnet sich, sobald sie erfüllt sind.'],
     ['Kasse, Lift, Piste', 'Dein Gebiet ist anfangs leer – nur Ort und Zufahrt stehen. Bau eine Kasse beim Ort, einen Lift den Hang hinauf und eine Piste zurück ins Tal.'],
     ['Gäste und Geld', 'Gäste kaufen an der Kasse den Skipass und fahren los. Mit den Einnahmen baust du weiter: mehr Lifte und Pisten, Hütten, Beschneiung, Pistenraupen.'],
@@ -46,7 +46,7 @@ const CONTROLS = [
         ['Schuss / gehen', 'Bild gedrückt halten – am Rechner W'],
         ['In der Luft', 'Lenken dreht, vorwärts und bremsen sind die Salti'],
         ['Loipe', 'gelenkt wird von selbst – du gibst nur die Kraft vor: viel Kraft treibt den Puls hoch, zu lange macht müde'],
-        ['Gleitschirm', 'am Startplatz abheben und ins Tal gleiten: lenken, schneller, bremsen'],
+        ['Gleitschirm', 'am Startplatz abheben und ins Tal gleiten – mit Steilspirale, Wingover und Looping'],
         ['Schießstand', 'ziehen = zielen, „Schuss" löst aus – hoher Puls lässt das Visier wackeln'],
         ['Eisbahn', 'durch den Eingang aufs Eis: laufen, mit „bremsen" springen – am Puck wird daraus der Schuss aufs Tor']
     ]]

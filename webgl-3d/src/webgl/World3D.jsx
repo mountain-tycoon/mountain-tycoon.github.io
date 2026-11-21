@@ -671,8 +671,9 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
     const aim = ski.shooting;
     const steering = touch && !ski.riding && !ski.resting && !aim;
     // Puls: beim Langlauf, am Schießstand und solange er merklich über der Ruhe liegt
-    const showPulse = ski.pulse > 0 && (aim || ski.nordic || ski.pulse >= 84);
     const hasPower = typeof ski.power === 'number';
+    // Puls: nur beim Langlauf und am Schießstand – sonst spielt er keine Rolle
+    const showPulse = ski.pulse > 0 && (aim || ski.nordic || hasPower);
     const pulseCol = ski.pulse >= 150 ? '#f87171' : ski.pulse >= 120 ? '#fcd34d' : '#e8eef6';
     return (
         <>
@@ -787,7 +788,7 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                 {!ski.riding && !ski.resting && !aim && !ski.hint && (touch ? ski.kmh < 4 : true) && (
                     <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5, lineHeight: 1.45 }}>
                         {ski.flying
-                            ? (touch ? 'Gleitschirm: Seitentasten lenken · Bild halten = schneller · beide = bremsen' : 'Gleitschirm: A / D lenken · W schneller und steiler · S bremsen')
+                            ? (touch ? 'Lange einlenken = Steilspirale · links–rechts im Takt = Wingover · schnell, dann bremsen = Looping' : 'A / D lenken · lange halten = Steilspirale · im Takt wechseln = Wingover · W, dann S = Looping')
                             : hasPower
                             ? (touch ? 'Loipe: rechte Taste = mehr Kraft · linke = weniger · gelenkt wird von selbst' : 'Loipe: W = mehr Kraft · S = weniger · gelenkt wird von selbst')
                             : ski.ice

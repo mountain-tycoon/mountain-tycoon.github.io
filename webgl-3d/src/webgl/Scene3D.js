@@ -2282,7 +2282,26 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     sun.shadow.bias = -0.00022;
     sun.shadow.normalBias = 0.35;      // gegen Schattenakne auf Rundungen
     sun.shadow.radius = 2.2;           // weiche Schattenkante
-    scene.add(sun);
+    scene.add(sun); scene.add(sun.target);
+    // Beim Selbstfahren rückt die Schattenkarte eng um die Figur: dieselbe Auflösung auf einem Bruchteil der
+    // Fläche gibt aus der Nähe scharfe Schatten von Figur, Bäumen und Liften. Der Ausschnitt springt in
+    // groben Schritten, damit die Schattenkanten nicht flimmern.
+    const sunDir = new THREE.Vector3(-0.35, 0.8, 0.28).normalize();
+    const SHADOW_NEAR = 85;
+    let shadowTight = false;
+    const focusShadow = (p) => {
+        const want = !!p;
+        if (want !== shadowTight) {
+            shadowTight = want;
+            const h = want ? SHADOW_NEAR : worldSpan * 0.46;
+            sc.left = -h; sc.right = h; sc.top = h; sc.bottom = -h; sc.updateProjectionMatrix();
+            if (!want) sun.target.position.set(0, 0, 0);
+        }
+        if (!want) return;
+        const step = 12;
+        sun.target.position.set(Math.round(p.x / step) * step, 0, Math.round(p.z / step) * step);
+        sun.position.copy(sun.target.position).addScaledVector(sunDir, worldSpan * 0.9);
+    };
     // Himmelslicht (kühl von oben, warm reflektiert vom Schnee) — sorgt für
     // Plastizität in den Schatten statt flachem Grau.
     const hemiLight = new THREE.HemisphereLight(topC.getHex(), 0xa8bcd2, 0.85);
@@ -6319,6 +6338,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         hemiLight.intensity = 0.85 + 0.30 * (1 - day);
         ambientLight.intensity = 0.26 + 0.16 * (1 - day);
         sun.position.set(-worldSpan * 0.35, worldSpan * (0.25 + 0.6 * day), worldSpan * (0.5 - 0.4 * day));
+        sunDir.copy(sun.position).normalize();
         // Tagessonne: steht dort, wo das Licht herkommt. Unterhalb von day≈0.55 zeigt
         // der Abschnitt „Sonnenscheibe + Strahlenkranz" die Abendsonne – bis dahin
         // ist die Tagessonne ausgeblendet, sonst stünden zwei Sonnen am Himmel.
@@ -6494,6 +6514,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // Der Spieler fährt selbst: Kamera hängt an der Figur. Erst NACH den Anlagen – in der Kabine
         // zählt deren Lage in diesem Bild, sonst hinge man eine Bildlänge hinterher.
         if (skiRun && skiRun.active()) skiRun.step(dt, t);
+        focusShadow(skiRun && skiRun.active() && !(import.meta.env.DEV && window.__mtCam?.wideShadow) ? skiRun.where() : null);
         if (water) water.userData.update(dt);     // Wellen und Strömung
         // ===== WIND: Böen treiben Schnee, Fahnen und Wipfel =====
         updateWind(t, dt);

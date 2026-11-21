@@ -180,6 +180,17 @@ export function makePlayerSkier(o = composeOutfit()) {
         frame.position.set(0, 0.004, 0.012); head.add(frame);
         const lens = new THREE.Mesh(new THREE.SphereGeometry(0.076, 14, 8, Math.PI * 0.2, Math.PI * 0.6, Math.PI * 0.36, Math.PI * 0.2), M.lens);
         lens.position.set(0, 0.004, 0.013); head.add(lens);
+    } else if (o.eyes === 'cage') {
+        // Eishockey: Gitter vor dem Gesicht
+        const A = Math.PI * 0.44, H = Math.PI * 0.62;
+        for (const a of [-0.5, -0.17, 0.17, 0.5]) {                                                 // senkrechte Stäbe
+            const bar = new THREE.Mesh(new THREE.TorusGeometry(0.083, 0.0035, 4, 10, A).rotateZ(-A / 2 - 0.12).rotateY(-Math.PI / 2 + a), M.strap);
+            bar.position.y = 0.004; head.add(bar);
+        }
+        for (const y of [-0.04, -0.012, 0.016]) {                                                   // Querstäbe
+            const hoop = new THREE.Mesh(new THREE.TorusGeometry(Math.sqrt(0.083 * 0.083 - y * y), 0.0035, 4, 14, H).rotateZ(Math.PI / 2 - H / 2).rotateX(Math.PI / 2), M.strap);
+            hoop.position.y = y + 0.004; head.add(hoop);
+        }
     } else if (o.eyes === 'shades') {
         // Sonnenbrille: zwei Gläser, Steg, Bügel
         for (const sx of [-1, 1]) {
@@ -213,6 +224,29 @@ export function makePlayerSkier(o = composeOutfit()) {
         return { sh, elbow, pole, stick: null };
     };
     const AL = mkArm(-0.172), AR = mkArm(0.172);
+
+    // ----- Ausrüstung je Sportart -----
+    if (o.gear === 'nordic') {
+        // Langlauf: schmale, leichte Ski und Stöcke bis zur Schulter
+        for (const leg of [L, R]) leg.ski.scale.set(0.6, 0.8, 1.06);
+        for (const arm of [AL, AR]) arm.pole.scale.y = 1.34;
+    }
+    if (o.gear === 'hockey') for (const arm of [AL, AR]) arm.elbow.children[2].scale.set(1.25, 1.35, 1.3);      // dicke Handschuhe
+    if (o.gear === 'glider') {
+        // Gurtzeug: Sitzschale am Rücken, Beingurte
+        const seat = new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.14, 4, 10), M.pack);
+        seat.scale.set(1.3, 1, 0.75); seat.position.set(0, 0.12, -0.11); seat.castShadow = true; torso.add(seat);
+        const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 0.03, 16), M.pack);
+        belt.position.y = 0.06; belt.scale.set(1.32, 1, 0.9); torso.add(belt);
+    }
+    if (o.rifle) {
+        // Biathlongewehr quer über dem Rücken, Lauf nach oben
+        const rifle = new THREE.Group();
+        const stock = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.3, 0.05), M.bind); stock.position.y = -0.05; rifle.add(stock);
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.36, 6), M.pole); barrel.position.y = 0.26; rifle.add(barrel);
+        const mag = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.05, 0.03), M.trim); mag.position.set(0, 0.02, 0.04); rifle.add(mag);
+        rifle.position.set(0.02, 0.2, -0.115); rifle.rotation.z = 0.32; torso.add(rifle);
+    }
 
     // Geschulterte Ski (zu Fuß auf aperem Boden)
     const carried = new THREE.Group();

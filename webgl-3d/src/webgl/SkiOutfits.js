@@ -49,6 +49,61 @@ export const OUTFITS = [
       headCol: 0x5a4632, headTrim: 0x3a2c1e, lens: 0x16130f, strap: 0x3a2c1e, ski: 0x9a6a3a, skiTop: 0x7a4f26, pole: 0x8a6a3e, packCol: 0x6a5234, hair: 0x4a3222 }
 ];
 
+// ===== SPORTARTEN =====
+// Alpin ist die frei kombinierbare Garderobe oben. Für die anderen Sportarten gibt es je eine Handvoll
+// ganzer Ausrüstungen – mit dem, was dazugehört: schmale Ski und lange Stöcke beim Langlauf (ohne Helm),
+// Gewehr beim Biathlon, Helm mit Gitter und Trikot beim Eishockey, Helm und Gurtzeug am Gleitschirm.
+//   gear   'nordic' | 'hockey' | 'glider'   – stellt in SkiFigure.js Ski, Stöcke und Zubehör um
+//   rifle  Biathlongewehr auf dem Rücken      eyes 'cage' = Gitter vor dem Gesicht
+export const SPORTS = [
+    { id: 'alpin', name: 'Alpin', hint: 'Piste, Park und Tiefschnee – jedes Teil frei kombinierbar.' },
+    { id: 'nordic', name: 'Langlauf', hint: 'Auf der Loipe und am Schießstand: schmale Ski, lange Stöcke, kein Helm.' },
+    { id: 'hockey', name: 'Eishockey', hint: 'Auf der Eisbahn: Schlittschuhe, Schläger, Helm.' },
+    { id: 'glider', name: 'Gleitschirm', hint: 'Am Startplatz: Helm und Gurtzeug, die Ski bleiben dran.' }
+];
+const NORDIC = { gear: 'nordic', pack: false, boot: 0x1b1e24, bootDark: 0x0e1014, hair: 0x4a3222 };
+const HOCKEY = { gear: 'hockey', head: 'helmet', torso: 'sweater', pack: false, fit: 'loose', boot: 0x15171b, bootDark: 0x0b0c0f, hair: 0x3b2a1e,
+    ski: 0x15171b, skiTop: 0xf2f2f0, pole: 0x8a8f96, packCol: 0x15171b };
+const GLIDER = { gear: 'glider', head: 'helmet', eyes: 'goggles', torso: 'jacket', pack: true, hair: 0x3b2a1e };
+export const SPORT_OUTFITS = {
+    nordic: [
+        { ...NORDIC, id: 'n_race', name: 'Rennanzug', era: 'Heute', head: 'headband', eyes: 'shades', torso: 'suit', bands: 2, fit: 'tight',
+          jacket: 0xd3202c, panel: 0x12305e, trim: 0xf4f4f2, pants: 0x12305e, knee: 0xd3202c, glove: 0x15171b,
+          headCol: 0xd3202c, headTrim: 0xf4f4f2, lens: 0xf2a21b, strap: 0x15171b, ski: 0xf2d21a, skiTop: 0x15171b, pole: 0x15171b, packCol: 0x15171b },
+        { ...NORDIC, id: 'n_biathlon', name: 'Biathlet', era: 'Heute', head: 'beanie', eyes: 'shades', torso: 'suit', bands: 1, fit: 'tight', rifle: true,
+          jacket: 0xf2f2f0, panel: 0x16181c, trim: 0xf2b01e, pants: 0x16181c, knee: 0xf2b01e, glove: 0x16181c,
+          headCol: 0x16181c, headTrim: 0xf2b01e, lens: 0x2e6bd6, strap: 0x16181c, ski: 0xe8452c, skiTop: 0xf2f2f0, pole: 0x16181c, packCol: 0x16181c },
+        { ...NORDIC, id: 'n_tour', name: 'Genussläufer', era: 'Heute', head: 'bobble', eyes: 'shades', torso: 'jacket', bands: 0,
+          jacket: 0x1f8a6a, panel: 0x14483a, trim: 0xf2ead8, pants: 0x1c2430, knee: 0x14181f, glove: 0x1c2430,
+          headCol: 0xf2ead8, headTrim: 0x1f8a6a, lens: 0x2a2018, strap: 0x2a2018, ski: 0x1b62b8, skiTop: 0xf4f4f2, pole: 0x8a8f96, packCol: 0x14483a },
+        { ...NORDIC, id: 'n_retro', name: 'Loipenklassiker', era: '1978', head: 'bobble', eyes: 'none', torso: 'sweater', bands: 3, hair: 0x6a4424,
+          jacket: 0x1d3f73, panel: 0x1d3f73, trim: 0xf2ead8, pants: 0x7a1f1f, knee: 0xf2ead8, glove: 0xf2ead8, boot: 0x3a2618, bootDark: 0x21160e,
+          headCol: 0xc8371f, headTrim: 0xf2ead8, lens: 0x16130f, strap: 0x16130f, ski: 0x9a6a3a, skiTop: 0x7a4f26, pole: 0xb9a16a, packCol: 0x4a2c18 }
+    ],
+    hockey: [
+        { ...HOCKEY, id: 'h_home', name: 'Heimtrikot', era: 'Heute', eyes: 'cage', bands: 2,
+          jacket: 0x1f4fb5, panel: 0x12305e, trim: 0xf4f4f2, pants: 0x12305e, knee: 0xf4f4f2, glove: 0x12305e,
+          headCol: 0x1f4fb5, headTrim: 0xf4f4f2, lens: 0x9aa3ad, strap: 0xc9ced4 },
+        { ...HOCKEY, id: 'h_away', name: 'Auswärtstrikot', era: 'Heute', eyes: 'cage', bands: 2,
+          jacket: 0xf2f2f0, panel: 0xc8222c, trim: 0xc8222c, pants: 0x16181c, knee: 0xc8222c, glove: 0xc8222c,
+          headCol: 0xf2f2f0, headTrim: 0xc8222c, lens: 0x9aa3ad, strap: 0xc9ced4 },
+        { ...HOCKEY, id: 'h_pond', name: 'Teichhockey', era: '1965', head: 'bobble', eyes: 'none', bands: 3, fit: undefined, hair: 0x6a4424,
+          jacket: 0x7a1f1f, panel: 0x7a1f1f, trim: 0xf2ead8, pants: 0x3a3226, knee: 0x3a3226, glove: 0x6a4a2a, boot: 0x3a2618, bootDark: 0x21160e,
+          headCol: 0xf2ead8, headTrim: 0x7a1f1f, lens: 0x16130f, strap: 0x16130f }
+    ],
+    glider: [
+        { ...GLIDER, id: 'g_pilot', name: 'Streckenpilot', era: 'Heute', bands: 0,
+          jacket: 0x2a6fd0, panel: 0x16305a, trim: 0xf2f2f0, pants: 0x1c2430, knee: 0x14181f, boot: 0xe9e6df, bootDark: 0x1d2128, glove: 0x15181d,
+          headCol: 0xf2f2f0, headTrim: 0x2a6fd0, lens: 0x58d0e6, strap: 0x16305a, ski: 0xf2f2f0, skiTop: 0x2a6fd0, pole: 0x9aa3ad, packCol: 0xe8452c },
+        { ...GLIDER, id: 'g_speed', name: 'Speedrider', era: 'Heute', bands: 1, fit: 'tight',
+          jacket: 0x16181c, panel: 0x0b0d10, trim: 0xf2b01e, pants: 0x16181c, knee: 0xf2b01e, boot: 0x16181c, bootDark: 0xf2b01e, glove: 0xf2b01e,
+          headCol: 0x16181c, headTrim: 0xf2b01e, lens: 0xf2b01e, strap: 0xf2b01e, ski: 0xf2b01e, skiTop: 0x16181c, pole: 0x16181c, packCol: 0xf2b01e },
+        { ...GLIDER, id: 'g_acro', name: 'Acro-Pilotin', era: 'Heute', bands: 0, fit: 'loose', hair: 0xd8b77a,
+          jacket: 0xe0409a, panel: 0x7a1f5a, trim: 0x58d0e6, pants: 0x1f8a8a, knee: 0x12343a, boot: 0xf2f2f0, bootDark: 0x1d2128, glove: 0x58d0e6,
+          headCol: 0x58d0e6, headTrim: 0xe0409a, lens: 0xe0409a, strap: 0x7a1f5a, ski: 0xe0409a, skiTop: 0x58d0e6, pole: 0x58d0e6, packCol: 0x7a1f5a }
+    ]
+};
+
 // ===== SKIMARKEN =====
 // Ski bekannter Hersteller, in deren typischen Farben. Nur der Name als Schrift – keine Logos, keine
 // nachgebauten Dekore. (Öffentliches Fanprojekt: die Namen gehören den jeweiligen Herstellern.)
@@ -93,13 +148,29 @@ export function getSelection() {
     }
     return sel;
 }
+const readStore = () => {
+    try { const raw = localStorage.getItem(key()); return raw && raw[0] === '{' ? JSON.parse(raw) : {}; } catch { return {}; }
+};
 export function setSelection(sel) {
-    try { localStorage.setItem(key(), JSON.stringify(sel)); } catch { /* privater Modus */ }
+    // die Wahl der anderen Sportarten (sport_…) bleibt daneben erhalten
+    try { localStorage.setItem(key(), JSON.stringify({ ...readStore(), ...sel })); } catch { /* privater Modus */ }
+}
+/** Gewählte Ausrüstung einer Sportart (Id aus SPORT_OUTFITS) – ohne Wahl die erste. */
+export function getSportChoice(sport) {
+    const list = SPORT_OUTFITS[sport] || [], id = readStore()['sport_' + sport];
+    return (list.find(o => o.id === id) || list[0] || {}).id || '';
+}
+export function setSportChoice(sport, id) {
+    try { localStorage.setItem(key(), JSON.stringify({ ...getSelection(), ...readStore(), ['sport_' + sport]: id })); } catch { /* privater Modus */ }
 }
 /** Auswahl für alle Teile aus einem Outfit. */
 export const presetSelection = (id) => Object.fromEntries(SLOTS.map(sl => [sl.key, id]));
 /** Aus der Auswahl das Outfit zusammensetzen, das SkiFigure baut. */
-export function composeOutfit(sel = getSelection()) {
+export function composeOutfit(sel = getSelection(), sport = 'alpin', sportId = null) {
+    if (sport !== 'alpin' && SPORT_OUTFITS[sport]) {
+        const id = sportId || getSportChoice(sport), src = SPORT_OUTFITS[sport].find(o => o.id === id) || SPORT_OUTFITS[sport][0];
+        return { ...src, topFit: src.fit || 'normal', pantsFit: src.fit || 'normal' };
+    }
     const out = {};
     for (const sl of SLOTS) {
         const src = (sl.key === 'ski' && partById(sel[sl.key])) || outfitById(sel[sl.key]);
@@ -109,7 +180,7 @@ export function composeOutfit(sel = getSelection()) {
     return out;
 }
 /** Kurzer Schlüssel der Auswahl (ändert er sich, wird die Figur neu gebaut). */
-export const selectionKey = (sel = getSelection()) => SLOTS.map(sl => sel[sl.key]).join('|');
+export const selectionKey = (sel = getSelection(), sport = 'alpin') => (sport !== 'alpin' && SPORT_OUTFITS[sport] ? getSportChoice(sport) : SLOTS.map(sl => sel[sl.key]).join('|'));
 
 /** Hat dieser Spieler seine Figur schon einmal eingekleidet? (Sonst zeigt das Spiel beim ersten Start die Garderobe.) */
 export function hasChosenOutfit() {

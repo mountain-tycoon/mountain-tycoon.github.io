@@ -54,6 +54,9 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   die Sitzung gesperrt – jeder Wechsel ruckelt selbst. Neue teure Effekte an eine Stufe hängen.
   Gemessen (Nov. 2026): die Spiellogik braucht unter 2 ms je Bild; Ruckeln kommt von der Grafikseite.
   Messen: `__mtCam.noRender(true)` lässt das Zeichnen aus, dann zeigt ein CPU-Profil die reine Rechenzeit.
+- **Schatten beim Selbstfahren:** `focusShadow` legt die Schattenkarte eng um die Figur (`SHADOW_NEAR`), der
+  Ausschnitt springt in groben Schritten mit. Gleiche Auflösung auf kleiner Fläche = scharfe Schatten von Figur
+  und Bäumen aus der Nähe; in der Übersicht gilt wieder die ganze Karte.
 - **Wasser** (`Water3D.js`): `prepareWater` gräbt Seebecken und Bachbetten ein (vor dem Geländenetz),
   `buildWater` legt eine Shader-Fläche darüber (Tiefe, Wellen, Spiegelung, Strömung). Wasserpunkte sind
   `landcover === 2`; die Bodenfarbe darunter kommt aus `waterBedColor`.
@@ -99,6 +102,12 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `localStorage['mt.outfit']` bzw. je Konto `mt.outfit:<Name>`. Ein neues Outfit ist nur ein weiterer Eintrag in
   `OUTFITS`. Für die Ski gibt es zusätzlich `SKI_BRANDS` (bekannte Hersteller in ihren typischen Farben – nur der
   Name als Schrift, keine Logos oder nachgebauten Dekore).
+- Sportarten: `SPORTS` und `SPORT_OUTFITS` in `SkiOutfits.js`. Alpin ist die frei kombinierbare Garderobe; für
+  Langlauf, Eishockey und Gleitschirm gibt es je eine Handvoll ganzer Ausrüstungen (`gear`: schmale Ski und lange
+  Stöcke, Gewehr `rifle`, Gitter `eyes: 'cage'`, Gurtzeug). Die Wahl je Sportart liegt im selben Speicher
+  (`sport_<id>`, `getSportChoice`/`setSportChoice`); `composeOutfit(auswahl, sportart)` liefert das Outfit. Im Spiel
+  zieht sich die Figur selbst um (`dress` in `SkiRun.js`): Loipe und Schießstand = Langlauf, Eisbahn = Eishockey,
+  Flug = Gleitschirm, sonst Alpin – zurück zu Alpin erst nach gut zwei Sekunden, damit es am Loipenrand nicht flackert.
 - Erster Besuch: hat das Konto noch keine Auswahl (`hasChosenOutfit`), zeigt das Hauptmenü zuerst nur die
   Garderobe mit Begrüßung; erst nach „los geht's" erscheinen die Reiter.
 - Anleitung: `components/menu/Guide.jsx` – drei Blätter (Ablauf, Bedienung, Installation als App auf iPhone/iPad
@@ -162,7 +171,8 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Selbstlenkung aus. Kraft bestimmt Tempo und Pulsziel; über 168 Schlägen füllt sich `spentAcc` (rund 5 s), dann
   ist die Figur `spent`: Kraft höchstens 0,22, bis der Puls unter 128 liegt. Das HUD zeigt Kraftbalken und Zustand.
 - **Puls** (`stepPulse`): folgt träge der Anstrengung – Skating nach Tempo und Steigung, Gehen bergauf, Abfahren
-  nur wenig; hinauf schnell, hinunter langsam. Das HUD zeigt ihn auf der Loipe, am Schießstand und ab 84.
+  nur wenig; hinauf schnell, hinunter langsam. Das HUD zeigt ihn NUR auf der Loipe und am Schießstand – beim
+  Abfahren, auf dem Eis und im Flug spielt er keine Rolle.
 - **Schießstand** (`Biathlon3D.js`, Gebäude `biathlon`): drei Stände, geschossen wird auf dem mittleren
   (`userData.shoot`: Standpunkt, fünf Scheiben, `reset`, `hit`). Nahe am Stand bietet das HUD „anlegen" an
   (`toggleShoot`): Blick durchs Visier mit engem Bildwinkel, Ziehen richtet es aus, „Schuss"/Leertaste löst aus
@@ -180,6 +190,11 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (links/rechts lenkt, „vorwärts" schneller und steiler, Bremsen langsamer), am Kartenrand dreht sie zurück.
   Berührt sie den Boden, fällt der Schirm zusammen und es geht auf Ski weiter. Stöcke sind im Flug ausgeblendet
   (`setPoles`). Gebäude und Bäume halten den Flug nicht auf.
+- Höhe: beim Start hebt der Schirm kräftig an, und wo das Gelände unter der Flugbahn steil abfällt, trägt
+  Hangaufwind (bis rund 45 Einheiten über Grund) – sonst klebte der Flug am Hang und es bliebe keine Luft für Manöver.
+- Manöver (`stepGlide`): **Steilspirale** – lange in eine Richtung ziehen (`holdT`), enger und steil hinunter, Punkte
+  je Umdrehung. **Wingover** – im Takt links/rechts umlenken (`wing`, `swing`), Punkte je Wechsel. **Looping** – mit
+  viel Fahrt („vorwärts") kräftig anbremsen, nur mit genug Höhe; Figur und Kappe drehen einmal über Kopf.
 
 ## Eisbahn (Eishockey)
 - `IceRink3D.js` (`makeIceRink`, Gebäude `eisbahn`): Feld mit Linien, Bande mit Eingang vorn in der Mitte (lokal
