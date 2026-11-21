@@ -8935,6 +8935,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 { gx: cg.gx - rr * 0.5, gy: cg.gy },
                 { gx: cg.gx + rr * 0.5, gy: cg.gy }
             ]);
+            // Große Anlagen (Eisbahn, Schießstand …): ein Streifen in der Mitte genügt nicht – die ganze
+            // Kreisfläche roden, sonst stehen Bäume auf dem Eis oder in der Schussbahn.
+            if (def.r > 4.5) {
+                for (let oy = -rr; oy <= rr + 0.01; oy += 2.2) {
+                    const hw = Math.sqrt(Math.max(0, rr * rr - oy * oy));
+                    clearForestAlongPath([{ gx: cg.gx - hw, gy: cg.gy + oy }, { gx: cg.gx + hw, gy: cg.gy + oy }]);
+                }
+            }
             if (rocks?.userData?.clearAlong) {
                 rocks.userData.clearAlong([{ gx: cg.gx - rr * 0.5, gy: cg.gy },
                                            { gx: cg.gx + rr * 0.5, gy: cg.gy }], rr * 0.8);

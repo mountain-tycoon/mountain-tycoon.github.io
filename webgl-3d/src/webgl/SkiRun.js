@@ -737,7 +737,7 @@ export function createSkiRun(deps) {
             // Schlittschuhschritt: tief in den Knien, seitlich abstoßen, der Schläger führt vorn am Eis
             skatePh += dt * (v > 0.5 ? 2.4 + v * 0.5 : 0);
             const k = clamp(v / 3, 0, 1) * (readInput().tuck ? 1 : 0.25), sw = Math.sin(skatePh) * k, pl = Math.max(0, sw), pr = Math.max(0, -sw);
-            ud.setPose({ bendL: 0.36 + pr * 0.22, bendR: 0.36 + pl * 0.22, swingL: -pl * 0.22, swingR: -pr * 0.22, outL: pl * 0.34, outR: pr * 0.34, splay: 0.5 * k,
+            ud.setPose({ bendL: 0.36 + pr * 0.22, bendR: 0.36 + pl * 0.22, swingL: -pl * 0.22, swingR: -pr * 0.22, outL: 0.05 + pl * 0.34, outR: 0.05 + pr * 0.34, splay: 0.5 * k,
                 lean: 0.4 + k * 0.1, armX: -0.55, armXR: -0.7, elbow: -0.55, armOut: 0.1, roll: -sw * 0.1 });
             mesh.rotation.z = lean * 0.8;
             return;
@@ -747,7 +747,7 @@ export function createSkiRun(deps) {
             skatePh += dt * (2.6 + v * 0.55);
             const sw = Math.sin(skatePh), pl = Math.max(0, sw), pr = Math.max(0, -sw);
             const pol = 0.5 - 0.5 * Math.cos(skatePh * 2);
-            ud.setPose({ bendL: 0.3 + pr * 0.25, bendR: 0.3 + pl * 0.25, swingL: -pl * 0.2, swingR: -pr * 0.2, outL: pl * 0.38, outR: pr * 0.38, splay: 0.9,
+            ud.setPose({ bendL: 0.3 + pr * 0.25, bendR: 0.3 + pl * 0.25, swingL: -pl * 0.2, swingR: -pr * 0.2, outL: 0.13 + pl * 0.36, outR: 0.13 + pr * 0.36, splay: 0.9,     // Grundstand breit, sonst kreuzen sich die Skienden
                 lean: 0.42 + pol * 0.2, armX: -1.0 + pol * 1.5, elbow: -0.55 + pol * 0.35, armOut: 0.16, pole: 0.5 + pol * 0.7, roll: -sw * 0.12 });
             // der Körper pendelt über das jeweilige Gleitbein
             const sway = -sw * 0.11;
