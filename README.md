@@ -26,6 +26,14 @@ selbst befahren – in der Luft drehen die Lenktasten, „vorwärts" und Bremsen
 einkehren (E) und die Aussicht genießen. Im Hauptmenü unter „Fahrer" kleidet man die Figur ein – ganze Outfits vom
 Skipionier von 1935 über den Neon-Einteiler bis heute, oder Kopf, Oberteil, Hose, Schuhe und Ski frei gemischt. Dazu gibt es Fahrgeräusche – abschaltbar über „Ton an/aus". „Beenden" (oder Esc) führt zurück zum Bauen.
 
+## Langlauf und Biathlon
+Unter „Pisten" gibt es die **Langlaufloipe**: Punkt für Punkt gezeichnet, sanft auf und ab, gern als Runde.
+Darauf sind Langläufer im Skatingschritt unterwegs. Die eigene Figur läuft auf der Loipe ebenfalls im
+Skatingschritt („vorwärts" halten); oben im Bild steht der **Puls**, der mit Tempo und Steigung steigt und nur
+langsam wieder fällt. Unter „Extras" steht der **Biathlon-Schießstand**: davor anhalten, „anlegen", das Visier
+durch Ziehen auf die fünf Scheiben richten und schießen. Bei hohem Puls schwankt das Visier stark – wer kurz
+wartet, trifft besser.
+
 ## Spielstand
 
 Das Spiel sichert von selbst: nach jedem Bauen, regelmäßig zwischendurch und beim Verlassen. Der Stand

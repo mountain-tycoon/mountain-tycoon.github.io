@@ -254,6 +254,7 @@ export function makePlayerSkier(o = composeOutfit()) {
      *   armX, elbow  Arme vor, Ellbogen       armOut         Arme seitlich
      *   pole         Stockwinkel              sit            sitzend (Sessel): Oberschenkel waagerecht
      *   roll, twist  Oberkörper seitlich aufrichten bzw. drehen (Hüftknick in der Kurve)
+     *   splay        Skating: Skispitzen auseinander (0…1)      outL/outR  Bein seitlich abgestoßen
      */
     ud.setPose = (p) => {
         if (p.sit) {
@@ -262,10 +263,11 @@ export function makePlayerSkier(o = composeOutfit()) {
             }
             body.position.y = 0;
         } else {
-            const dl = setLeg(L, p.bendL ?? 0, p.swingL ?? 0, -(p.plough ?? 0) * 0.16, -1);
-            const dr = setLeg(R, p.bendR ?? 0, p.swingR ?? 0, -(p.plough ?? 0) * 0.16, 1);
-            // Pflug: Skispitzen zusammen
-            L.ankle.rotation.y = -(p.plough ?? 0) * 0.3; R.ankle.rotation.y = (p.plough ?? 0) * 0.3;
+            const dl = setLeg(L, p.bendL ?? 0, p.swingL ?? 0, -(p.plough ?? 0) * 0.16 - (p.outL ?? 0), -1);
+            const dr = setLeg(R, p.bendR ?? 0, p.swingR ?? 0, -(p.plough ?? 0) * 0.16 - (p.outR ?? 0), 1);
+            // Pflug: Skispitzen zusammen – Skating (splay): Spitzen auseinander
+            const tips = (p.plough ?? 0) - (p.splay ?? 0);
+            L.ankle.rotation.y = -tips * 0.3; R.ankle.rotation.y = tips * 0.3;
             body.position.y = -Math.min(dl, dr);
         }
         const lean = p.lean ?? 0;

@@ -16,7 +16,7 @@ export function skiSoundWanted() {
 }
 
 export function createSkiSound() {
-    let ctx = null, master = null, parts = null;
+    let ctx = null, master = null, parts = null, noise = null;
     let wanted = skiSoundWanted();
 
     const noiseBuffer = (c) => {
@@ -30,7 +30,7 @@ export function createSkiSound() {
         if (!AC) return false;
         ctx = new AC();
         master = ctx.createGain(); master.gain.value = 0; master.connect(ctx.destination);
-        const buf = noiseBuffer(ctx);
+        const buf = noise = noiseBuffer(ctx);
         const band = (type, freq, q) => {
             const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
             const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q;
@@ -95,6 +95,19 @@ export function createSkiSound() {
             g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.25 + 0.4 * Math.min(1, strength), t + 0.012);
             g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
             o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.35);
+        },
+        /** Schuss am Biathlonstand: trockener Knall, bei einem Treffer klappt die Scheibe hörbar um. */
+        shot(hit) {
+            if (!ctx || !wanted) return;
+            const t = ctx.currentTime, src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+            src.buffer = noise; f.type = 'bandpass'; f.frequency.value = 1900; f.Q.value = 0.7;
+            g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.7, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+            src.connect(f); f.connect(g); g.connect(master); src.start(t, Math.random()); src.stop(t + 0.2);
+            if (!hit) return;
+            const o = ctx.createOscillator(), g2 = ctx.createGain(), t2 = t + 0.09;
+            o.type = 'triangle'; o.frequency.setValueAtTime(1500, t2); o.frequency.exponentialRampToValueAtTime(900, t2 + 0.12);
+            g2.gain.setValueAtTime(0.0001, t2); g2.gain.exponentialRampToValueAtTime(0.3, t2 + 0.006); g2.gain.exponentialRampToValueAtTime(0.0001, t2 + 0.2);
+            o.connect(g2); g2.connect(master); o.start(t2); o.stop(t2 + 0.25);
         },
         dispose() { try { ctx?.close(); } catch { /* schon zu */ } ctx = null; }
     };

@@ -44,7 +44,9 @@ const CONTROLS = [
         ['Lenken', 'die zwei Tasten links/rechts – am Rechner A und D'],
         ['Bremsen', 'beide Tasten zugleich – am Rechner S'],
         ['Schuss / gehen', 'Bild gedrückt halten – am Rechner W'],
-        ['In der Luft', 'Lenken dreht, vorwärts und bremsen sind die Salti']
+        ['In der Luft', 'Lenken dreht, vorwärts und bremsen sind die Salti'],
+        ['Loipe', 'vorwärts = Skatingschritt; der Puls steigt mit Tempo und Steigung'],
+        ['Schießstand', 'ziehen = zielen, „Schuss" löst aus – hoher Puls lässt das Visier wackeln']
     ]]
 ];
 

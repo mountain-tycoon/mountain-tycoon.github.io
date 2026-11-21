@@ -9,7 +9,7 @@ Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
   - `src/engine/terrainGen.js` – Landschaftserzeugung (Spielfeld samt Umland), siehe „Landschaft" unten
   - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `SnowSurface.js`, `Surround3D.js`,
     `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`, `SkiFigure.js`, `SkiOutfits.js`,
-    `SkiSound.js`). Die ganze Simulation (Gäste, Lifte, Wirtschaft) steckt in `Scene3D.js`.
+    `SkiSound.js`, `Loipe3D.js`, `Biathlon3D.js`). Die ganze Simulation (Gäste, Lifte, Wirtschaft) steckt in `Scene3D.js`.
   - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
   - `src/components/menu/` – Hauptmenü (Kampagne, Sandbox, Fahrer-Garderobe `Wardrobe.jsx`) und Ladebildschirm
   - `src/constants/campaign.js` – Level, Aufgaben, Fortschritt
@@ -142,6 +142,27 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `step(1/60, t)` in einer Schleife spulen die Fahrt vor, `__state()` zeigt Ort und Tempo. `__mtCam.buildLift(art,
   ax, az, bx, bz)` stellt ohne Dialog und Bauzeit einen Lift hin, `__mtCam.place(art, gx, gy)` ein Gebäude oder
   eine Anlage (Anlagen brauchen eine extrabreite Piste: `route.width = 'xwide'`). Die Fahrzeuge bewegen sich nur in echten Bildern.
+
+## Langlauf und Biathlon
+- **Loipe** (`Loipe3D.js`, `buildLoipePath` in `Scene3D.js`): gebaut mit dem Pistenwerkzeug in der Breite `'loipe'`
+  (Menü „Pisten", Spielstand-Aktion `p` mit `w: 'loipe'`). Sie wird NICHT bergab ausgerichtet, darf bis 9° steigen
+  und fallen und auch eine Runde sein. Das Band ist ein Pistenband (`noWear`: verspurt nicht, keine Raupe nötig),
+  dazu klassische Spuren an beiden Rändern. Loipen stehen nicht in `guestRoutes` – die Gäste-Logik kennt sie nicht.
+  `createLoipen` verwaltet sie: `add`, `at(gx, gy)`, `dirAt`, `update(dt, tagsüber)`. Die Verwaltung wird früh
+  angelegt (gleich nach `sim`), weil der Bildtakt schon während des Aufbaus der Szene läuft.
+- **Langläufer:** eigene kleine Schar (höchstens `MAX_SKATERS`, je Läufer vier Netze, ein Material mit Eckfarben),
+  Skatingschritt hin und zurück bzw. im Kreis, bergauf langsamer, bergab in der Hocke; nachts und ohne Schnee
+  unsichtbar. Jede Ankunft am Loipenende bringt `LOIPE_FEE`.
+- **Spielfigur:** auf der Loipe (`deps.loipeAt`) wird „vorwärts" zum Skatingschritt (`skating` in `SkiRun.js`,
+  Haltung über `splay`/`outL`/`outR` in `setPose`). Beim Absetzen auf einer Loipe schaut die Figur in Laufrichtung.
+- **Puls** (`stepPulse`): folgt träge der Anstrengung – Skating nach Tempo und Steigung, Gehen bergauf, Abfahren
+  nur wenig; hinauf schnell, hinunter langsam. Das HUD zeigt ihn auf der Loipe, am Schießstand und ab 84.
+- **Schießstand** (`Biathlon3D.js`, Gebäude `biathlon`): drei Stände, geschossen wird auf dem mittleren
+  (`userData.shoot`: Standpunkt, fünf Scheiben, `reset`, `hit`). Nahe am Stand bietet das HUD „anlegen" an
+  (`toggleShoot`): Blick durchs Visier mit engem Bildwinkel, Ziehen richtet es aus, „Schuss"/Leertaste löst aus
+  (`fire`). Es schwankt das ganze Bild – Grundunruhe, Atem und ein Ruck je Herzschlag, alles mit dem Puls
+  stärker; im Anschlag sinkt der Puls langsam. Getroffen ist die Scheibe unter der Bildmitte im Augenblick des
+  Schusses. Der Diopterring im HUD bekommt seine Größe aus der Szene (`shooting.ring`).
 
 ## Landschaft, Umland, Schnee
 - **Erzeugung** (`engine/terrainGen.js`): kein Aufaddieren breiter Kuppeln mehr (das ergab in jedem Level einen

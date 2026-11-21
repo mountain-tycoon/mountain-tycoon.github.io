@@ -17,6 +17,8 @@ import { M0 as VMATS, makeCar, makeBus, makeSnowcat, makeSkier, makeSkiInstructo
 import { makeClouds, makeSkyDome, makeMoon } from './Sky3D.js';
 import { planVillageAccess, findPath, smoothPath } from './AccessPlanner.js';
 import { createSkiRun } from './SkiRun.js';
+import { createLoipen, LOIPE_W } from './Loipe3D.js';
+import { makeBiathlonRange, BIATHLON_R } from './Biathlon3D.js';
 // ===== POSTPROCESSING =====
 // Hebt die Bildqualität deutlich: weiches Glühen an hellen Kanten (Schnee,
 // Sonne, Lichter), Kantenglättung und ein abschließendes Color-Grading.
@@ -1136,7 +1138,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         hotel_pension: 0, hotel_budget: 0, hotel_mid: 0, hotel_resort: 0, hotel_lux: 0, chalet_s: 0, chalet_l: 0, chalet_lux: 0,
         huette: 0, bergrest: 0, panorama: 0, sterne: 0, apres: 0, partyzelt: 0, disco: 0, souvenir: 0,
         medical: 0, hospital: 0, workshop: 0, reservoir: 0, reservoir_l: 0, cannon_s: 0, cannon_l: 0,
-        sauna: 0, therme: 0, eisbahn: 0, kicker: 0, halfpipe: 0, racecourse: 0 };
+        sauna: 0, therme: 0, eisbahn: 0, kicker: 0, halfpipe: 0, racecourse: 0, biathlon: 0 };
     // Sammelwerte über alle Klassen (für Statistik & Simulation)
     // ===== BETTEN =====
     // Jede Unterkunft hat eine echte Kapazität statt der pauschalen 40 Betten
@@ -1322,6 +1324,16 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const logAction = (a) => { if (replaying) return; saveLog.push(a); if (onSaveChange) onSaveChange(); };
     // ===== ÖKONOMIE-SIMULATION =====
     const sim = { served: 0, active: 0, revenue: 0, satisfaction: 78, timeAcc: 0, dayProfit: 0, bestDayProfit: 0, dayAcc: 0, dayRevenue: 0, dayCost: 0, carActive: 0, carGuestsToday: 0, groom: 85 };
+    // ===== LANGLAUF =====
+    // Loipen sind keine Gäste-Routen (kein Lift, keine Abfahrt): sie haben eigene Läufer (Loipe3D.js).
+    // Gebaut werden sie mit dem Pistenwerkzeug in der Breite 'loipe'; jede Ankunft eines Läufers am
+    // Loipenende bringt eine kleine Loipengebühr.
+    let dayNow = 1;                       // Tageslicht 0…1 (aus der Himmelsrechnung), für die Langläufer
+    const LOIPE_RGB = [0.16, 0.60, 0.56], LOIPE_HEX = 0x2a9d8f, LOIPE_FEE = 4;
+    const loipen = createLoipen({
+        scene, posAt: (gx, gy) => worldPosSmooth(gx, gy), hasSnowAt: (gx, gy) => hasSnowAt(gx, gy),
+        onLap: () => { money += LOIPE_FEE; sim.revenue += LOIPE_FEE; sim.dayRevenue += LOIPE_FEE; }
+    });
     // ===== ÖKONOMIE (Konzept aus dem 2D-Spiel übernommen) =====
     // Globaler Skipass-Preis (Kasse), einstellbar 50%..200% der Basis
     const eco = { baseSkiPass: 85, skiPass: null, ad: { id: null, daysLeft: 0 } };  // null = Basispreis
@@ -1591,7 +1603,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             cannon_l:   { icon: '🗼', name: 'Schnee-Lanze',    desc: 'Große Reichweite, hoher Wasserbedarf — Stausee nötig.' },
             sauna:      { icon: '🧖', name: 'Sauna-Anlage',    desc: 'Wellness nach dem Skitag.' },
             therme:     { icon: '♨️', name: 'Große Therme',    desc: 'Glaskuppel, Becken, Whirlpool — Top-Attraktion.' },
-            eisbahn:    { icon: '⛸️', name: 'Eislaufbahn',     desc: 'Abwechslung abseits der Piste.' }
+            eisbahn:    { icon: '⛸️', name: 'Eislaufbahn',     desc: 'Abwechslung abseits der Piste.' },
+            biathlon:   { icon: '🎯', name: 'Biathlon-Schießstand', desc: 'Drei Stände, fünf Scheiben – beim Selbstfahren kannst du hier schießen. Hoher Puls lässt das Visier wackeln.' }
         }[t] || { icon: '📍', name: t, desc: '' };
         let liftTitle = null;   // benannte Liftanlage überschreibt die Überschrift
         // Ortschaft: rein informativ, nichts zu bauen oder abzureißen
@@ -1913,7 +1926,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const bedWear = dt * (0.0026 + Math.min(0.016, sim.active * 0.0003));
         let bedSum = 0, bedN = 0;
         for (const bed of pisteBeds) {
-            if (!bed.groom) continue;
+            if (!bed.groom || bed.noWear) continue;      // Loipen verspuren nicht (keine Raupe fährt sie ab)
             for (let k = 0; k < bed.groom.length; k++) {
                 if (bed.groom[k] > 0) bed.groom[k] = Math.max(0, bed.groom[k] - bedWear);
                 bedSum += bed.groom[k]; bedN++;
@@ -1926,7 +1939,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const groomPenalty = Math.max(0, (60 - sim.groom)) * 0.3;        // unter 60% wird gemeckert
         // Funpark hebt die Laune — je größer, desto stärker; Toiletten ebenfalls
         const funMood = built.funpark_s * 4 + built.funpark * 9 + built.funpark_l * 16
-            + built.kicker * 3 + built.halfpipe * 20 + built.racecourse * 26;
+            + built.kicker * 3 + built.halfpipe * 20 + built.racecourse * 26
+            + built.biathlon * 8 + Math.min(12, loipen.list().length * 4);
         const target = Math.max(20, Math.min(98, 55 + totalGastro() * 5 + funMood + totalHotels() * 2 + totalNight() * 4 + totalWell() * 5 + built.toilet * 3 + built.medical * 2 + built.hospital * 4 - overcrowd * 60 - groomPenalty));
         sim.satisfaction += (target - sim.satisfaction) * Math.min(1, dt * 0.3);
         // Lift-Auslastung -> besetzte Sessel/Bügel (nur wenn wirklich Gäste da sind)
@@ -6279,6 +6293,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // Plateau ab 0.52 (vorher 0.62): gut die Hälfte des Zyklus ist voller Tag.
         const dayT = Math.max(0, Math.min(1, (rawDay - 0.10) / 0.42));
         const day = dayT * dayT * (3 - 2 * dayT);      // weiches Ein-/Ausblenden
+        dayNow = day;
         // Neuer Zyklus -> neu auswürfeln (ca. jeder dritte Abend wird spektakulär)
         const cyc = Math.floor(t / CYCLE);
         if (cyc !== lastCycle) {
@@ -6434,9 +6449,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
             guests: () => guestPool, villagesNow: () => villages, noRender: (v) => { skipRender = !!v; },
-            walkers: () => _dbgWalkers, buildPiste: (pts) => buildPistePath(pts),
+            walkers: () => _dbgWalkers, buildPiste: (pts, width) => { if (width) pisteWidth = width; return buildPistePath(pts); }, loipen: () => loipen,
             // Gäste und Anlagen vorspulen (Prüfungen): n Schritte zu je dt Sekunden; `each` wird nach jedem Schritt gerufen
-            fastForward: (n, dt, each) => { let tt = clock.getElapsedTime(); for (let i = 0; i < n; i++) { tt += dt; for (const u of updaters) u(tt); updateGuests(tt, dt); if (each) each(i); } },
+            fastForward: (n, dt, each) => { let tt = clock.getElapsedTime(); for (let i = 0; i < n; i++) { tt += dt; for (const u of updaters) u(tt); updateGuests(tt, dt); loipen.update(dt, true); if (each) each(i); } },
             // Gebäude oder Anlage ohne Bauzeit hinstellen (Prüfungen)
             place: (type, gx, gy) => { try { return placeBuildingAt(type, { gx, gy }); } finally { for (const c of constructions) c.t = c.dur; } },
             // Lift ohne Dialog bauen (Prüfungen): Art, Tal- und Bergpunkt in Weltkoordinaten
@@ -6472,6 +6487,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         updateConstructions(dt);
         updateQueue(t);
         for (const u of updaters) u(t);
+        loipen.update(dt, dayNow > 0.3);          // Langläufer: tagsüber unterwegs
         // Der Spieler fährt selbst: Kamera hängt an der Figur. Erst NACH den Anlagen – in der Kabine
         // zählt deren Lage in diesem Bild, sonst hinge man eine Bildlänge hinterher.
         if (skiRun && skiRun.active()) skiRun.step(dt, t);
@@ -6585,7 +6601,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         cannon_l:     { cost: 55200,  r: 1.6, make: () => makeSnowCannon('large') },
         sauna:        { cost: 195000, r: 2.6, make: () => makeSauna() },
         therme:       { cost: 2600000,r: 5.6, make: () => makeThermalBath() },
-        eisbahn:      { cost: 975000, r: 7.5, make: () => makeIceRink() }
+        eisbahn:      { cost: 975000, r: 7.5, make: () => makeIceRink() },
+        biathlon:     { cost: 160000, r: BIATHLON_R, make: () => makeBiathlonRange() }
     };
     let currentBuild = null;
     let ghost = null;
@@ -6954,6 +6971,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const rise = yb - ya;                 // > 0 = bergauf von a nach b
         const distM = dist * 20;              // 1 Kachel = 20 m
         const angleUp = Math.atan2(Math.max(0, rise), distM) * 180 / Math.PI;
+        if (pisteWidth === 'loipe') return Math.abs(Math.atan2(rise, distM) * 180 / Math.PI) <= 9;   // Loipe: auf und ab, aber nicht steil
         if (angleUp > 5) return false;        // nicht bergauf > 5°
         return true;
     };
@@ -8031,8 +8049,42 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const pisteCostForPts = (pts) => {
         let d = 0; for (let i = 1; i < pts.length; i++) d += Math.hypot(pts[i].gx - pts[i-1].gx, pts[i].gy - pts[i-1].gy);
         // Breitere Pisten kosten mehr Erdbewegung und Präparierung
-        const wMul = { narrow: 0.8, medium: 1, wide: 1.35, xwide: 1.95 }[pisteWidth] || 1;
+        const wMul = { narrow: 0.8, medium: 1, wide: 1.35, xwide: 1.95, loipe: 0.45 }[pisteWidth] || 1;
         return Math.round((2000 + d * 400) * wMul);
+    };
+    /**
+     * Loipe: schmales gewalztes Band in der gezeichneten Richtung (auf und ab erlaubt, auch als Runde).
+     * Wald und Felsblöcke weichen, der Boden wird beschneit; Läufer und Spuren kommen aus Loipe3D.js.
+     */
+    const buildLoipePath = (pts0) => {
+        let pts = pts0.map(q => ({ gx: q.gx, gy: q.gy }));
+        for (let round = 0; round < 2 && pts.length >= 3; round++) {          // Ecken runden wie bei den Pisten
+            const sm = [pts[0]];
+            for (let i = 0; i < pts.length - 1; i++) {
+                const a = pts[i], b = pts[i + 1];
+                sm.push({ gx: a.gx * 0.75 + b.gx * 0.25, gy: a.gy * 0.75 + b.gy * 0.25 });
+                sm.push({ gx: a.gx * 0.25 + b.gx * 0.75, gy: a.gy * 0.25 + b.gy * 0.75 });
+            }
+            sm.push(pts[pts.length - 1]);
+            pts = sm;
+        }
+        const bedRec = buildPisteBand(pts, LOIPE_W, LOIPE_RGB);
+        bedRec.noWear = true; bedRec.route = null;
+        pisteBeds.push(bedRec);
+        clearForestAlongPath(pts);
+        if (rocks?.userData?.clearAlong) rocks.userData.clearAlong(pts, LOIPE_W + 1.0);
+        snowifyGroundAlongPath(pts, 2.4);
+        const rec = loipen.add(pts, LOIPE_W);
+        if (!rec) return null;
+        rec.bed = bedRec;
+        // Loipenschilder: an beiden Enden und alle rund 25 Kacheln ein Pfosten am Rand
+        for (let i = 0; i < rec.mid.length; i += 25) {
+            const a = rec.mid[Math.max(0, i - 1)], b = rec.mid[Math.min(rec.mid.length - 1, i + 1)], l = Math.hypot(b.gx - a.gx, b.gy - a.gy) || 1;
+            const mk = makePisteMarker(LOIPE_HEX);
+            mk.position.copy(worldPosSmooth(rec.mid[i].gx - (b.gy - a.gy) / l * (LOIPE_W + 0.35), rec.mid[i].gy + (b.gx - a.gx) / l * (LOIPE_W + 0.35)));
+            scene.add(mk);
+        }
+        return rec;
     };
     // Baut das gefärbte Pistenband entlang der Wegpunkte; km je Schwierigkeit zählen.
     const buildPistePath = (rawPts) => {
@@ -8040,6 +8092,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const pts = [];
         for (const q of rawPts) { const last = pts[pts.length-1]; if (!last || Math.hypot(last.gx-q.gx, last.gy-q.gy) > 1.5) pts.push(q); }
         if (pts.length < 2) return null;
+        if (pisteWidth === 'loipe' && !pisteLit) return buildLoipePath(pts);
         // so orientieren, dass Punkt 0 oben (höchster) ist
         if (yAtSmooth(pts[0].gx, pts[0].gy) < yAtSmooth(pts[pts.length-1].gx, pts[pts.length-1].gy)) pts.reverse();
         // Zusammenlaufende Pisten intelligent verbinden: Start/Ende nahe einer
@@ -8704,7 +8757,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             const pointOK = pistePts.length === 0 ? isBuildableGround(np.gx, np.gy) : segmentValid(pistePts[pistePts.length - 1], np);
             if (!pointOK) {
                 // Mit der Maus zeigt die rote Vorschaulinie, dass es hier nicht geht – am Handy sagt es die Leiste.
-                if (isTouchEvent(e)) pistePending('hier nicht möglich (bergauf, Wasser oder Fels)');
+                if (isTouchEvent(e)) pistePending(pisteWidth === 'loipe' ? 'hier nicht möglich (zu steil, Wasser oder Fels)' : 'hier nicht möglich (bergauf, Wasser oder Fels)');
                 return; // ungültiges Segment -> ignorieren
             }
             pistePts.push(np);
@@ -9296,6 +9349,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         huts: () => placedBuildings.filter(b => HUT_NAMES[b.type] && b.rec).map(b => ({ x: b.rec.x, z: b.rec.z, name: HUT_NAMES[b.type] })),
         isBuilt: (gx, gy) => occAt(gx, gy) === OCC_BUILD,
         routes: () => guestRoutes,
+        loipeAt: (wx, wz) => !!loipen.at((wx + half) / tile, (wz + half) / tile),
+        loipeDir: (wx, wz) => loipen.dirAt((wx + half) / tile, (wz + half) / tile),
+        ranges: () => placedBuildings.filter(b => b.type === 'biathlon' && b.mesh.userData.shoot).map(b => ({ x: b.rec.x, z: b.rec.z, obj: b.mesh })),
         touch: () => lastPointerType !== 'mouse',
         onState: (info) => { if (onSki) onSki(info); }
     });
@@ -9427,6 +9483,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         skiTakeLift(){ return skiRun.takeLift(); },
         skiToggleHut(){ return skiRun.toggleHut(); },
         skiSound(on){ skiRun.setSound(on); },
+        skiToggleShoot(){ return skiRun.toggleShoot(); },
+        skiFire(){ return skiRun.fire(); },
         setOnSki(cb){ onSki = cb; },
         dispose(){ cancelAnimationFrame(raf); skiRun.dispose(); orbit.dispose(); window.removeEventListener('resize',onResize); window.visualViewport?.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onHover); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('pointerup',onTouchEnd); canvas.removeEventListener('pointercancel',onTouchEnd); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
         // ----- Bedienung per Finger: vorgemerkte Aktion bestätigen oder verwerfen -----

@@ -58,7 +58,7 @@ const warnBtn = (col) => ({
 const UNLOCK = {
     // ab dem 2. Level
     chair6: 1, lift4: 1, lift: 1, piste_xw: 1, piste_lit: 1, bergrest: 1, apres: 1, hotel: 1, chalet_l: 1,
-    garage2: 1, garage5_1: 1, medical: 1, snowcannon: 1, sauna: 1, funpark_s: 1, kicker: 1,
+    garage2: 1, garage5_1: 1, medical: 1, snowcannon: 1, sauna: 1, funpark_s: 1, kicker: 1, loipe: 1, biathlon: 1,
     // ab dem 3. Level
     lift8: 2, tram: 2, panorama: 2, partyzelt: 2, hotel_mid: 2, parkgarage: 2, garage4: 2, garage5_2: 2,
     workshop: 2, garage6_1: 2, cannon_l: 2, reservoir_l: 2, eisbahn: 2, funpark: 2, halfpipe: 2, racecourse: 2,
@@ -99,7 +99,8 @@ const CATEGORIES = [
             { key: 'piste',   tool: 'piste', lit: false, width: 'medium', icon: '🎿', name: 'Piste', group: 'Piste', variant: 'mittel', cost: 'ab €2k' },
             { key: 'piste_w', tool: 'piste', lit: false, width: 'wide',   icon: '🎿', name: 'Piste', group: 'Piste', variant: 'breit',  cost: 'ab €3k' },
             { key: 'piste_xw', tool: 'piste', lit: false, width: 'xwide', icon: '🎿', name: 'Piste', group: 'Piste', variant: 'extrabreit', cost: 'ab €4k' },
-            { key: 'piste_lit', tool: 'piste', lit: true, width: 'medium', icon: '💡', name: 'Piste + Flutlicht', cost: 'ab €3k' }
+            { key: 'piste_lit', tool: 'piste', lit: true, width: 'medium', icon: '💡', name: 'Piste + Flutlicht', cost: 'ab €3k' },
+            { key: 'loipe', tool: 'piste', lit: false, width: 'loipe', icon: '⛷️', name: 'Langlaufloipe', cost: 'ab €1k' }
         ]
     },
     {
@@ -176,6 +177,7 @@ const CATEGORIES = [
             { key: 'kicker',     tool: 'build', icon: '⛷️', name: 'Kicker',      cost: 18500 },
             { key: 'halfpipe',   tool: 'build', icon: '🏂', name: 'Halfpipe',    cost: 186000 },
             { key: 'racecourse', tool: 'build', icon: '🏁', name: 'Rennstrecke', cost: 340000 },
+            { key: 'biathlon',   tool: 'build', icon: '🎯', name: 'Biathlon-Schießstand', cost: 160000 },
             { key: 'skischool', tool: 'build', icon: '🎿', name: 'Skischule',  cost: 45000 },
             { key: 'skirental', tool: 'build', icon: '⛷️', name: 'Skiverleih', cost: 38000 },
             { key: 'shop',      tool: 'build', icon: '🛍️', name: 'Sport-Shop', cost: 52000 },
@@ -657,7 +659,7 @@ const SteerPad = ({ side, onHold }) => {
 };
 
 /** Anzeige und Steuerung beim Selbstfahren. */
-const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput }) => {
+const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, onShoot, onFire }) => {
     // Zwei Lenktasten: eine = lenken, beide zugleich = bremsen
     const held = useRef({ l: false, r: false });
     const hold = (k, v) => {
@@ -665,7 +667,11 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput }
         const { l, r } = held.current;
         onInput({ left: l && !r, right: r && !l, brake: l && r });
     };
-    const steering = touch && !ski.riding && !ski.resting;
+    const aim = ski.shooting;
+    const steering = touch && !ski.riding && !ski.resting && !aim;
+    // Puls: beim Langlauf, am Schießstand und solange er merklich über der Ruhe liegt
+    const showPulse = ski.pulse > 0 && (aim || ski.nordic || ski.pulse >= 84);
+    const pulseCol = ski.pulse >= 150 ? '#f87171' : ski.pulse >= 120 ? '#fcd34d' : '#e8eef6';
     return (
         <>
             <div style={{ position: 'fixed', zIndex: 21, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: `calc(${compact ? 8 : 14}px + ${SAFE_L})` }}>
@@ -678,12 +684,40 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput }
                     Ton {ski.sound ? 'an' : 'aus'}
                 </button>
             </div>
+            {aim && (
+                <>
+                    {/* Visier: Diopterring in der Bildmitte, außen abgedunkelt. Das Bild dahinter schwankt mit dem Puls. */}
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 19, pointerEvents: 'none',
+                                  background: 'radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 0, rgba(0,0,0,0) 20vmin, rgba(6,9,14,0.42) 30vmin, rgba(6,9,14,0.74) 50vmin)' }} />
+                    <div style={{ position: 'fixed', zIndex: 19, left: '50%', top: '50%', width: `${(aim.ring * 100).toFixed(2)}vh`, height: `${(aim.ring * 100).toFixed(2)}vh`, transform: 'translate(-50%, -50%)',
+                                  boxSizing: 'border-box', borderRadius: '50%', border: '0.5vmin solid rgba(8,10,14,0.92)', pointerEvents: 'none' }} />
+                    <div style={{ position: 'fixed', zIndex: 19, left: '50%', top: '50%', width: 4, height: 4, marginLeft: -2, marginTop: -2,
+                                  borderRadius: '50%', background: 'rgba(8,10,14,0.9)', pointerEvents: 'none' }} />
+                </>
+            )}
             {!ski.cabin && (
-                <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? 8 : 14}px + ${SAFE_T})`, left: 0, right: 0,
+                <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? (aim || showPulse ? 54 : 8) : 14}px + ${SAFE_T})`, left: 0, right: 0,
                               display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+                    {/* am Handy rutscht die breitere Anzeige (Puls, Scheiben) unter die beiden Knöpfe */}
                     <div style={{ ...chip, color: '#e8eef6', display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                        <span style={{ fontSize: 19, fontWeight: 700, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{ski.kmh}</span>
-                        <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>km/h</span>
+                        {!aim && <span style={{ fontSize: 19, fontWeight: 700, minWidth: 34, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{ski.kmh}</span>}
+                        {!aim && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>km/h</span>}
+                        {aim && (
+                            <span style={{ display: 'inline-flex', gap: 5, alignSelf: 'center', marginRight: 4 }}>
+                                {aim.marks.map((hit, i) => (
+                                    <i key={i} style={{ width: 11, height: 11, borderRadius: '50%', boxSizing: 'border-box',
+                                                        background: hit ? '#f2f4f7' : '#14171b', border: '1.5px solid rgba(232,238,246,0.7)' }} />
+                                ))}
+                            </span>
+                        )}
+                        {aim && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>{aim.left} Schuss</span>}
+                        {showPulse && (
+                            <>
+                                <span style={{ fontSize: 13, marginLeft: 10, color: pulseCol, alignSelf: 'center' }}>♥</span>
+                                <span style={{ fontSize: 16, fontWeight: 700, minWidth: 30, textAlign: 'right', color: pulseCol, fontVariantNumeric: 'tabular-nums' }}>{ski.pulse}</span>
+                                <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>Puls</span>
+                            </>
+                        )}
                         {ski.score > 0 && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>{ski.score.toLocaleString('de-DE')} P</span>}
                         {ski.timer && <span style={{ fontSize: 15, fontWeight: 700, marginLeft: 10, color: '#fcd34d', fontVariantNumeric: 'tabular-nums' }}>{ski.timer}</span>}
                     </div>
@@ -708,6 +742,19 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput }
                         </button>
                     </>
                 )}
+                {aim && !aim.done && (
+                    <div style={{ display: 'flex', gap: 10, pointerEvents: 'auto' }}>
+                        <button onClick={onShoot} style={{ ...btn, padding: '14px 18px' }}>Fertig{touch ? '' : ' (B)'}</button>
+                        <button onClick={onFire} style={{ ...btn, padding: '14px 34px', fontWeight: 700, border: '1px solid rgba(252,211,77,0.75)' }}>
+                            Schuss{touch ? '' : ' (Leertaste)'}
+                        </button>
+                    </div>
+                )}
+                {ski.range && (
+                    <button onClick={onShoot} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
+                        Schießstand · anlegen{touch ? '' : ' (B)'}
+                    </button>
+                )}
                 {ski.hut && (
                     <button onClick={onHut} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
                         Einkehren · {ski.hut}{touch ? '' : ' (E)'}
@@ -718,9 +765,11 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput }
                         {ski.lift} nach oben{touch ? '' : ' (L)'}
                     </button>
                 )}
-                {!ski.riding && !ski.resting && !ski.hint && (touch ? ski.kmh < 4 : true) && (
+                {!ski.riding && !ski.resting && !aim && !ski.hint && (touch ? ski.kmh < 4 : true) && (
                     <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5, lineHeight: 1.45 }}>
-                        {touch ? 'Seitentasten lenken · beide zugleich bremsen · Bild gedrückt halten: Schuss und gehen'
+                        {ski.nordic
+                            ? (touch ? 'Loipe: Bild gedrückt halten = Skatingschritt · Seitentasten lenken' : 'Loipe: W halten = Skatingschritt · A / D lenken · S bremsen')
+                            : touch ? 'Seitentasten lenken · beide zugleich bremsen · Bild gedrückt halten: Schuss und gehen'
                                : 'A / D oder ← / → lenken · W Schuss und gehen · S bremsen · Esc beenden'}
                     </div>
                 )}
@@ -829,6 +878,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             if (e.key === 'Escape') { if (picking) apiRef.current?.pickSki?.(false); else apiRef.current?.stopSki?.(); }
             else if (e.key.toLowerCase() === 'l') apiRef.current?.skiTakeLift?.();
             else if (e.key.toLowerCase() === 'e') apiRef.current?.skiToggleHut?.();
+            else if (e.key.toLowerCase() === 'b') apiRef.current?.skiToggleShoot?.();
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
@@ -898,6 +948,9 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                 ? 'Lift: erst die Talstation antippen, dann die Bergstation – mit ✓ bauen'
                 : 'Lift ziehen: 1. Klick Talstation, 2. Klick Bergstation') + (max ? ` · höchstens ${max} m` : '');
         }
+        if (activeItem.tool === 'piste' && activeItem.width === 'loipe') return touch
+            ? 'Loipe: Punkt für Punkt antippen (auf und ab, auch als Runde), dann mit ✓ bauen'
+            : 'Loipe zeichnen: pro Klick ein Punkt · Doppelklick beendet · sanft auf und ab, gern als Runde';
         if (activeItem.tool === 'piste') return touch
             ? 'Piste: Punkt für Punkt bergab antippen, dann mit ✓ bauen'
             : 'Piste zeichnen: pro Klick ein Kurvenpunkt · Doppelklick beendet · Schwierigkeit ergibt sich aus dem Gefälle';
@@ -926,7 +979,8 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             {skiing ? (
                 <SkiHud ski={ski} touch={touch} compact={compact} onStop={stopSki}
                         onLift={() => apiRef.current?.skiTakeLift?.()} onHut={() => apiRef.current?.skiToggleHut?.()}
-                        onSound={(v) => apiRef.current?.skiSound?.(v)} onInput={(part) => apiRef.current?.skiInput?.(part)} />
+                        onSound={(v) => apiRef.current?.skiSound?.(v)}
+                        onShoot={() => apiRef.current?.skiToggleShoot?.()} onFire={() => apiRef.current?.skiFire?.()} onInput={(part) => apiRef.current?.skiInput?.(part)} />
             ) : compact ? (
                 <div style={{ position: 'fixed', top: `calc(8px + ${SAFE_T})`, left: `calc(8px + ${SAFE_L})`, zIndex: 10 }}>
                     <button onClick={onExit} title="Zurück zum Hauptmenü"
