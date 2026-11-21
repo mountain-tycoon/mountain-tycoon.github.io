@@ -188,6 +188,25 @@ export function createLoipen(deps) {
             }
             return best;
         },
+        /**
+         * Nächster Punkt der Loipenachse: Richtung der Wegpunkte (`ang`), der Achspunkt selbst (cx, cy) und
+         * `end` = −1 am Anfang, +1 am Ende einer offenen Loipe (dort wird gewendet), sonst 0.
+         */
+        trackAt(gx, gy) {
+            let best = null, bd = Infinity;
+            for (const rec of list) {
+                const m = rec.mid;
+                for (let i = 0; i < m.length - 1; i++) {
+                    const d = Math.hypot(m[i].gx - gx, m[i].gy - gy);
+                    if (d < bd && d < rec.snowW + 4) {
+                        bd = d;
+                        best = { ang: Math.atan2(m[i + 1].gx - m[i].gx, m[i + 1].gy - m[i].gy), cx: m[i].gx, cy: m[i].gy,
+                            end: rec.loop ? 0 : i <= 1 ? -1 : i >= m.length - 3 ? 1 : 0 };
+                    }
+                }
+            }
+            return best;
+        },
         /** Je Bild: Läufer weiterbewegen. `show` = es wird gelaufen (tagsüber). */
         update(dt, show) {
             checkT -= dt;

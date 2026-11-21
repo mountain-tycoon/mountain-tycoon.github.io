@@ -9,7 +9,7 @@ Live: https://mountain-tycoon.github.io/ · Antworten an den Nutzer auf Deutsch.
   - `src/engine/terrainGen.js` – Landschaftserzeugung (Spielfeld samt Umland), siehe „Landschaft" unten
   - `src/webgl/` – 3D-Renderer (`World3D.jsx`, `Scene3D.js`, `TerrainMesh.js`, `SnowSurface.js`, `Surround3D.js`,
     `Water3D.js`, `Buildings3D.js`, `Vehicles3D.js`, `Sky3D.js`, `SkiRun.js`, `SkiFigure.js`, `SkiOutfits.js`,
-    `SkiSound.js`, `Loipe3D.js`, `Biathlon3D.js`, `IceRink3D.js`). Die ganze Simulation (Gäste, Lifte, Wirtschaft) steckt in `Scene3D.js`.
+    `SkiSound.js`, `Loipe3D.js`, `Biathlon3D.js`, `IceRink3D.js`, `Paraglider3D.js`). Die ganze Simulation (Gäste, Lifte, Wirtschaft) steckt in `Scene3D.js`.
   - `src/savegames.js` – Spielstände des 3D-Spiels (Gerät + Konto), siehe „Spielstände" unten
   - `src/components/menu/` – Hauptmenü (Kampagne, Sandbox, Fahrer-Garderobe `Wardrobe.jsx`) und Ladebildschirm
   - `src/constants/campaign.js` – Level, Aufgaben, Fortschritt
@@ -155,6 +155,12 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   unsichtbar. Jede Ankunft am Loipenende bringt `LOIPE_FEE`.
 - **Spielfigur:** auf der Loipe (`deps.loipeAt`) wird „vorwärts" zum Skatingschritt (`skating` in `SkiRun.js`,
   Haltung über `splay`/`outL`/`outR` in `setPose`). Beim Absetzen auf einer Loipe schaut die Figur in Laufrichtung.
+- **Kraftregler statt Lenken** (`autoSk`, `power`): läuft man in Loipenrichtung los, lenkt die Figur selbst
+  (`deps.loipeTrack` → `loipen.trackAt`, Zielpunkt ein Stück voraus auf der Achse, am Ende einer offenen Loipe
+  wird gewendet, in der Wende nimmt sie Tempo heraus). Der Spieler stellt nur die Kraft: „vorwärts" bzw. rechte
+  Taste mehr, „bremsen" bzw. linke Taste weniger; sie bleibt stehen, wo man sie lässt. A/D steigen aus der
+  Selbstlenkung aus. Kraft bestimmt Tempo und Pulsziel; über 168 Schlägen füllt sich `spentAcc` (rund 5 s), dann
+  ist die Figur `spent`: Kraft höchstens 0,22, bis der Puls unter 128 liegt. Das HUD zeigt Kraftbalken und Zustand.
 - **Puls** (`stepPulse`): folgt träge der Anstrengung – Skating nach Tempo und Steigung, Gehen bergauf, Abfahren
   nur wenig; hinauf schnell, hinunter langsam. Das HUD zeigt ihn auf der Loipe, am Schießstand und ab 84.
 - **Schießstand** (`Biathlon3D.js`, Gebäude `biathlon`): drei Stände, geschossen wird auf dem mittleren
@@ -166,6 +172,14 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - **Flutlicht an Gebäuden:** Schießstand und Eisbahn haben `userData.setNight(dark)` (Strahler, Eigenlicht der
   angestrahlten Flächen, Lichtkegel nur als Hauch und erst bei Dunkelheit – kräftige Kegel wirken aus der Nähe
   wie gelbe Flächen). `placeBuildingAt` hängt jedes Gebäude mit `setNight` an `nightLit`.
+
+## Gleitschirm mit Ski
+- `Paraglider3D.js`: `makeGliderLaunch` (Gebäude `paraglide`, Menü „Extras": Rampe, Windsack, ausgelegter Schirm)
+  und `makeCanopy` (Kappe mit Leinen; Ursprung am Gurtzeug). Nahe am Startplatz bietet das HUD den Start an
+  (`launchGlider`, Taste G): die Figur hebt in Falllinie ab, `stepGlide` fliegt mit Gleitzahl rund 10
+  (links/rechts lenkt, „vorwärts" schneller und steiler, Bremsen langsamer), am Kartenrand dreht sie zurück.
+  Berührt sie den Boden, fällt der Schirm zusammen und es geht auf Ski weiter. Stöcke sind im Flug ausgeblendet
+  (`setPoles`). Gebäude und Bäume halten den Flug nicht auf.
 
 ## Eisbahn (Eishockey)
 - `IceRink3D.js` (`makeIceRink`, Gebäude `eisbahn`): Feld mit Linien, Bande mit Eingang vorn in der Mitte (lokal

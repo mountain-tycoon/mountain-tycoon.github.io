@@ -34,6 +34,11 @@ langsam wieder fällt. Unter „Extras" steht der **Biathlon-Schießstand**: dav
 durch Ziehen auf die fünf Scheiben richten und schießen. Bei hohem Puls schwankt das Visier stark – wer kurz
 wartet, trifft besser.
 
+## Gleitschirm
+Unter „Extras" gibt es den **Gleitschirm-Startplatz**. Wer mit der eigenen Figur davor steht, hebt mit Ski und
+Schirm ab und gleitet gemächlich ins Tal – lenken, schneller fliegen oder abbremsen, nach der Landung geht es auf
+Ski weiter. Auf der Loipe lenkt die Figur inzwischen selbst: man regelt nur die Kraft und muss mit dem Puls haushalten.
+
 ## Eisbahn
 Die Eislaufbahn (unter „Wellness") ist ein kleines Eishockeyfeld mit Toren, Torhütern, Puck und Flutlicht. Die eigene
 Figur kommt durch den Eingang bei den Bänken aufs Eis, läuft Schlittschuh, springt (mit Drehung gibt es Punkte) und

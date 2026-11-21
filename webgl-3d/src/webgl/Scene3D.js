@@ -20,6 +20,7 @@ import { createSkiRun } from './SkiRun.js';
 import { createLoipen, LOIPE_W } from './Loipe3D.js';
 import { makeBiathlonRange, BIATHLON_R } from './Biathlon3D.js';
 import { makeIceRink } from './IceRink3D.js';
+import { makeGliderLaunch, LAUNCH_R } from './Paraglider3D.js';
 // ===== POSTPROCESSING =====
 // Hebt die Bildqualität deutlich: weiches Glühen an hellen Kanten (Schnee,
 // Sonne, Lichter), Kantenglättung und ein abschließendes Color-Grading.
@@ -1139,7 +1140,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         hotel_pension: 0, hotel_budget: 0, hotel_mid: 0, hotel_resort: 0, hotel_lux: 0, chalet_s: 0, chalet_l: 0, chalet_lux: 0,
         huette: 0, bergrest: 0, panorama: 0, sterne: 0, apres: 0, partyzelt: 0, disco: 0, souvenir: 0,
         medical: 0, hospital: 0, workshop: 0, reservoir: 0, reservoir_l: 0, cannon_s: 0, cannon_l: 0,
-        sauna: 0, therme: 0, eisbahn: 0, kicker: 0, halfpipe: 0, racecourse: 0, biathlon: 0 };
+        sauna: 0, therme: 0, eisbahn: 0, kicker: 0, halfpipe: 0, racecourse: 0, biathlon: 0, paraglide: 0 };
     // Sammelwerte über alle Klassen (für Statistik & Simulation)
     // ===== BETTEN =====
     // Jede Unterkunft hat eine echte Kapazität statt der pauschalen 40 Betten
@@ -1605,6 +1606,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             sauna:      { icon: '🧖', name: 'Sauna-Anlage',    desc: 'Wellness nach dem Skitag.' },
             therme:     { icon: '♨️', name: 'Große Therme',    desc: 'Glaskuppel, Becken, Whirlpool — Top-Attraktion.' },
             eisbahn:    { icon: '⛸️', name: 'Eislaufbahn',     desc: 'Abwechslung abseits der Piste.' },
+            paraglide:  { icon: '🪂', name: 'Gleitschirm-Startplatz', desc: 'Startrampe mit Windsack – beim Selbstfahren hebst du hier mit Ski und Schirm ab und gleitest ins Tal.' },
             biathlon:   { icon: '🎯', name: 'Biathlon-Schießstand', desc: 'Drei Stände, fünf Scheiben – beim Selbstfahren kannst du hier schießen. Hoher Puls lässt das Visier wackeln.' }
         }[t] || { icon: '📍', name: t, desc: '' };
         let liftTitle = null;   // benannte Liftanlage überschreibt die Überschrift
@@ -1941,7 +1943,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // Funpark hebt die Laune — je größer, desto stärker; Toiletten ebenfalls
         const funMood = built.funpark_s * 4 + built.funpark * 9 + built.funpark_l * 16
             + built.kicker * 3 + built.halfpipe * 20 + built.racecourse * 26
-            + built.biathlon * 8 + Math.min(12, loipen.list().length * 4);
+            + built.biathlon * 8 + built.paraglide * 6 + Math.min(12, loipen.list().length * 4);
         const target = Math.max(20, Math.min(98, 55 + totalGastro() * 5 + funMood + totalHotels() * 2 + totalNight() * 4 + totalWell() * 5 + built.toilet * 3 + built.medical * 2 + built.hospital * 4 - overcrowd * 60 - groomPenalty));
         sim.satisfaction += (target - sim.satisfaction) * Math.min(1, dt * 0.3);
         // Lift-Auslastung -> besetzte Sessel/Bügel (nur wenn wirklich Gäste da sind)
@@ -6603,7 +6605,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         sauna:        { cost: 195000, r: 2.6, make: () => makeSauna() },
         therme:       { cost: 2600000,r: 5.6, make: () => makeThermalBath() },
         eisbahn:      { cost: 975000, r: 7.5, make: () => makeIceRink() },
-        biathlon:     { cost: 160000, r: BIATHLON_R, make: () => makeBiathlonRange() }
+        biathlon:     { cost: 160000, r: BIATHLON_R, make: () => makeBiathlonRange() },
+        paraglide:    { cost: 68000, r: LAUNCH_R, make: () => makeGliderLaunch() }
     };
     let currentBuild = null;
     let ghost = null;
@@ -9380,6 +9383,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         routes: () => guestRoutes,
         rinkAt,
         loipeAt: (wx, wz) => !!loipen.at((wx + half) / tile, (wz + half) / tile),
+        loipeTrack: (wx, wz) => { const q = loipen.trackAt((wx + half) / tile, (wz + half) / tile); return q ? { ang: q.ang, x: q.cx * tile - half, z: q.cy * tile - half, end: q.end } : null; },
+        launches: () => placedBuildings.filter(b => b.type === 'paraglide').map(b => ({ x: b.rec.x, z: b.rec.z })),
         loipeDir: (wx, wz) => loipen.dirAt((wx + half) / tile, (wz + half) / tile),
         ranges: () => placedBuildings.filter(b => b.type === 'biathlon' && b.mesh.userData.shoot).map(b => ({ x: b.rec.x, z: b.rec.z, obj: b.mesh })),
         touch: () => lastPointerType !== 'mouse',
@@ -9515,6 +9520,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         skiSound(on){ skiRun.setSound(on); },
         skiToggleShoot(){ return skiRun.toggleShoot(); },
         skiFire(){ return skiRun.fire(); },
+        skiGlide(){ return skiRun.launchGlider(); },
         setOnSki(cb){ onSki = cb; },
         dispose(){ cancelAnimationFrame(raf); skiRun.dispose(); orbit.dispose(); window.removeEventListener('resize',onResize); window.visualViewport?.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onHover); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('pointerup',onTouchEnd); canvas.removeEventListener('pointercancel',onTouchEnd); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
         // ----- Bedienung per Finger: vorgemerkte Aktion bestätigen oder verwerfen -----

@@ -289,6 +289,8 @@ export function makePlayerSkier(o = composeOutfit()) {
         const blade = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.06, 0.24), M.bind); blade.position.set(0, -0.82, 0.1); blade.rotation.x = 0.95; stick.add(blade);
         AR.elbow.add(stick); AR.stick = stick;
     }
+    /** Stöcke ein-/ausblenden (am Gleitschirm bleiben die Hände an den Steuerleinen). */
+    ud.setPoles = (on) => { AL.pole.visible = AR.pole.visible = !!on && !ud.onIce && !ud.carrying; };
     ud.onIce = false;
     ud.setIce = (on) => {
         ud.onIce = !!on;
