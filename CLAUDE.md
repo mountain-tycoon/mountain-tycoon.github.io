@@ -210,11 +210,27 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (links/rechts lenkt, „vorwärts" schneller und steiler, Bremsen langsamer), am Kartenrand dreht sie zurück.
   Berührt sie den Boden, fällt der Schirm zusammen und es geht auf Ski weiter. Stöcke sind im Flug ausgeblendet
   (`setPoles`). Gebäude und Bäume halten den Flug nicht auf.
+- Wind (`deps.wind` = das Windobjekt der Szene): er versetzt den Schirm über Grund (Rücken-/Gegen-/Seitenwind,
+  im HUD angezeigt), eine Bö schüttelt ihn (Rollen, Sinken), und wo er einen Hang hinaufweht, trägt er – im Lee
+  geht es abwärts.
 - Höhe: beim Start hebt der Schirm kräftig an, und wo das Gelände unter der Flugbahn steil abfällt, trägt
   Hangaufwind (bis rund 45 Einheiten über Grund) – sonst klebte der Flug am Hang und es bliebe keine Luft für Manöver.
 - Manöver (`stepGlide`): **Steilspirale** – lange in eine Richtung ziehen (`holdT`), enger und steil hinunter, Punkte
   je Umdrehung. **Wingover** – im Takt links/rechts umlenken (`wing`, `swing`), Punkte je Wechsel. **Looping** – mit
   viel Fahrt („vorwärts") kräftig anbremsen, nur mit genug Höhe; Figur und Kappe drehen einmal über Kopf.
+
+## Pistenraupe selbst fahren
+- Nahe einer Garage bietet das HUD „Pistenraupe fahren" an (`toggleCat` in `SkiRun.js`, Taste P): die Spielfigur
+  steigt in die größte Klasse, für die eine Garage steht (`deps.cat` in der Szene: `make`, `settle`, `groom`,
+  `garages`). `stepCat`: „vorwärts" Gas, „bremsen" anhalten und dann rückwärts, links/rechts lenkt (auch im Stand);
+  im Wald nur Schritttempo, Gebäude/Wasser/Kartenrand halten auf. Was sie überfährt, wird frisch gewalzt
+  (`groom` setzt `bed.groom` aller Pisten- und Loipenbänder im Umkreis auf 1). „Aussteigen" stellt die Figur daneben.
+
+## Tiefschnee
+- `weather.powder` (0…1 ≙ bis rund 60 cm): wächst bei Schneefall, setzt sich danach über Minuten (tagsüber
+  schneller). Abseits von Piste und Loipe (`deepS` in `SkiRun.js`) bremst er, die Ski drehen träger, die Figur sinkt
+  ein und schwimmt mit Tempo auf, es staubt kräftiger und die Spur wird zur Furche; zu Fuß stapft es sich mühsam.
+  Das HUD zeigt die Tiefe in Zentimetern.
 
 ## Eisbahn (Eishockey)
 - `IceRink3D.js` (`makeIceRink`, Gebäude `eisbahn`): Feld mit Linien, Bande mit Eingang vorn in der Mitte (lokal

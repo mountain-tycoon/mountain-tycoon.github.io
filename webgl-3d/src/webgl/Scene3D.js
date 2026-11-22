@@ -7492,6 +7492,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // zuckert an, starker Schneefall packt voll zu. Hört es auf zu
         // schneien (oder kommt der Föhn), taut die Last über die langsame
         // Abwärts-Annäherung unten von selbst wieder ab.
+        // Neuschnee abseits der Pisten: wächst, solange es schneit (bei dichtem Fall in gut einer Minute auf
+        // volle Tiefe), und setzt sich danach über viele Minuten – tagsüber in der Sonne etwas schneller.
+        weather.powder = Math.max(0, Math.min(1, (weather.powder ?? 0.45)
+            + dt * (Math.max(0, weather.snowfall - 0.08) * 0.02 - 0.0016 - 0.0014 * dayNow)));
         const loadTarget = smooth01((weather.snowfall - 0.05) / 0.75);
         weather.treeLoad += (loadTarget - weather.treeLoad) * Math.min(1, dt * (loadTarget > weather.treeLoad ? 0.22 : 0.05));
         if (forest?.userData?.setSnowLoad) forest.userData.setSnowLoad(weather.treeLoad);
@@ -9467,6 +9471,34 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         rinkAt,
         loipeAt: (wx, wz) => !!loipen.at((wx + half) / tile, (wz + half) / tile),
         loipeTrack: (wx, wz) => { const q = loipen.trackAt((wx + half) / tile, (wz + half) / tile); return q ? { ang: q.ang, x: q.cx * tile - half, z: q.cy * tile - half, end: q.end } : null; },
+        wind: () => wind,
+        powder: () => weather.powder ?? 0.45,
+        // Pistenraupe zum Selbstfahren: die größte Klasse, für die eine Garage steht
+        cat: {
+            garages: () => placedBuildings.filter(b => b.type.startsWith('garage')).map(b => ({ x: b.rec.x, z: b.rec.z })),
+            make: () => {
+                const model = cat600Count() > 0 ? '600' : cat500Count() > 0 ? '500' : '300';
+                const m = makeSnowcat(SNOWCAT_COLOR, model); m.userData.model = model;
+                return m;
+            },
+            settle: (mesh, dx, dz) => settleCat(mesh, { dx, dy: dz }),
+            night: () => 1 - dayNow,
+            /** Alles im Umkreis frisch walzen (Pisten und Loipen). */
+            groom: (wx, wz, rad) => {
+                const gx = (wx + half) / tile, gy = (wz + half) / tile;
+                let n = 0;
+                for (const bed of pisteBeds) {
+                    if (!bed.groom || !bed.grid) continue;
+                    const grid = bed.grid, gi = bed.gIdx, last = bed.groom.length - 1;
+                    for (let v = 0, k = 0; v < gi.length; v++, k += 2) {
+                        if (Math.abs(grid[k] - gx) > rad || Math.abs(grid[k + 1] - gy) > rad) continue;
+                        const i = Math.min(last, gi[v]);
+                        if (bed.groom[i] < 0.98) { bed.groom[i] = 1; n++; }
+                    }
+                }
+                return n;
+            }
+        },
         launches: () => placedBuildings.filter(b => b.type === 'paraglide').map(b => ({ x: b.rec.x, z: b.rec.z })),
         loipeDir: (wx, wz) => loipen.dirAt((wx + half) / tile, (wz + half) / tile),
         ranges: () => placedBuildings.filter(b => b.type === 'biathlon' && b.mesh.userData.shoot).map(b => ({ x: b.rec.x, z: b.rec.z, obj: b.mesh })),
@@ -9604,6 +9636,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         skiToggleShoot(){ return skiRun.toggleShoot(); },
         skiFire(){ return skiRun.fire(); },
         skiGlide(){ return skiRun.launchGlider(); },
+        skiCat(){ return skiRun.toggleCat(); },
         setOnSki(cb){ onSki = cb; },
         dispose(){ cancelAnimationFrame(raf); skiRun.dispose(); orbit.dispose(); window.removeEventListener('resize',onResize); window.visualViewport?.removeEventListener('resize',onResize); canvas.removeEventListener('pointermove',onHover); canvas.removeEventListener('pointerdown',onDown); canvas.removeEventListener('pointerup',onUp); canvas.removeEventListener('pointerup',onDemolish); canvas.removeEventListener('pointerup',onPick); canvas.removeEventListener('pointerup',onTouchEnd); canvas.removeEventListener('pointercancel',onTouchEnd); canvas.removeEventListener('dblclick',onDblClick); renderer.dispose(); scene.traverse(o=>{o.geometry?.dispose?.(); if(o.material&&!Array.isArray(o.material))o.material.dispose?.();}); },
         // ----- Bedienung per Finger: vorgemerkte Aktion bestätigen oder verwerfen -----

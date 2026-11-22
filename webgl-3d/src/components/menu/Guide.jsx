@@ -46,7 +46,8 @@ const CONTROLS = [
         ['Schuss / gehen', 'Bild gedrückt halten – am Rechner W'],
         ['In der Luft', 'Lenken dreht, vorwärts und bremsen sind die Salti'],
         ['Loipe', 'gelenkt wird von selbst – du gibst nur die Kraft vor: viel Kraft treibt den Puls hoch, zu lange macht müde'],
-        ['Gleitschirm', 'am Startplatz abheben und ins Tal gleiten – mit Steilspirale, Wingover und Looping'],
+        ['Gleitschirm', 'am Startplatz abheben und ins Tal gleiten – mit Steilspirale, Wingover und Looping; der Wind fliegt mit'],
+        ['Pistenraupe', 'an einer Garage einsteigen und selbst walzen: Gas, lenken, bremsen'],
         ['Schießstand', 'ziehen = zielen, „Schuss" löst aus – hoher Puls lässt das Visier wackeln'],
         ['Eisbahn', 'durch den Eingang aufs Eis: laufen, mit „bremsen" springen – am Puck wird daraus der Schuss aufs Tor']
     ]]

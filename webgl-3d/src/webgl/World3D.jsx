@@ -660,7 +660,7 @@ const SteerPad = ({ side, onHold }) => {
 };
 
 /** Anzeige und Steuerung beim Selbstfahren. */
-const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, onShoot, onFire, onGlide }) => {
+const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, onShoot, onFire, onGlide, onCat }) => {
     // Zwei Lenktasten: eine = lenken, beide zugleich = bremsen
     const held = useRef({ l: false, r: false });
     const hold = (k, v) => {
@@ -699,7 +699,7 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                 </>
             )}
             {!ski.cabin && (
-                <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? (aim || showPulse || ski.flying ? 54 : 8) : 14}px + ${SAFE_T})`, left: 0, right: 0,
+                <div style={{ position: 'fixed', zIndex: 20, top: `calc(${compact ? (aim || showPulse || ski.flying || ski.driving || ski.powder > 0 ? 54 : 8) : 14}px + ${SAFE_T})`, left: 0, right: 0,
                               display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
                     {/* am Handy rutscht die breitere Anzeige (Puls, Scheiben) unter die beiden Knöpfe */}
                     <div style={{ ...chip, color: '#e8eef6', display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -715,6 +715,9 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                         )}
                         {aim && <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#9aa0a8' }}>{aim.left} Schuss</span>}
                         {ski.flying && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>{ski.flying.alt} m über Grund</span>}
+                        {ski.flying?.wind && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: ski.flying.wind.gust ? '#fcd34d' : '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>{ski.flying.wind.gust ? 'Bö · ' : ''}{ski.flying.wind.from} {ski.flying.wind.kmh} km/h</span>}
+                        {ski.powder > 0 && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>Tiefschnee {ski.powder} cm</span>}
+                        {ski.driving && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2' }}>{ski.driving}</span>}
                         {hasPower && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginLeft: 10, alignSelf: 'center' }}>
                                 <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: ski.spent ? '#f87171' : '#9aa0a8' }}>{ski.spent ? 'Erschöpft' : 'Kraft'}</span>
@@ -765,6 +768,11 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                         </button>
                     </div>
                 )}
+                {(ski.cat || ski.driving) && (
+                    <button onClick={onCat} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
+                        {ski.driving ? 'Aussteigen' : 'Pistenraupe fahren'}{touch ? '' : ' (P)'}
+                    </button>
+                )}
                 {ski.launch && (
                     <button onClick={onGlide} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
                         Gleitschirm starten{touch ? '' : ' (G)'}
@@ -787,7 +795,9 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                 )}
                 {!ski.riding && !ski.resting && !aim && !ski.hint && (touch ? ski.kmh < 4 : true) && (
                     <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5, lineHeight: 1.45 }}>
-                        {ski.flying
+                        {ski.driving
+                            ? (touch ? 'Bild halten = Gas · Seitentasten lenken · beide = bremsen, dann rückwärts' : 'W Gas · A / D lenken · S bremsen, dann rückwärts · P aussteigen')
+                            : ski.flying
                             ? (touch ? 'Lange einlenken = Steilspirale · links–rechts im Takt = Wingover · schnell, dann bremsen = Looping' : 'A / D lenken · lange halten = Steilspirale · im Takt wechseln = Wingover · W, dann S = Looping')
                             : hasPower
                             ? (touch ? 'Loipe: rechte Taste = mehr Kraft · linke = weniger · gelenkt wird von selbst' : 'Loipe: W = mehr Kraft · S = weniger · gelenkt wird von selbst')
@@ -906,6 +916,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             else if (e.key.toLowerCase() === 'e') apiRef.current?.skiToggleHut?.();
             else if (e.key.toLowerCase() === 'b') apiRef.current?.skiToggleShoot?.();
             else if (e.key.toLowerCase() === 'g') apiRef.current?.skiGlide?.();
+            else if (e.key.toLowerCase() === 'p') apiRef.current?.skiCat?.();
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
@@ -1007,7 +1018,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                 <SkiHud ski={ski} touch={touch} compact={compact} onStop={stopSki}
                         onLift={() => apiRef.current?.skiTakeLift?.()} onHut={() => apiRef.current?.skiToggleHut?.()}
                         onSound={(v) => apiRef.current?.skiSound?.(v)}
-                        onGlide={() => apiRef.current?.skiGlide?.()}
+                        onGlide={() => apiRef.current?.skiGlide?.()} onCat={() => apiRef.current?.skiCat?.()}
                         onShoot={() => apiRef.current?.skiToggleShoot?.()} onFire={() => apiRef.current?.skiFire?.()} onInput={(part) => apiRef.current?.skiInput?.(part)} />
             ) : compact ? (
                 <div style={{ position: 'fixed', top: `calc(8px + ${SAFE_T})`, left: `calc(8px + ${SAFE_L})`, zIndex: 10 }}>
