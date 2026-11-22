@@ -12,6 +12,7 @@ import { makePlayerSkier, PLAYER_SCALE } from './SkiFigure.js';
 import { selectionKey, composeOutfit } from './SkiOutfits.js';
 import { createSkiSound } from './SkiSound.js';
 import { makeCanopy } from './Paraglider3D.js';
+import { canopyColors } from './SkiOutfits.js';
 
 const G = 8.4;              // Hangabtrieb
 const FALL = 15;            // Fallbeschleunigung im Sprung
@@ -245,6 +246,8 @@ export function createSkiRun(deps) {
     let skating = false, skatePh = 0, nordic = false;
     let pulse = 68, beat = 0;
     const loipeAt = deps.loipeAt || (() => false);
+    /** Eigene Einsätze an die Szene melden (zählen für die Levelziele). */
+    const achieve = (k, v, max = false) => { if (deps.achieve) deps.achieve(k, v, max); };
     // Skating mit Kraftregler: auf der Loipe lenkt die Figur selbst, der Spieler gibt nur vor, wie viel Kraft
     // er einsetzt (0…1). Viel Kraft = schnell, aber der Puls schießt hoch; wer zu lange im roten Bereich
     // läuft, ist erschöpft und kommt erst nach einer Erholung wieder auf Tempo.
@@ -405,7 +408,7 @@ export function createSkiRun(deps) {
                 } else if (spinR || flipR) {
                     const name = jump.ice ? `Eissprung ${spinR}°` : [flipR ? (flipR > 1 ? 'Doppelter ' : '') + (jump.flip > 0 ? 'Frontflip' : 'Backflip') : '', spinR ? spinR + '°' : ''].filter(Boolean).join(' ');
                     const pts = Math.round((spinR / 180 * 100 + flipR * 300 + airT * 80) * (jump.pipe ? 1.5 : 1) / 10) * 10;
-                    score += pts;
+                    score += pts; achieve('aTricks', pts);
                     say(`${name} · +${pts} Punkte`, 3);
                 }
             }
@@ -643,7 +646,7 @@ export function createSkiRun(deps) {
                 else v *= Math.exp(-(inp.brake && v <= 1.6 ? 6 : 0.3) * dt);
                 v -= Math.abs(steerS) * v * 0.22 * dt;
                 const hx = dx * rk.c - dz * rk.s, hz = dx * rk.s + dz * rk.c;       // Blickrichtung in Koordinaten der Bahn
-                rk.rink.onGoal = (n) => { score += 100; say(`Tor! ${n}. Treffer · +100 Punkte`, 3); sound.thump(0.7); };
+                rk.rink.onGoal = (n) => { score += 100; achieve('aGoals', 1); say(`Tor! ${n}. Treffer · +100 Punkte`, 3); sound.thump(0.7); };
                 if (inp.brake && !brakeHeld) {
                     if (rk.rink.shoot(rk.lx + hx * 0.3, rk.lz + hz * 0.3, hx, hz, v)) sound.thump(0.35);
                     else if (v > 1.6) { air = true; airT = 0; vy = 3.5; takeOff(); jump.tricks = true; jump.ice = true; }
@@ -673,6 +676,7 @@ export function createSkiRun(deps) {
                 if (curRun && curRun.type === 'halfpipe' && v > 1) a += 1.7 * (1 - brakeS);   // Schwung holen in der Rinne: so trägt es bis über die Kante
                 v = clamp(v + a * dt, 0, V_MAX);
             }
+            if (snow && !walking && !ice && v > 0.5) achieve(nordic ? 'aLoipe' : 'aSki', v * dt * 3.3);      // gefahrene Meter
             // Schneestaub: mit dem Tempo mehr, in der Kurve und beim Bremsen eine Fahne
             const spray = snow && !ice && !walking && !striding && !skating && v > 1.5 ? (v * 8 + (Math.abs(steerS) * 14 + brakeS * 18) * v) * (1 + 2.5 * deepS) : 0;
             stepDust(dt, Math.min(260, spray), steerS * Math.min(1, v / 6));
@@ -855,7 +859,7 @@ export function createSkiRun(deps) {
         else {
             // walzen: hinter dem Fahrzeug, in seiner Breite – auf der Piste das Band, abseits eine eigene Spur
             d.acc += dt;
-            if (d.acc > 0.12 && Math.abs(v) > 0.4) { d.acc = 0; d.done += deps.cat.groom(pos.x - dx * 1.2, pos.z - dz * 1.2, d.width); }
+            if (d.acc > 0.12 && Math.abs(v) > 0.4) { d.acc = 0; const n = deps.cat.groom(pos.x - dx * 1.2, pos.z - dz * 1.2, d.width); d.done += n; if (n) achieve('aGroom', n * 1.65); }
             const offPiste = snowHere && Math.abs(v) > 0.3 && !loipeAt(pos.x, pos.z) && !pistes().some(r => { const p = r.path, gx = toG(pos.x), gy = toG(pos.z); for (let i = 0; i < p.length; i += 2) if (Math.hypot(p[i].gx - gx, p[i].gy - gy) < (r.snowW || 3) + 0.5) return true; return false; });
             stepCatTrail(offPiste, d.width * 0.55);
         }
@@ -932,7 +936,7 @@ export function createSkiRun(deps) {
             q.loop += dt / 1.7 * Math.PI * 2;
             const up = Math.pow(Math.sin(Math.min(q.loop, Math.PI * 2) / 2), 2) * 3;       // Bogen nach oben und zurück
             pos.y += up - q.lift; q.lift = up;
-            if (q.loop >= Math.PI * 2) { q.loop = null; v = 6.5; score += 300; say('Looping · +300 Punkte', 3); sound.thump(0.3); }
+            if (q.loop >= Math.PI * 2) { q.loop = null; v = 6.5; score += 300; achieve('aLoops', 1); say('Looping · +300 Punkte', 3); sound.thump(0.3); }
         }
         const fast = inp.tuck && !inp.brake, slow = inp.brake && q.loop === null;
         v += (7.2 + (fast ? 3 : 0) - (slow ? 2.4 : 0) - v) * ease(1.2, dt);
@@ -973,6 +977,7 @@ export function createSkiRun(deps) {
             pos.y = ground; lastGround = ground; glide = null; air = false; vy = 0; v = Math.min(v, 6); jump = null;
             canopy.visible = false; mesh.userData.setPoles(true);
             squat = 0.6; burstDust(30); sound.thump(0.4); trGap = true; camTh = th;
+            if (q.t > 8) achieve('aFlights', 1);
             say('Gelandet – weiter geht es auf Ski', 3);
             emitT = 0;
         }
@@ -1002,7 +1007,7 @@ export function createSkiRun(deps) {
         if (best >= 0) { q.sh.hit(best); q.hits++; }
         if (q.shots === 0) {
             const miss = 5 - q.hits;
-            score += q.hits * 40 + (miss ? 0 : 100);
+            score += q.hits * 40 + (miss ? 0 : 100); achieve('aBiath', q.hits, true);
             q.done = 3.4;
             say(miss === 0 ? 'Fünf Treffer – fehlerfrei!' : `${q.hits} von 5 Treffern · ${miss} ${miss === 1 ? 'Strafrunde' : 'Strafrunden'}`, 3.4);
         }
@@ -1403,7 +1408,9 @@ export function createSkiRun(deps) {
             th = camTh = dir; v = 5.5; vy = 0; air = false; jump = null; race = null; crashT = 0; steerS = 0;
             walking = false; striding = false; skating = false; autoSk = false; ice = false;
             mesh.userData.setCarry(false); mesh.userData.setIce(false); mesh.userData.setPoles(false);
-            if (!canopy) canopy = makeCanopy();
+            // Schirm in den gewählten Farben (Garderobe)
+            const cols = canopyColors();
+            if (!canopy || canopy.userData.key !== cols.join()) { if (canopy) scene.remove(canopy); canopy = makeCanopy(cols); canopy.userData.key = cols.join(); }
             scene.add(canopy); canopy.visible = true;
             glide = { t: 0, alt: 0.9, roll: 0, last: 0, sinceRev: 9, wing: 0, swing: 0, holdT: 0, turned: 0, rounds: 0, loop: null, lift: 0, brakeHeld: false, tip: false };
             camPos.set(pos.x - Math.sin(dir) * 9, pos.y + 3.4, pos.z - Math.cos(dir) * 9); camLook.set(pos.x, pos.y + 1.2, pos.z);

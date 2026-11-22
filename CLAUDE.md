@@ -247,6 +247,26 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   höchstens alle paar Minuten. `World3D.jsx` zeigt den Spruch (`radioMsg`) und ergänzt Erinnerungen an das nächste
   offene Ziel sowie „Ziel geschafft". Neue Probleme einfach in die Liste `msgs` einreihen (Reihenfolge = Dringlichkeit).
 
+- Wer spricht: jede Meldung trägt `who` (`boss` Betriebsleitung, `rescue` Bergrettung, `piste` Pistenchef; Zuordnung
+  je Thema in `WHO`). `World3D.jsx` zeigt die Karte OBEN unter der Kopfleiste mit Bild und Namen (`RADIO_PEOPLE`,
+  Bilder aus `public/icons`). Solange ein Ereignis läuft, schweigt der übrige Funk.
+
+## Ereignisse, eigene Einsätze, Belohnungen
+- **Ereignisse** (`EVENTS`, `eventTick` in `Scene3D.js`): Ferienansturm, Sturm, Unfall, Presse – kommen von Zeit zu
+  Zeit, laufen auf Zeit mit einem Ziel und zahlen bei Erfolg eine Prämie (`evPay`); `eventBoost` hebt solange den
+  Andrang. Das HUD zeigt Name, Restzeit und Ziel als Zeile über dem Funk (`setOnEvent` → `gameEvent`). Ausprobieren:
+  `__mtCam.event('rush')`, `__mtCam.eventStep(dt)`.
+- **Eigene Einsätze als Levelziele:** `SkiRun.js` meldet über `deps.achieve(schlüssel, wert, höchstwert)` gefahrene
+  Meter (Ski, Loipe, Raupe), Rettungen, Biathlon-Treffer, Hockey-Tore, Flüge, Loopings und Trickpunkte; die Zähler
+  (`a…` in `sim`, Teil des Spielstands über `SIM_KEYS`) erscheinen in `getStats` (`selfSkiM`, `biathlonBest` …).
+  Zieltypen dazu in `constants/campaign.js` (`self_ski_km`, `self_loipe_km`, `self_groom_m`, `self_rescues`,
+  `biathlon_hits`, `hockey_goals`, `glider_flights`, `glider_loops`, `trick_points`); jedes Level hat ein bis zwei.
+  Wer ein solches Ziel vergibt, prüft, dass das nötige Gebäude in dem Level freigeschaltet ist (`UNLOCK`).
+- **Belohnungen** (`SkiOutfits.js`): Outfits, Sport-Ausrüstungen und Schirmfarben (`CANOPIES`) mit `unlock` = Zahl
+  geschaffter Level; `rewardsAt(n)` nennt, was beim n-ten Level dazukommt (Funkspruch beim Sieg), `isUnlocked` sperrt
+  in der Garderobe. Beim Entwickeln und für Admins ist alles frei. Die Schirmfarbe liegt als `sport_canopy` im
+  Outfit-Speicher (`getCanopyChoice`, `canopyColors`).
+
 ## Tiefschnee
 - `weather.powder` (0…1 ≙ bis rund 60 cm): wächst bei Schneefall, setzt sich danach über Minuten (tagsüber
   schneller). Abseits von Piste und Loipe (`deepS` in `SkiRun.js`) bremst er, die Ski drehen träger, die Figur sinkt

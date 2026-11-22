@@ -550,3 +550,7 @@
 .mm-sport:hover { color: #e8eef6; }
 .mm-sport.on { background: rgba(232,238,246,0.94); color: #0b1220; border-color: transparent; }
 .mm-sport-hint { margin: 0 0 14px !important; }
+
+/* Garderobe: Belohnungen, die noch nicht freigespielt sind */
+.mm-outfit.locked { opacity: 0.42; cursor: default; }
+.mm-outfit.locked .mm-outfit-swatch { filter: grayscale(1); }

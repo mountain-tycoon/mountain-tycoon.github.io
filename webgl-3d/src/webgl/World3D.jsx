@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { buildLevelWorld } from '../engine/utils';
 import { createScene3D } from './Scene3D.js';
-import { evaluateObjective, objectiveLabel, formatObjectiveValue, markLevelCompleted, CAMPAIGN_LEVELS, MASSIFS } from '../constants/campaign';
+import { evaluateObjective, objectiveLabel, formatObjectiveValue, markLevelCompleted, loadProgress, CAMPAIGN_LEVELS, MASSIFS } from '../constants/campaign';
+import { rewardsAt } from './SkiOutfits.js';
 import { canSave, createAutosave } from '../savegames';
 
 // ===== BILDSCHIRM UND EINGABEART =====
@@ -659,6 +660,13 @@ const SteerPad = ({ side, onHold }) => {
     );
 };
 
+// Wer am Funk spricht: die Betriebsleitung, die Bergrettung, der Pistenchef (Bilder aus public/icons)
+const RADIO_PEOPLE = {
+    boss:   { name: 'Toni',  role: 'Betriebsleitung', icon: 'guest_m_schnauzer' },
+    rescue: { name: 'Vroni', role: 'Bergrettung',     icon: 'guest_retter' },
+    piste:  { name: 'Sepp',  role: 'Pistenchef',      icon: 'guest_skilehrer' }
+};
+
 /** Anzeige und Steuerung beim Selbstfahren. */
 const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, onShoot, onFire, onGlide, onCat }) => {
     // Zwei Lenktasten: eine = lenken, beide zugleich = bremsen
@@ -850,6 +858,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
     const [wonDismissed, setWonDismissed] = useState(false);
     const [selInfo, setSelInfo] = useState(null);   // Infofeld für angeklicktes Objekt
     const [buildHint, setBuildHint] = useState('');  // Grund, warum es gerade nicht baubar ist
+    const [gameEvent, setGameEvent] = useState(null);   // laufendes Ereignis { name, goal, left }
     const [radioMsg, setRadioMsg] = useState(null);     // Funkspruch der Betriebsleitung { tone, text }
     const radioAt = useRef(0);
     const [toast, setToast] = useState('');
@@ -903,6 +912,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
         api.setOnMoney((m) => setMoney(m));
         api.setOnBuildDone(() => setActive(null));
         api.setOnBuildHint?.((h) => setBuildHint(h || ''));
+        api.setOnEvent?.((e) => setGameEvent(e));
         api.setOnRadio?.((m) => { radioAt.current = Date.now(); setRadioMsg(m); clearTimeout(window.__radioT); window.__radioT = setTimeout(() => setRadioMsg(null), 11000); });
         api.setOnToast?.((m) => { setToast(m); clearTimeout(window.__toastT); window.__toastT = setTimeout(() => setToast(''), 25000); });
         api.setOnSelect?.((info) => setSelInfo(info));
@@ -913,7 +923,15 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             setStats(st);
             if ((level?.objectives?.length > 0) && level.objectives.every(o => evaluateObjective(o, st).done)) {
                 wonRef.current = true;
-                setWon(prev => { if (!prev && level?.id && !level.isSandbox) markLevelCompleted(level.id); return true; });
+                setWon(prev => {
+                    if (!prev && level?.id && !level.isSandbox) {
+                        const before = loadProgress().completed.length;
+                        markLevelCompleted(level.id);
+                        const now = loadProgress().completed.length, got = now > before ? rewardsAt(now) : [];
+                        if (got.length) setTimeout(() => { radioAt.current = Date.now(); setRadioMsg({ tone: 'good', who: 'boss', text: `Gebiet geschafft! Dafür gibt es neue Ausrüstung in der Garderobe: ${got.join(', ')}.` }); clearTimeout(window.__radioT); window.__radioT = setTimeout(() => setRadioMsg(null), 16000); }, 1500);
+                    }
+                    return true;
+                });
             }
         });
         // ===== SPIELSTAND =====
@@ -1485,18 +1503,40 @@ const World3D = ({ level, onExit, initialSave = null }) => {
 
             {/* Unterer Stapel: Meldung, Werkzeug-Hinweis und (Finger) die Bestätigen-Leiste.
                 Der Stapel selbst fängt keine Berührungen ab – das Gelände dahinter bleibt bedienbar. */}
+            {/* ===== FUNK UND EREIGNIS: oben in der Mitte, unter der Kopfleiste ===== */}
+            {(radioMsg || gameEvent) && (
+                <div style={{ position: 'fixed', left: 0, right: 0, top: `calc(${skiing && compact ? 104 : compact ? 58 : 64}px + ${SAFE_T})`, zIndex: 14, boxSizing: 'border-box',
+                              padding: `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
+                    {gameEvent && (
+                        <div style={{ ...chip, display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', maxWidth: '100%', boxSizing: 'border-box', borderLeft: '3px solid #fcd34d' }}>
+                            <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#fcd34d' }}>Ereignis</span>
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: '#e8eef6' }}>{gameEvent.name}</span>
+                            <span style={{ fontSize: 12.5, fontWeight: 700, color: '#e8eef6', fontVariantNumeric: 'tabular-nums' }}>{Math.floor(gameEvent.left / 60)}:{String(gameEvent.left % 60).padStart(2, '0')}</span>
+                            {!compact && <span style={{ fontSize: 11.5, color: '#c8ccd2' }}>{gameEvent.goal}</span>}
+                        </div>
+                    )}
+                    {radioMsg && (() => {
+                        const P = RADIO_PEOPLE[radioMsg.who] || RADIO_PEOPLE.boss;
+                        return (
+                            <div onClick={() => setRadioMsg(null)}
+                                 style={{ ...chip, pointerEvents: 'auto', cursor: 'pointer', maxWidth: 'min(600px, 100%)', boxSizing: 'border-box', textAlign: 'left',
+                                          display: 'flex', alignItems: 'center', gap: 11, padding: '8px 14px 8px 8px',
+                                          borderLeft: `3px solid ${radioMsg.tone === 'warn' ? '#fcd34d' : radioMsg.tone === 'good' ? '#86efac' : 'rgba(232,238,246,0.6)'}` }}>
+                                <img src={`${import.meta.env.BASE_URL || '/'}icons/${P.icon}.png`} alt="" width={44} height={44}
+                                     style={{ flex: '0 0 auto', borderRadius: '50%', objectFit: 'cover', background: 'rgba(232,238,246,0.12)', border: '1px solid rgba(232,238,246,0.25)' }}
+                                     onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                                    <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9aa0a8' }}>Funk · {P.name} · {P.role}</span>
+                                    <span style={{ fontSize: 13, lineHeight: 1.4, color: '#e8eef6' }}>{radioMsg.text}</span>
+                                </div>
+                            </div>
+                        );
+                    })()}
+                </div>
+            )}
             <div style={{ position: 'fixed', left: 0, right: 0, bottom: skiing ? `calc(96px + ${SAFE_B})` : compact ? aboveBar : 20, zIndex: 13, boxSizing: 'border-box',
                           padding: `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`,
                           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
-                {radioMsg && (
-                    <div onClick={() => setRadioMsg(null)}
-                         style={{ ...chip, pointerEvents: 'auto', cursor: 'pointer', maxWidth: 'min(560px, 100%)', boxSizing: 'border-box', textAlign: 'left',
-                                  display: 'flex', flexDirection: 'column', gap: 3, padding: '9px 14px',
-                                  borderLeft: `3px solid ${radioMsg.tone === 'warn' ? '#fcd34d' : radioMsg.tone === 'good' ? '#86efac' : 'rgba(232,238,246,0.6)'}` }}>
-                        <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9aa0a8' }}>Funk · {radioMsg.who || 'Betriebsleitung'}</span>
-                        <span style={{ fontSize: 13, lineHeight: 1.4, color: '#e8eef6' }}>{radioMsg.text}</span>
-                    </div>
-                )}
                 {toast && (
                     <div style={{ ...chip, pointerEvents: 'auto', color: '#e8eaed', fontSize: 12, maxWidth: 'min(90vw, 100%)', boxSizing: 'border-box',
                                   background: 'rgba(7,15,30,0.94)', border: '1px solid rgba(255,255,255,0.35)',

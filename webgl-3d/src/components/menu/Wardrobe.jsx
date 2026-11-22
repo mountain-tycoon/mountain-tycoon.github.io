@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { makePlayerSkier } from '../../webgl/SkiFigure.js';
-import { OUTFITS, SLOTS, SKI_BRANDS, SPORTS, SPORT_OUTFITS, getSelection, setSelection, presetSelection, composeOutfit, selectionKey, outfitById,
-    getSportChoice, setSportChoice } from '../../webgl/SkiOutfits.js';
+import { OUTFITS, SLOTS, SKI_BRANDS, SPORTS, SPORT_OUTFITS, CANOPIES, getSelection, setSelection, presetSelection, composeOutfit, selectionKey, outfitById,
+    getSportChoice, setSportChoice, getCanopyChoice, isUnlocked } from '../../webgl/SkiOutfits.js';
+import { loadProgress } from '../../constants/campaign';
 
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
 /** Farbfelder, die ein Teil am besten zeigen. */
@@ -25,6 +26,14 @@ const Wardrobe = ({ welcome = false, onDone = null }) => {
     const [sport, setSport] = useState('alpin');
     const [choice, setChoice] = useState(() => Object.fromEntries(Object.keys(SPORT_OUTFITS).map(k => [k, getSportChoice(k)])));
     const viewRef = useRef({ sport: 'alpin', id: '' });
+    // Belohnungen: manche Stücke gibt es erst für geschaffte Level (beim Entwickeln und für Admins ist alles frei)
+    const [done] = useState(() => {
+        let admin = false;
+        try { admin = localStorage.getItem('mt.role') === 'admin'; } catch { admin = false; }
+        return import.meta.env.DEV || admin ? 99 : loadProgress().completed.length;
+    });
+    const [canopy, setCanopy] = useState(() => getCanopyChoice());
+    const lockNote = (o) => (o.unlock === 1 ? 'nach dem 1. Level' : `nach ${o.unlock} Leveln`);
     useEffect(() => { viewRef.current = { sport, id: choice[sport] || '' }; }, [sport, choice]);
 
     useEffect(() => {
@@ -120,7 +129,8 @@ const Wardrobe = ({ welcome = false, onDone = null }) => {
                 {kit && (
                     <div className="mm-wardrobe-grid">
                         {SPORT_OUTFITS[sport].map(o => (
-                            <button key={o.id} className={`mm-outfit ${kit.id === o.id ? 'on' : ''}`} onClick={() => pickKit(o.id)}>
+                            <button key={o.id} className={`mm-outfit ${kit.id === o.id ? 'on' : ''} ${isUnlocked(o, done) ? '' : 'locked'}`}
+                                    disabled={!isUnlocked(o, done)} onClick={() => pickKit(o.id)}>
                                 <span className="mm-outfit-swatch">
                                     <i style={{ background: hex(o.headCol) }} />
                                     <i style={{ background: hex(o.jacket) }} />
@@ -129,17 +139,37 @@ const Wardrobe = ({ welcome = false, onDone = null }) => {
                                 </span>
                                 <span className="mm-outfit-text">
                                     <b>{o.name}</b>
-                                    <small>{o.era}</small>
+                                    <small>{isUnlocked(o, done) ? o.era : lockNote(o)}</small>
                                 </span>
                             </button>
                         ))}
                     </div>
                 )}
+                {sport === 'glider' && (
+                    <>
+                        <h3 className="mm-wardrobe-h">Schirm</h3>
+                        <div className="mm-wardrobe-grid">
+                            {CANOPIES.map(c => (
+                                <button key={c.id} className={`mm-outfit ${canopy === c.id ? 'on' : ''} ${isUnlocked(c, done) ? '' : 'locked'}`}
+                                        disabled={!isUnlocked(c, done)} onClick={() => { setCanopy(c.id); setSportChoice('canopy', c.id); }}>
+                                    <span className="mm-outfit-swatch">
+                                        {c.cols.slice(0, 4).map((col, i) => <i key={i} style={{ background: hex(col) }} />)}
+                                    </span>
+                                    <span className="mm-outfit-text">
+                                        <b>{c.name}</b>
+                                        <small>{isUnlocked(c, done) ? 'Gleitschirm' : lockNote(c)}</small>
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    </>
+                )}
                 {!kit && (<>
                 <h3>Ganzes Outfit</h3>
                 <div className="mm-wardrobe-grid">
                     {OUTFITS.map(o => (
-                        <button key={o.id} className={`mm-outfit ${whole?.id === o.id ? 'on' : ''}`} onClick={() => apply(presetSelection(o.id))}>
+                        <button key={o.id} className={`mm-outfit ${whole?.id === o.id ? 'on' : ''} ${isUnlocked(o, done) ? '' : 'locked'}`}
+                                disabled={!isUnlocked(o, done)} onClick={() => apply(presetSelection(o.id))}>
                             <span className="mm-outfit-swatch">
                                 <i style={{ background: hex(o.headCol) }} />
                                 <i style={{ background: hex(o.jacket) }} />
@@ -148,7 +178,7 @@ const Wardrobe = ({ welcome = false, onDone = null }) => {
                             </span>
                             <span className="mm-outfit-text">
                                 <b>{o.name}</b>
-                                <small>{o.era}</small>
+                                <small>{isUnlocked(o, done) ? o.era : lockNote(o)}</small>
                             </span>
                         </button>
                     ))}
@@ -159,7 +189,7 @@ const Wardrobe = ({ welcome = false, onDone = null }) => {
                     <div className="mm-slot" key={sl.key}>
                         <span className="mm-slot-label">{sl.label}</span>
                         <div className="mm-slot-row">
-                            {OUTFITS.map(o => {
+                            {OUTFITS.filter(o => isUnlocked(o, done)).map(o => {
                                 const [c1, c2] = SWATCH[sl.key](o);
                                 const fit = sl.fit && FIT[o.fit];
                                 return (

@@ -137,7 +137,17 @@ export const OBJECTIVE_TYPES = {
     profit_day:     { label: (t) => `€${t.toLocaleString()} Gewinn an einem Tag`, unit: '€' },
     poi_summit:     { label: (t) => `${t} Gäste am Gipfelkreuz ✝`, unit: '' },
     poi_valley:     { label: (t) => `${t} Gäste am Talkreuz ✝`, unit: '' },
-    poi_lake:       { label: (t) => `${t} Gäste am Bergsee-Panorama`, unit: '' }
+    poi_lake:       { label: (t) => `${t} Gäste am Bergsee-Panorama`, unit: '' },
+    // ----- Eigene Einsätze (Selbst fahren): der Spieler muss selbst ran -----
+    self_ski_km:    { label: (t) => `${t} km selbst Ski fahren`, unit: 'km', self: true },
+    self_loipe_km:  { label: (t) => `${t} km selbst auf der Loipe laufen`, unit: 'km', self: true },
+    self_groom_m:   { label: (t) => `${t} m Piste selbst walzen`, unit: 'm', self: true },
+    self_rescues:   { label: (t) => (t === 1 ? 'Einen Verletzten selbst bergen' : `${t} Verletzte selbst bergen`), unit: '', self: true },
+    biathlon_hits:  { label: (t) => `${t} von 5 Treffern am Schießstand`, unit: '', self: true },
+    hockey_goals:   { label: (t) => `${t} Tore auf der Eisbahn schießen`, unit: '', self: true },
+    glider_flights: { label: (t) => (t === 1 ? 'Einen Gleitschirmflug landen' : `${t} Gleitschirmflüge landen`), unit: '', self: true },
+    glider_loops:   { label: (t) => (t === 1 ? 'Einen Looping am Gleitschirm fliegen' : `${t} Loopings am Gleitschirm fliegen`), unit: '', self: true },
+    trick_points:   { label: (t) => `${t.toLocaleString()} Trickpunkte sammeln`, unit: '', self: true }
 };
 
 /**
@@ -168,6 +178,15 @@ export function evaluateObjective(obj, stats) {
         case 'poi_summit':     current = stats.poiSummit || 0; break;
         case 'poi_valley':     current = stats.poiValley || 0; break;
         case 'poi_lake':       current = stats.poiLake || 0; break;
+        case 'self_ski_km':    current = (stats.selfSkiM || 0) / 1000; break;
+        case 'self_loipe_km':  current = (stats.selfLoipeM || 0) / 1000; break;
+        case 'self_groom_m':   current = stats.selfGroomM || 0; break;
+        case 'self_rescues':   current = stats.selfRescues || 0; break;
+        case 'biathlon_hits':  current = stats.biathlonBest || 0; break;
+        case 'hockey_goals':   current = stats.hockeyGoals || 0; break;
+        case 'glider_flights': current = stats.gliderFlights || 0; break;
+        case 'glider_loops':   current = stats.gliderLoops || 0; break;
+        case 'trick_points':   current = stats.trickPoints || 0; break;
         default: current = 0;
     }
     const target = obj.target;
@@ -186,7 +205,8 @@ export function objectiveLabel(obj) {
 }
 
 export function formatObjectiveValue(obj, value) {
-    if (obj.type.startsWith('piste_km')) return `${value.toFixed(1)} km`;
+    if (obj.type.startsWith('piste_km') || obj.type.endsWith('_km')) return `${value.toFixed(1)} km`;
+    if (obj.type === 'self_groom_m') return `${Math.round(value)} m`;
     if (obj.type === 'satisfaction') return `${Math.round(value)}%`;
     if (OBJECTIVE_TYPES[obj.type]?.unit === '€') return `€${Math.round(value).toLocaleString()}`;
     return `${Math.round(value).toLocaleString()}`;
@@ -238,7 +258,9 @@ export const CAMPAIGN_LEVELS = [
             { type: 'lift_count', target: 2 },
             { type: 'piste_km_total', target: 2 },
             { type: 'guests_total', target: 60 },
-            { type: 'revenue_total', target: 30000 }
+            { type: 'revenue_total', target: 30000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'self_ski_km', target: 1 }
         ]
     },
     {
@@ -283,7 +305,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'piste_km_total', target: 4 },
             { type: 'guests_total', target: 100 },
             { type: 'gastro_count', target: 1 },
-            { type: 'revenue_total', target: 60000 }
+            { type: 'revenue_total', target: 60000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'self_loipe_km', target: 0.5 },
+            { type: 'biathlon_hits', target: 3 }
         ]
     },
     {
@@ -331,7 +356,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'guests_total', target: 250 },
             { type: 'lift_capacity', target: 12 },
             { type: 'hotel_beds', target: 30 },
-            { type: 'revenue_total', target: 250000 }
+            { type: 'revenue_total', target: 250000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'self_rescues', target: 1 },
+            { type: 'glider_flights', target: 1 }
         ]
     },
     {
@@ -380,7 +408,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'guests_total', target: 400 },
             { type: 'gastro_count', target: 2 },
             { type: 'satisfaction', target: 74, minGuests: 25 },
-            { type: 'revenue_total', target: 400000 }
+            { type: 'revenue_total', target: 400000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'self_groom_m', target: 300 },
+            { type: 'trick_points', target: 500 }
         ]
     },
     {
@@ -429,7 +460,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'guests_total', target: 320 },
             { type: 'gastro_count', target: 2 },
             { type: 'satisfaction', target: 75, minGuests: 25 },
-            { type: 'revenue_total', target: 280000 }
+            { type: 'revenue_total', target: 280000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'self_rescues', target: 3 },
+            { type: 'biathlon_hits', target: 5 }
         ]
     },
     {
@@ -474,7 +508,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'gastro_count', target: 2 },
             { type: 'guests_total', target: 400 },
             { type: 'satisfaction', target: 76, minGuests: 25 },
-            { type: 'revenue_total', target: 320000 }
+            { type: 'revenue_total', target: 320000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'glider_loops', target: 1 },
+            { type: 'hockey_goals', target: 3 }
         ]
     },
     {
@@ -523,7 +560,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'hotel_beds', target: 20 },
             { type: 'guests_total', target: 300 },
             { type: 'lift_capacity', target: 8 },
-            { type: 'revenue_total', target: 180000 }
+            { type: 'revenue_total', target: 180000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'self_loipe_km', target: 2 },
+            { type: 'self_groom_m', target: 600 }
         ]
     },
     {
@@ -568,7 +608,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'lift_count', target: 4 },
             { type: 'guests_total', target: 600 },
             { type: 'satisfaction', target: 75, minGuests: 25 },
-            { type: 'revenue_total', target: 350000 }
+            { type: 'revenue_total', target: 350000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'trick_points', target: 2000 },
+            { type: 'self_rescues', target: 4 }
         ]
     },
     {
@@ -616,7 +659,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'guests_total', target: 1000 },
             { type: 'hotel_beds', target: 60 },
             { type: 'gastro_count', target: 2 },
-            { type: 'profit_day', target: 5000 }
+            { type: 'profit_day', target: 5000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'glider_flights', target: 3 },
+            { type: 'hockey_goals', target: 5 }
         ]
     },
     {
@@ -664,7 +710,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'lift_capacity', target: 50 },
             { type: 'guests_total', target: 1500 },
             { type: 'satisfaction', target: 78, minGuests: 35 },
-            { type: 'revenue_total', target: 1000000 }
+            { type: 'revenue_total', target: 1000000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'self_ski_km', target: 8 },
+            { type: 'glider_loops', target: 2 }
         ]
     },
     {
@@ -717,7 +766,10 @@ export const CAMPAIGN_LEVELS = [
             { type: 'guests_total', target: 2500 },
             { type: 'hotel_beds', target: 120 },
             { type: 'satisfaction', target: 80, minGuests: 50 },
-            { type: 'profit_day', target: 15000 }
+            { type: 'profit_day', target: 15000 },
+            // eigener Einsatz: das schafft nur, wer selbst fährt
+            { type: 'self_rescues', target: 6 },
+            { type: 'trick_points', target: 4000 }
         ]
     }
 ];

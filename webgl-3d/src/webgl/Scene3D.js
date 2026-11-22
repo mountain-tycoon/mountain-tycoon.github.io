@@ -1325,6 +1325,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     let playSeconds = 0;               // gespielte Zeit in diesem Gebiet
     const logAction = (a) => { if (replaying) return; saveLog.push(a); if (onSaveChange) onSaveChange(); };
     // ===== ÖKONOMIE-SIMULATION =====
+    let eventBoost = 1;                   // Gästezustrom während eines Ereignisses (siehe eventTick)
     const sim = { served: 0, active: 0, revenue: 0, satisfaction: 78, timeAcc: 0, dayProfit: 0, bestDayProfit: 0, dayAcc: 0, dayRevenue: 0, dayCost: 0, carActive: 0, carGuestsToday: 0, groom: 85 };
     // ===== LANGLAUF =====
     // Loipen sind keine Gäste-Routen (kein Lift, keine Abfahrt): sie haben eigene Läufer (Loipe3D.js).
@@ -1492,6 +1493,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             pisteCondition: Math.round(sim.groom),
             bestDailyProfit: Math.round(sim.bestDayProfit),
             // Bediente Gäste verteilen sich auf die Aussichtspunkte (POI-Besucher)
+            selfSkiM: sim.aSki || 0, selfLoipeM: sim.aLoipe || 0, selfGroomM: sim.aGroom || 0, selfRescues: sim.aRescue || 0,
+            biathlonBest: sim.aBiath || 0, hockeyGoals: sim.aGoals || 0, gliderFlights: sim.aFlights || 0, gliderLoops: sim.aLoops || 0,
+            trickPoints: sim.aTricks || 0,
             poiSummit: Math.floor(sim.served * 0.35),
             poiValley: Math.floor(sim.served * 0.3),
             poiLake:   Math.floor(sim.served * 0.3),
@@ -1838,8 +1842,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // Skipass-Preis steuert den Zustrom (teuer = weniger Gäste, dafür mehr €/Ticket)
         // Werbung zieht zusätzliche Gäste an — die Kapazität bleibt aber die
         // harte Grenze: ohne Lifte und Betten nützt die beste Kampagne nichts.
+        // (Ferienansturm: ein laufendes Ereignis hebt Zustrom und Obergrenze)
         const targetActive = hasCore
-            ? Math.min(capacity, attract * 3 * (skiPassAttract() / 100) * adBoost() * reputF) : 0;
+            ? Math.min(capacity * eventBoost, attract * 3 * (skiPassAttract() / 100) * adBoost() * reputF * eventBoost) : 0;
         // Gäste kommen/gehen (glatt annähern)
         const prev = sim.active;
         sim.active += (targetActive - sim.active) * Math.min(1, dt * 0.25);
@@ -4955,14 +4960,83 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             ['powder',  (weather.powder || 0) > 0.85 && pistes.length > 0, 'good', 'Es hat kräftig geschneit – abseits der Pisten liegt jetzt richtig Tiefschnee. Wer fährt die erste Spur?'],
             ['fine',    guests > 30 && sim.satisfaction > 82 && sim.groom > 75, 'good', 'Läuft rund hier oben: volle Pisten, gute Laune. Weiter so!']
         ];
+        // wer spricht: die Bergrettung über Verletzte, der Pistenchef über die Pisten, sonst die Betriebsleitung
+        const WHO = { hurtWait: 'rescue', hurtMany: 'rescue', medic: 'rescue', groom: 'piste', powder: 'piste' };
+        if (ev) { radio.wait = 6; return; }                        // während eines Ereignisses spricht nur das Ereignis
         for (const [id, cond, tone, text] of msgs) {
             if (!cond || radio.t - (radio.last[id] ?? -1e9) < (tone === 'good' ? 420 : 170)) continue;
             radio.last[id] = radio.t; radio.wait = 28;
-            onRadio({ id, tone, text });
+            onRadio({ id, tone, text, who: WHO[id] || 'boss' });
             return;
         }
         radio.wait = 6;
     }
+    // ===== EREIGNISSE =====
+    // Alle paar Minuten passiert etwas im Gebiet: ein Ansturm, ein Schneesturm, ein Massensturz, Besuch von der
+    // Presse. Jedes Ereignis hat eine Frist und ein Ziel; wer es schafft, bekommt eine Prämie. Der Funk kündigt
+    // es an und meldet den Ausgang, das HUD zeigt Ziel und Restzeit.
+    let ev = null, evWait = 140;
+    const evSay = (tone, text, who = 'boss') => { if (onRadio) onRadio({ id: 'event', tone, text, who }); radio.wait = 25; };
+    const evPay = (sum) => { money += sum; sim.revenue += sum; sim.dayRevenue += sum; if (onMoney) onMoney(money); };
+    const EVENTS = {
+        rush: {
+            name: 'Ferienansturm', secs: 90, goal: 'Zufriedenheit am Ende mindestens 68 %',
+            start() { eventBoost = 1.6; evSay('warn', 'Ferienbeginn! Gleich rollt die halbe Stadt an. Halt die Leute bei Laune – wenn die Stimmung hält, zahlt sich das aus.'); },
+            end() { eventBoost = 1; const ok = sim.satisfaction >= 68, sum = 4000 + Math.round(sim.active * 40);
+                if (ok) evPay(sum);
+                evSay(ok ? 'good' : 'tip', ok ? `Ansturm gemeistert, alle zufrieden. Das bringt ${sum.toLocaleString('de-DE')} € extra.` : 'Der Ansturm ist durch – aber viele waren genervt. Beim nächsten Mal mehr Lifte und Einkehr.'); }
+        },
+        storm: {
+            name: 'Schneesturm', secs: 80, goal: 'Pistenzustand am Ende mindestens 60 %',
+            start() { weather.targetFall = 1; weather.timer = 95; evSay('warn', 'Sturmwarnung! Es schneit waagerecht. Die Pisten wehen zu – halt sie in Schuss, notfalls mit der Raupe selbst.', 'piste'); },
+            tick(dt) { for (const bed of pisteBeds) if (bed.groom && !bed.noWear) for (let k = 0; k < bed.groom.length; k++) bed.groom[k] = Math.max(0, bed.groom[k] - dt * 0.006);
+                if (wind.gust <= 0 && wind.gustT > 7) wind.gustT = 7; },
+            end() { const ok = sim.groom >= 60;
+                if (ok) evPay(6000);
+                evSay(ok ? 'good' : 'tip', ok ? 'Sturm überstanden und die Pisten stehen da wie geleckt. 6.000 € Prämie vom Tourismusverband – und draußen liegt jetzt Tiefschnee.' : 'Der Sturm ist vorbei, die Pisten sehen wüst aus. Immerhin: abseits liegt jetzt Tiefschnee.', 'piste'); }
+        },
+        accident: {
+            name: 'Massensturz', secs: 110, goal: 'Alle Verletzten versorgen, bevor die Zeit abläuft',
+            ok() { return guestPool.filter(g => g.state === 'piste' && !g.hurt && g.mesh && g.mesh.visible).length >= 3; },
+            start() { const list = guestPool.filter(g => g.state === 'piste' && !g.hurt && g.mesh && g.mesh.visible).slice(0, 3);
+                for (const g of list) startFall(g, worldToGrid(g.mesh.position.x, g.mesh.position.z));
+                evSay('warn', `Massensturz auf der Piste, ${list.length} Verletzte! Alles, was Kufen und Rotoren hat, raus – du kannst selbst mitfahren.`, 'rescue'); },
+            tick() { if (ev.left < ev.secs - 6 && injured.length === 0 && rescues.length === 0) ev.left = 0; },
+            end() { const ok = injured.length === 0 && rescues.length === 0;
+                if (ok) evPay(5000);
+                evSay(ok ? 'good' : 'warn', ok ? 'Alle versorgt, niemand ernsthaft verletzt. Saubere Arbeit – 5.000 € von der Versicherung.' : 'Die Zeit ist um und es liegen noch Leute draußen. Das spricht sich herum.', 'rescue');
+                if (!ok) sim.satisfaction = Math.max(10, sim.satisfaction - 6); }
+        },
+        press: {
+            name: 'Presse im Gebiet', secs: 80, goal: 'Zufriedenheit am Ende mindestens 78 %',
+            start() { evSay('tip', 'Ein Reiseblatt testet heute unser Gebiet. Wenn die Stimmung stimmt, gibt das Werbung, die kein Geld kaufen kann.'); },
+            end() { const ok = sim.satisfaction >= 78;
+                if (ok) { evPay(5000); sim.reput = Math.min(1, (sim.reput || 0) + 0.06); }
+                evSay(ok ? 'good' : 'tip', ok ? 'Fünf Sterne im Reiseblatt! Das hebt unseren Ruf – und 5.000 € Werbewert obendrauf.' : 'Der Bericht ist lauwarm ausgefallen. Mehr Einkehr, kürzere Schlangen, dann klappt es beim nächsten Mal.'); }
+        }
+    };
+    function eventTick(dt) {
+        if (replaying) return;
+        if (ev) {
+            ev.left -= dt;
+            if (ev.def.tick) ev.def.tick(dt);
+            if (ev.left <= 0) { const d = ev.def; ev = null; d.end(); evWait = 210 + Math.random() * 120; if (onEvent) onEvent(null); return; }
+            if (onEvent) onEvent({ name: ev.def.name, goal: ev.def.goal, left: Math.ceil(ev.left) });
+            return;
+        }
+        evWait -= dt;
+        if (evWait > 0) return;
+        const lifts = guestRoutes.some(r => r.kind === 'lift'), pistes = guestRoutes.some(r => r.kind === 'piste');
+        if (!lifts || !pistes || sim.active < 15) { evWait = 30; return; }      // erst wenn das Gebiet läuft
+        const keys = Object.keys(EVENTS).filter(k => k !== lastEvent && (!EVENTS[k].ok || EVENTS[k].ok()));
+        const key = keys[Math.floor(Math.random() * keys.length)];
+        if (!key) { evWait = 30; return; }
+        lastEvent = key;
+        ev = { def: EVENTS[key], left: EVENTS[key].secs, secs: EVENTS[key].secs };
+        ev.def.start();
+        if (onEvent) onEvent({ name: ev.def.name, goal: ev.def.goal, left: ev.secs });
+    }
+    let lastEvent = '';
     /** Alle Pisten- und Loipenbänder im Umkreis (Rasterkoordinaten) frisch walzen; liefert die Zahl der Abschnitte. */
     function groomAround(gx, gy, rad) {
         let n = 0;
@@ -6594,7 +6668,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
             guests: () => guestPool, villagesNow: () => villages, noRender: (v) => { skipRender = !!v; },
-            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim,
+            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt),
             // Prüfhilfe: einen Gast an dieser Stelle verletzt hinlegen (braucht Gäste im Vorrat)
             hurt: (gx, gy) => { const g = guestPool.find(q => !q.hurt && q.mesh); if (!g) return false; const w = worldPosSmooth(gx, gy); g.mesh.position.copy(w); g._prevPos?.copy?.(w); g.mesh.visible = true; startFall(g, { gx, gy }); return true; },
             buildPiste: (pts, width) => { if (width) pisteWidth = width; return buildPistePath(pts); }, loipen: () => loipen,
@@ -6627,7 +6701,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         }
         // Ökonomie: alle ~1s ein Tick, danach HUD aktualisieren
         sim.timeAcc += dt;
-        if (sim.timeAcc >= 1) { radioTick(sim.timeAcc); simTick(sim.timeAcc); sim.timeAcc = 0; emitStats(); if (selectedSel && onSelect) onSelect(infoFor(selectedSel)); }
+        if (sim.timeAcc >= 1) { eventTick(sim.timeAcc); radioTick(sim.timeAcc); simTick(sim.timeAcc); sim.timeAcc = 0; emitStats(); if (selectedSel && onSelect) onSelect(infoFor(selectedSel)); }
         updateGuests(t, dt);
         updateRescues(t, dt);
         if (!(skiRun && skiRun.active())) orbit.step();     // laufender Kameraflug
@@ -9245,6 +9319,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     let onBuildHint = null;      // Grund, warum gerade nicht gebaut werden kann (HUD)
     let onToast = null;          // kurze Meldung im HUD
     let onRadio = null;          // Funkspruch der Betriebsleitung (siehe radioTick)
+    let onEvent = null;          // laufendes Ereignis fürs HUD: { name, goal, left } oder null
     const onDemolish = (e) => {
         if (!demolishMode || skiPick || (skiRun && skiRun.active())) return;
         if (!isTap(e)) return;
@@ -9576,6 +9651,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         rinkAt,
         loipeAt: (wx, wz) => !!loipen.at((wx + half) / tile, (wz + half) / tile),
         loipeTrack: (wx, wz) => { const q = loipen.trackAt((wx + half) / tile, (wz + half) / tile); return q ? { ang: q.ang, x: q.cx * tile - half, z: q.cy * tile - half, end: q.end } : null; },
+        // eigene Einsätze mitzählen (für die Levelziele): 'max' hält den Bestwert, sonst wird addiert
+        achieve: (k, v, max) => { sim[k] = max ? Math.max(sim[k] || 0, v) : (sim[k] || 0) + v; },
         wind: () => wind,
         powder: () => weather.powder ?? 0.45,
         // Pistenraupe zum Selbstfahren: die größte Klasse, für die eine Garage steht
@@ -9612,7 +9689,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 finishRescue(g);
                 money += 350; sim.revenue += 350; sim.dayRevenue += 350; if (onMoney) onMoney(money);
                 sim.satisfaction = Math.min(100, sim.satisfaction + 1.5);
-                sim.rescuedByPlayer = (sim.rescuedByPlayer || 0) + 1;
+                sim.aRescue = (sim.aRescue || 0) + 1;
             },
             /** Fahrt abgebrochen: der Verletzte liegt wieder dort, wo er lag, und wartet. */
             drop: (g) => { g.carried = false; g.mesh.visible = true; if (g.state === 'down' && !injured.includes(g)) injured.push(g); }
@@ -9649,7 +9726,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
 
     // ===== SPIELSTAND: SICHERN UND LADEN =====
     const SIM_KEYS = ['served', 'revenue', 'satisfaction', 'dayProfit', 'bestDayProfit', 'dayAcc', 'dayRevenue',
-                      'dayCost', 'groom', 'reput', 'attract', 'mood', 'carGuestsToday'];
+                      'dayCost', 'groom', 'reput', 'attract', 'mood', 'carGuestsToday',
+                      // eigene Einsätze des Spielers (Levelziele)
+                      'aSki', 'aLoipe', 'aGroom', 'aRescue', 'aBiath', 'aGoals', 'aFlights', 'aLoops', 'aTricks'];
     /** Aktueller Spielstand als schlichtes Objekt (JSON-tauglich). */
     const getSave = () => {
         const simOut = {};
@@ -9790,6 +9869,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         setOnBuildHint(cb){ onBuildHint = cb; },
         setOnToast(cb){ onToast = cb; },
         setOnRadio(cb){ onRadio = cb; },
+        setOnEvent(cb){ onEvent = cb; },
         setOnSelect(cb){ onSelect = cb; },
         /**
          * Kamera zum Problem führen. `kind` ist 'stranded' oder 'injured'.

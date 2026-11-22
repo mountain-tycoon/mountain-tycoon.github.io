@@ -22,7 +22,7 @@ const tinted = (geo, hex) => {
 };
 
 /** Kappe als Bogen aus Zellen; `flat` = am Boden ausgelegt. */
-const wingGeo = (span, chord, rise, flat = false) => {
+const wingGeo = (span, chord, rise, flat = false, cols = WING) => {
     const N = 15, parts = [];
     for (let i = 0; i < N; i++) {
         const u = (i + 0.5) / N * 2 - 1;                         // −1 … 1 über die Spannweite
@@ -32,15 +32,16 @@ const wingGeo = (span, chord, rise, flat = false) => {
         const cell = new THREE.BoxGeometry(span / N * 1.04, flat ? 0.05 : 0.12, chord * (1 - 0.35 * u * u));
         if (!flat) cell.rotateZ(-a * 0.9);
         cell.translate(x, y, 0);
-        parts.push(tinted(cell, WING[Math.min(WING.length - 1, Math.floor((u + 1) / 2 * WING.length))]));
+        parts.push(tinted(cell, cols[Math.min(cols.length - 1, Math.floor((u + 1) / 2 * cols.length))]));
     }
     return mergeGeometries(parts);
 };
 
-export function makeCanopy() {
+/** @param cols Farben der Zellen von einer Flügelspitze zur anderen (ohne Angabe rot-weiß-gelb) */
+export function makeCanopy(cols = WING) {
     const g = new THREE.Group();
     const SPAN = 5.2, UP = 3.3;
-    const wing = new THREE.Mesh(wingGeo(SPAN, 1.35, 1.0), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, side: THREE.DoubleSide }));
+    const wing = new THREE.Mesh(wingGeo(SPAN, 1.35, 1.0, false, cols), new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, side: THREE.DoubleSide }));
     wing.position.y = UP; wing.castShadow = true; g.add(wing);
     // Leinen: von der Kappe zu den beiden Tragegurten über den Schultern
     const pos = [];

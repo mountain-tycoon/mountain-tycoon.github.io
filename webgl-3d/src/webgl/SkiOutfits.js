@@ -78,7 +78,10 @@ export const SPORT_OUTFITS = {
           headCol: 0xf2ead8, headTrim: 0x1f8a6a, lens: 0x2a2018, strap: 0x2a2018, ski: 0x1b62b8, skiTop: 0xf4f4f2, pole: 0x8a8f96, packCol: 0x14483a },
         { ...NORDIC, id: 'n_retro', name: 'Loipenklassiker', era: '1978', head: 'bobble', eyes: 'none', torso: 'sweater', bands: 3, hair: 0x6a4424,
           jacket: 0x1d3f73, panel: 0x1d3f73, trim: 0xf2ead8, pants: 0x7a1f1f, knee: 0xf2ead8, glove: 0xf2ead8, boot: 0x3a2618, bootDark: 0x21160e,
-          headCol: 0xc8371f, headTrim: 0xf2ead8, lens: 0x16130f, strap: 0x16130f, ski: 0x9a6a3a, skiTop: 0x7a4f26, pole: 0xb9a16a, packCol: 0x4a2c18 }
+          headCol: 0xc8371f, headTrim: 0xf2ead8, lens: 0x16130f, strap: 0x16130f, ski: 0x9a6a3a, skiTop: 0x7a4f26, pole: 0xb9a16a, packCol: 0x4a2c18 },
+        { ...NORDIC, id: 'n_gold', name: 'Weltcup-Gold', era: '★ 3', unlock: 3, head: 'headband', eyes: 'shades', torso: 'suit', bands: 3, fit: 'tight', rifle: true,
+          jacket: 0xd9a520, panel: 0x16181c, trim: 0xfaf6e6, pants: 0x16181c, knee: 0xd9a520, glove: 0xfaf6e6,
+          headCol: 0xd9a520, headTrim: 0xfaf6e6, lens: 0x2e6bd6, strap: 0x16181c, ski: 0xfaf6e6, skiTop: 0xd9a520, pole: 0xd9a520, packCol: 0x16181c }
     ],
     hockey: [
         { ...HOCKEY, id: 'h_home', name: 'Heimtrikot', era: 'Heute', eyes: 'cage', bands: 2,
@@ -100,9 +103,40 @@ export const SPORT_OUTFITS = {
           headCol: 0x16181c, headTrim: 0xf2b01e, lens: 0xf2b01e, strap: 0xf2b01e, ski: 0xf2b01e, skiTop: 0x16181c, pole: 0x16181c, packCol: 0xf2b01e },
         { ...GLIDER, id: 'g_acro', name: 'Acro-Pilotin', era: 'Heute', bands: 0, fit: 'loose', hair: 0xd8b77a,
           jacket: 0xe0409a, panel: 0x7a1f5a, trim: 0x58d0e6, pants: 0x1f8a8a, knee: 0x12343a, boot: 0xf2f2f0, bootDark: 0x1d2128, glove: 0x58d0e6,
-          headCol: 0x58d0e6, headTrim: 0xe0409a, lens: 0xe0409a, strap: 0x7a1f5a, ski: 0xe0409a, skiTop: 0x58d0e6, pole: 0x58d0e6, packCol: 0x7a1f5a }
+          headCol: 0x58d0e6, headTrim: 0xe0409a, lens: 0xe0409a, strap: 0x7a1f5a, ski: 0xe0409a, skiTop: 0x58d0e6, pole: 0x58d0e6, packCol: 0x7a1f5a },
+        { ...GLIDER, id: 'g_legend', name: 'Fluglegende', era: '★ 6', unlock: 6, bands: 2,
+          jacket: 0xf2f2f0, panel: 0xd9a520, trim: 0xd9a520, pants: 0x16181c, knee: 0xd9a520, boot: 0xf2f2f0, bootDark: 0x16181c, glove: 0xd9a520,
+          headCol: 0xd9a520, headTrim: 0xf2f2f0, lens: 0x58d0e6, strap: 0x16181c, ski: 0xd9a520, skiTop: 0xf2f2f0, pole: 0x16181c, packCol: 0x16181c }
     ]
 };
+
+// ===== BELOHNUNGEN =====
+// Manche Stücke gibt es erst für geschaffte Kampagnen-Level: `unlock` = so viele Level müssen geschafft sein.
+// Alles ohne `unlock` ist von Anfang an da. Beim Entwickeln und für Admins ist nichts gesperrt.
+export const REWARD_OUTFITS = [
+    { id: 'patrol', name: 'Bergrettung', era: '★ 2', unlock: 2, head: 'helmet', eyes: 'goggles', torso: 'jacket', bands: 2, pack: true,
+      jacket: 0xd3202c, panel: 0x16181c, trim: 0xf4d21f, pants: 0x16181c, knee: 0xf4d21f, boot: 0x16181c, bootDark: 0xd3202c, glove: 0xf4d21f,
+      headCol: 0xf4f4f2, headTrim: 0xd3202c, lens: 0xf2a21b, strap: 0xd3202c, ski: 0xd3202c, skiTop: 0xf4f4f2, pole: 0xf4d21f, packCol: 0xd3202c, hair: 0x3b2a1e },
+    { id: 'groomer', name: 'Pistenchef', era: '★ 4', unlock: 4, head: 'beanie', eyes: 'shades', torso: 'jacket', bands: 1, pack: false, fit: 'loose',
+      jacket: 0xf07a1c, panel: 0x2a2e36, trim: 0xe9eef2, pants: 0x2a2e36, knee: 0x1a1d23, boot: 0x2a2018, bootDark: 0x15100c, glove: 0x2a2e36,
+      headCol: 0x2a2e36, headTrim: 0xf07a1c, lens: 0x2a2018, strap: 0x2a2018, ski: 0xf07a1c, skiTop: 0x2a2e36, pole: 0x8a8f96, packCol: 0x2a2e36, hair: 0x6a4424 },
+    { id: 'champion', name: 'Gesamtsieger', era: '★ 7', unlock: 7, head: 'helmet', eyes: 'goggles', torso: 'suit', bands: 3, pack: false, fit: 'tight',
+      jacket: 0xd9a520, panel: 0xb07f17, trim: 0xfaf6e6, pants: 0xd9a520, knee: 0xfaf6e6, boot: 0xfaf6e6, bootDark: 0xb07f17, glove: 0xfaf6e6,
+      headCol: 0xd9a520, headTrim: 0xfaf6e6, lens: 0x2e6bd6, strap: 0xfaf6e6, ski: 0xfaf6e6, skiTop: 0xd9a520, pole: 0xd9a520, packCol: 0xb07f17, hair: 0x3b2a1e }
+];
+// Gleitschirme: Farben der Kappe von Spitze zu Spitze
+export const CANOPIES = [
+    { id: 'c_classic', name: 'Klassik', cols: [0xe8452c, 0xf2f4f7, 0xf2b01e, 0xf2f4f7, 0xe8452c] },
+    { id: 'c_ocean', name: 'Ozean', cols: [0x1f4fb5, 0x58d0e6, 0xf2f4f7, 0x58d0e6, 0x1f4fb5] },
+    { id: 'c_forest', name: 'Bergwald', cols: [0x14483a, 0x1f8a6a, 0xf2ead8, 0x1f8a6a, 0x14483a] },
+    { id: 'c_rainbow', name: 'Regenbogen', unlock: 1, cols: [0xd3202c, 0xf07a1c, 0xf2d21a, 0x2fa64a, 0x1f6fd0, 0x7a3fc4] },
+    { id: 'c_night', name: 'Nachtflug', unlock: 5, cols: [0x16181c, 0x9be53a, 0x16181c, 0x9be53a, 0x16181c] },
+    { id: 'c_gold', name: 'Gold', unlock: 9, cols: [0xfaf6e6, 0xd9a520, 0xb07f17, 0xd9a520, 0xfaf6e6] }
+];
+/** Was wird mit dem n-ten geschafften Level frei? (für die Meldung nach dem Levelende) */
+export const rewardsAt = (n) => [...REWARD_OUTFITS, ...Object.values(SPORT_OUTFITS).flat(), ...CANOPIES].filter(o => o.unlock === n).map(o => o.name);
+/** Ist dieses Stück schon freigespielt? `done` = Zahl der geschafften Level. */
+export const isUnlocked = (o, done) => !o.unlock || done >= o.unlock;
 
 // ===== SKIMARKEN =====
 // Ski bekannter Hersteller, in deren typischen Farben. Nur der Name als Schrift – keine Logos, keine
@@ -121,6 +155,7 @@ export const SKI_BRANDS = [
     { id: 'ski_stoeckli',  name: 'Stöckli',   ski: 0xc9ced4, skiTop: 0x1f4f9f, pole: 0x1f4f9f },
     { id: 'ski_dynastar',  name: 'Dynastar',  ski: 0x1f4fb5, skiTop: 0xf2d21a, pole: 0xf2d21a }
 ];
+OUTFITS.push(...REWARD_OUTFITS);
 const partById = (id) => SKI_BRANDS.find(b => b.id === id) || OUTFITS.find(o => o.id === id) || null;
 
 // ===== EINZELTEILE =====
@@ -160,6 +195,12 @@ export function getSportChoice(sport) {
     const list = SPORT_OUTFITS[sport] || [], id = readStore()['sport_' + sport];
     return (list.find(o => o.id === id) || list[0] || {}).id || '';
 }
+/** Farben des gewählten Gleitschirms. */
+export function canopyColors() {
+    const id = readStore().sport_canopy;
+    return (CANOPIES.find(c => c.id === id) || CANOPIES[0]).cols;
+}
+export const getCanopyChoice = () => (CANOPIES.find(c => c.id === readStore().sport_canopy) || CANOPIES[0]).id;
 export function setSportChoice(sport, id) {
     try { localStorage.setItem(key(), JSON.stringify({ ...getSelection(), ...readStore(), ['sport_' + sport]: id })); } catch { /* privater Modus */ }
 }
