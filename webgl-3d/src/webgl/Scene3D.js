@@ -799,7 +799,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (parcelGrid) parcelGrid.visible = !!on;
         if (!on) showParcel(null, false);
     };
-    const roadMat = new THREE.MeshStandardMaterial({ color: 0x3a3f47, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const roadMat = new THREE.MeshStandardMaterial({ color: 0x737a85, roughness: 0.9, metalness: 0.05, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     const roadLineMat = new THREE.MeshStandardMaterial({ color: 0xdfe4ea, roughness: 0.7, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
     // GERENDERTE Steigung entlang einer Strecke (das, was der Spieler sieht):
     // Δ(Welt-Höhe) / Δ(Welt-Horizontal). Ablehnen ab 15 %.
@@ -816,13 +816,104 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         }
         return true;
     };
+    // ===== STRASSENBETT =====
+    // Eine Straße folgt nicht einfach dem rohen Hang: darunter wird das Gelände zu einem Bett abgetragen bzw.
+    // aufgefüllt – längs geglättet (keine Buckel), quer eben. Ohne das verschwand das Band hinter jeder Kuppe
+    // im Boden oder hing in der Luft. Alle Bänder merken sich ihre Stützpunkte (`roadSeats`) und setzen sich
+    // neu auf, wenn sich der Boden später ändert (Einebnen für Gebäude, weitere Straßen).
+    const roadSeats = [];              // { attr, pts: [gx, gy, höhe über Grund, …], box }
+    const roadDiscs = [];              // Wendeplatten und Endkappen: { mesh, gx, gy, off }
+    // Schneewälle dürfen keine Einmündung zustellen: jedes Band kennt seine Wallstücke und nimmt die heraus,
+    // die im Korridor einer anderen Fahrbahn liegen – in beide Richtungen, egal welche Straße zuerst da war.
+    const roadLines = [];              // { samples, hw, segs: [{ gx, gy, at }], index }
+    const nearLine = (samples, gx, gy, r) => {
+        const r2 = r * r;
+        for (let i = 0; i < samples.length - 1; i++) {
+            const a = samples[i], b = samples[i + 1], ex = b.gx - a.gx, ey = b.gy - a.gy, l2 = ex * ex + ey * ey || 1;
+            const f = Math.max(0, Math.min(1, ((gx - a.gx) * ex + (gy - a.gy) * ey) / l2));
+            const dx = gx - (a.gx + ex * f), dy = gy - (a.gy + ey * f);
+            if (dx * dx + dy * dy < r2) return true;
+        }
+        return false;
+    };
+    const openBanks = (line, other) => {
+        let hit = false;
+        for (const sg of line.segs) {
+            if (sg.off || !nearLine(other.samples, sg.gx, sg.gy, other.hw + 0.25)) continue;
+            line.index.array.fill(0, sg.at, sg.at + 12); sg.off = true; hit = true;
+        }
+        if (hit) line.index.needsUpdate = true;
+    };
+    const reseatRoads = (x0 = -1e9, y0 = -1e9, x1 = 1e9, y1 = 1e9) => {
+        for (const rs of roadSeats) {
+            if (rs.box[0] > x1 || rs.box[2] < x0 || rs.box[1] > y1 || rs.box[3] < y0) continue;
+            const pts = rs.pts, a = rs.attr;
+            for (let i = 0, v = 0; i < pts.length; i += 3, v++) a.setY(v, yAtSmooth(pts[i], pts[i + 1]) + pts[i + 2]);
+            a.needsUpdate = true;
+        }
+        for (const d of roadDiscs) d.mesh.position.y = yAtSmooth(d.gx, d.gy) + d.off;
+    };
+    const gradeRoad = (samples, width) => {
+        const tpos = terrain?.geometry?.attributes?.position;
+        const n = samples.length;
+        if (!tpos || n < 2) return;
+        const hw = width / 2, inner = hw + 0.7, outer = hw + 3.2;
+        const fixed = samples.map(c => occAt(Math.round(c.gx), Math.round(c.gy)) === OCC_BUILD);
+        const raw = samples.map(c => yAtSmooth(c.gx, c.gy) / hScale);
+        let h = raw.slice();
+        // Längsprofil glätten; Enden und Stücke auf Bauland (Ortsplatz, Parkplatz) bleiben, wo sie sind
+        for (let pass = 0; pass < 8; pass++) {
+            const o = h.slice();
+            for (let i = 1; i < n - 1; i++) h[i] = fixed[i] ? raw[i] : (o[i - 1] + 2 * o[i] + o[i + 1]) / 4;
+        }
+        let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+        for (const c of samples) { bx0 = Math.min(bx0, c.gx); by0 = Math.min(by0, c.gy); bx1 = Math.max(bx1, c.gx); by1 = Math.max(by1, c.gy); }
+        const gx0 = Math.max(1, Math.floor(bx0 - outer)), gx1 = Math.min(gridSize - 2, Math.ceil(bx1 + outer));
+        const gy0 = Math.max(1, Math.floor(by0 - outer)), gy1 = Math.min(gridSize - 2, Math.ceil(by1 + outer));
+        for (let gy = gy0; gy <= gy1; gy++) for (let gx = gx0; gx <= gx1; gx++) {
+            const vi = gy * gridSize + gx;
+            if (occGrid[vi] === OCC_BUILD || world.landcover[vi] === 2) continue;      // Bauplätze und Wasser bleiben
+            let bd = outer * outer, bh = 0;
+            for (let i = 0; i < n - 1; i++) {
+                if (fixed[i] && fixed[i + 1]) continue;
+                const a = samples[i], b = samples[i + 1];
+                const ex = b.gx - a.gx, ey = b.gy - a.gy, l2 = ex * ex + ey * ey || 1;
+                const f = Math.max(0, Math.min(1, ((gx - a.gx) * ex + (gy - a.gy) * ey) / l2));
+                const dx = gx - (a.gx + ex * f), dy = gy - (a.gy + ey * f), d2 = dx * dx + dy * dy;
+                if (d2 < bd) { bd = d2; bh = h[i] + (h[i + 1] - h[i]) * f; }
+            }
+            if (bd >= outer * outer) continue;
+            const d = Math.sqrt(bd), w = d <= inner ? 1 : 1 - (d - inner) / (outer - inner), sm = w * w * (3 - 2 * w);
+            const nh = heightmap[vi] + (bh - heightmap[vi]) * sm;
+            heightmap[vi] = nh; tpos.setY(vi, nh * hScale);
+        }
+        tpos.needsUpdate = true;
+        syncOuter(gx0, gy0, gx1, gy1);
+        const cx = (gx0 + gx1) / 2, cy = (gy0 + gy1) / 2, rad = Math.hypot(gx1 - gx0, gy1 - gy0) / 2 + 2;
+        for (const bedP of pisteBeds) if (bedP.reseat) bedP.reseat(cx, cy, rad);
+        if (forest?.userData?.reseat) forest.userData.reseat(cx, cy, rad);
+        recomputeTerrainNormals();
+        reseatRoads(gx0, gy0, gx1, gy1);
+    };
+    // Geräumter Schnee am Fahrbahnrand: ein flacher Wall je Seite, im Ton der Schneedecke
+    let roadBankMat = null;
+    const bankMat = () => {
+        if (!roadBankMat) {
+            roadBankMat = new THREE.MeshStandardMaterial({ color: 0xe9eef5, roughness: 0.95, side: THREE.DoubleSide });
+            try { matchSnowLook(roadBankMat, snowU, 'snow-look-road'); } catch { /* ohne Abgleich bleibt der Wall schlicht weiß */ }
+        }
+        return roadBankMat;
+    };
     // Baut das Straßenband aus einer Liste von Mittelpunkt-Samples (glatt, mit
     // pro-Sample-Tangente -> saubere Kurven) inkl. gestrichelter Mittellinie,
     // Eckfüllungen (fillt Knicke bei verketteten Segmenten) und Fahr-Kacheln.
-    const roadRibbon = (samples, width, caps = true) => {
+    const roadRibbon = (samples, width, caps = true, grade = true) => {
         if (samples.length < 2) return;
         const hw = width / 2;
+        if (grade) gradeRoad(samples, width);
         const pos = [], idx = [], lpos = [], lidx = []; let v = 0, lv = 0;
+        const seatR = [], seatL = [], bpos = [], bidx = [], seatB = [], bsegs = []; let bv = 0;
+        const BANK = [[-0.05, 0.12], [0.32, 0.34], [0.85, 0.03]];      // Querschnitt des Schneewalls: Abstand vom Rand, Höhe
         // ===== ABSCHNITTE ÜBER GEBÄUDEN AUSLASSEN =====
         // `claimRoadTile` verweigert zwar die Belegung über einem Gebäude,
         // das BAND wurde aber trotzdem durchgezeichnet — die Straße lief
@@ -838,12 +929,24 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             const blocked = blockedAt(c);
             const l = worldPosSmooth(c.gx + nx * hw, c.gy + ny * hw), r = worldPosSmooth(c.gx - nx * hw, c.gy - ny * hw);
             pos.push(l.x, l.y + 0.18, l.z, r.x, r.y + 0.18, r.z);
+            seatR.push(c.gx + nx * hw, c.gy + ny * hw, 0.18, c.gx - nx * hw, c.gy - ny * hw, 0.18);
+            for (const sgn of [1, -1]) for (const [off, up] of BANK) {
+                const ox = c.gx + nx * (hw + off) * sgn, oy = c.gy + ny * (hw + off) * sgn, wp = worldPosSmooth(ox, oy);
+                bpos.push(wp.x, wp.y + up, wp.z); seatB.push(ox, oy, up);
+            }
+            if (i > 0 && !blocked && !lastBlocked) for (const o of [0, 3]) {
+                const sgn = o === 0 ? 1 : -1, pr = samples[i - 1];
+                bsegs.push({ gx: (c.gx + pr.gx) / 2 + nx * (hw + 0.3) * sgn, gy: (c.gy + pr.gy) / 2 + ny * (hw + 0.3) * sgn, at: bidx.length });
+                for (let q = 0; q < 2; q++) { const a0 = bv - 6 + o + q, b0 = bv + o + q; bidx.push(a0, a0 + 1, b0, a0 + 1, b0 + 1, b0); }
+            }
+            bv += 6;
             // Nur verbinden, wenn WEDER dieses NOCH das vorige Segment auf
             // Bauland liegt — sonst spannt sich ein Dreieck über das Haus.
             if (i > 0 && !blocked && !lastBlocked) { const bi = v - 2; idx.push(bi, bi + 1, bi + 2, bi + 1, bi + 3, bi + 2); }
             v += 2;
             const ll = worldPosSmooth(c.gx + nx * 0.28, c.gy + ny * 0.28), lr = worldPosSmooth(c.gx - nx * 0.28, c.gy - ny * 0.28);
             lpos.push(ll.x, ll.y + 0.22, ll.z, lr.x, lr.y + 0.22, lr.z);
+            seatL.push(c.gx + nx * 0.28, c.gy + ny * 0.28, 0.22, c.gx - nx * 0.28, c.gy - ny * 0.28, 0.22);
             if (i > 0 && (i % 3 !== 0) && !blocked && !lastBlocked) { const bi = lv - 2; lidx.push(bi, bi + 1, bi + 2, bi + 1, bi + 3, bi + 2); }
             lv += 2;
             // Belegung nur so breit wie die Fahrbahn WIRKLICH ist — und nur
@@ -870,12 +973,82 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         lg.setAttribute('position', new THREE.Float32BufferAttribute(lpos, 3));
         lg.setIndex(lidx); lg.computeVertexNormals();
         const lm = new THREE.Mesh(lg, roadLineMat); lm.frustumCulled = false; scene.add(lm);
+        const bg = new THREE.BufferGeometry();
+        bg.setAttribute('position', new THREE.Float32BufferAttribute(bpos, 3));
+        bg.setIndex(bidx); bg.computeVertexNormals();
+        const bm = new THREE.Mesh(bg, bankMat()); bm.receiveShadow = true; bm.frustumCulled = false; scene.add(bm);
+        {
+            const line = { samples, hw, segs: bsegs, index: bg.index };
+            for (const other of roadLines) { openBanks(line, other); openBanks(other, line); }
+            roadLines.push(line);
+        }
+        {
+            let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+            for (const c of samples) { x0 = Math.min(x0, c.gx); y0 = Math.min(y0, c.gy); x1 = Math.max(x1, c.gx); y1 = Math.max(y1, c.gy); }
+            const box = [x0 - hw - 1, y0 - hw - 1, x1 + hw + 1, y1 + hw + 1];
+            roadSeats.push({ attr: geo.attributes.position, pts: seatR, box }, { attr: lg.attributes.position, pts: seatL, box },
+                           { attr: bg.attributes.position, pts: seatB, box });
+        }
         // Eck-/Endfüllung nur für verkettete gerade Segmente (nicht für glatte Kurven)
         if (caps) for (const c of [samples[0], samples[samples.length - 1]]) {
             const p = worldPosSmooth(c.gx, c.gy);
             const cap = new THREE.Mesh(new THREE.CylinderGeometry(width * 0.5, width * 0.5, 0.05, 16), roadMat);
             cap.position.set(p.x, p.y + 0.17, p.z); cap.frustumCulled = false; scene.add(cap);
+            roadDiscs.push({ mesh: cap, gx: c.gx, gy: c.gy, off: 0.17 });
         }
+    };
+    /**
+     * Die Zufahrt endet nicht am Kartenrand: sie läuft im Umland weiter talauswärts, bis der Dunst sie schluckt.
+     * Dort gibt es kein Bett – das Band liegt quer eben auf dem höchsten Punkt seines Querschnitts.
+     */
+    const addRoadBeyond = (edge, before, width, len = 85) => {
+        const hAt = surround?.userData?.heightAt;
+        if (!hAt) return;
+        let dx = edge.gx - before.gx, dy = edge.gy - before.gy; const dl = Math.hypot(dx, dy);
+        if (dl < 1e-3) return;
+        dx /= dl; dy /= dl;
+        // gerade hinaus, senkrecht zur nächsten Kartenkante – sonst liefe das Band am Rand entlang
+        const toL = edge.gx, toR = gridSize - 1 - edge.gx, toT = edge.gy, toB = gridSize - 1 - edge.gy, m = Math.min(toL, toR, toT, toB);
+        const ox = m === toL ? -1 : m === toR ? 1 : 0, oy = m === toT ? -1 : m === toB ? 1 : 0;
+        const hw = width / 2, pos = [], idx = [], bpos = [], bidx = [], lpos = [], lidx = [];
+        let pgx = edge.gx, pgy = edge.gy;
+        for (let k = 0; k <= len; k++) {
+            const f = Math.min(1, k / 10);                     // erst in Fahrtrichtung, dann gerade hinaus
+            let tx = dx + (ox - dx) * f, ty = dy + (oy - dy) * f; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+            const gx = k === 0 ? pgx : pgx + tx, gy = k === 0 ? pgy : pgy + ty;
+            pgx = gx; pgy = gy;
+            const nx = -ty, ny = tx, W = (a, b) => [a * tile - half, b * tile - half];
+            const inside = gx >= 0 && gy >= 0 && gx <= gridSize - 1 && gy <= gridSize - 1;
+            const hh = (a, b) => { const [wx, wz] = W(a, b); return inside ? yAtSmooth(a, b) : hAt(wx, wz); };
+            const y = Math.max(hh(gx, gy), hh(gx + nx * hw, gy + ny * hw), hh(gx - nx * hw, gy - ny * hw)) + 0.2;
+            const [lx, lz] = W(gx + nx * hw, gy + ny * hw), [rx, rz] = W(gx - nx * hw, gy - ny * hw);
+            pos.push(lx, y, lz, rx, y, rz);
+            { const [ax, az] = W(gx + nx * 0.28, gy + ny * 0.28), [cx2, cz2] = W(gx - nx * 0.28, gy - ny * 0.28); lpos.push(ax, y + 0.04, az, cx2, y + 0.04, cz2); }
+            for (const sgn of [1, -1]) for (const [off, up] of [[0, -0.05], [0.4, 0.2], [1.0, -0.25]]) {
+                const [wx, wz] = W(gx + nx * (hw + off) * sgn, gy + ny * (hw + off) * sgn); bpos.push(wx, y + up, wz);
+            }
+            if (k > 0) {
+                const bi = k * 2 - 2; idx.push(bi, bi + 1, bi + 2, bi + 1, bi + 3, bi + 2);
+                if (k % 3 !== 0) lidx.push(bi, bi + 1, bi + 2, bi + 1, bi + 3, bi + 2);      // gestrichelte Mittellinie wie auf dem Spielfeld
+                for (const o of [0, 3]) for (let q = 0; q < 2; q++) { const a0 = k * 6 - 6 + o + q, b0 = k * 6 + o + q; bidx.push(a0, a0 + 1, b0, a0 + 1, b0 + 1, b0); }
+            }
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+        const mesh = new THREE.Mesh(geo, roadMat); mesh.receiveShadow = true; mesh.frustumCulled = false; scene.add(mesh);
+        const bg = new THREE.BufferGeometry();
+        bg.setAttribute('position', new THREE.Float32BufferAttribute(bpos, 3)); bg.setIndex(bidx); bg.computeVertexNormals();
+        const bm = new THREE.Mesh(bg, bankMat()); bm.frustumCulled = false; scene.add(bm);
+        const lg = new THREE.BufferGeometry();
+        lg.setAttribute('position', new THREE.Float32BufferAttribute(lpos, 3)); lg.setIndex(lidx); lg.computeVertexNormals();
+        const lm = new THREE.Mesh(lg, roadLineMat); lm.frustumCulled = false; scene.add(lm);
+    };
+    /** Runde Asphaltplatte (Wendeplatz am Ende einer Zufahrt). */
+    const addRoadDisc = (gx, gy, radius) => {
+        const p = worldPosSmooth(gx, gy);
+        const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.05, 28), roadMat);
+        m.position.set(p.x, p.y + 0.16, p.z); m.receiveShadow = true; m.frustumCulled = false; scene.add(m);
+        roadDiscs.push({ mesh: m, gx, gy, off: 0.16 });
     };
     /**
      * VORSCHAU-BAND für den Straßenbau.
@@ -4939,7 +5112,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const guests = sim.active + sim.carActive, hurt = injured.length;
         const longWait = injured.some(g => (g.hurtT || 0) > 22);
         const queue = lifts.reduce((m, r) => Math.max(m, (r.queue || []).length), 0);
-        const fullLots = parkingLots.length > 0 && parkingLots.every(l => l.occ >= l.cap * 0.95);
+        const fullLots = parkingLots.length > 0 && (sim.parkingRejects || 0) > 0 && (sim._tNow || 0) - (sim.parkingRejectT || 0) < 40
+            && parkingLots.every(l => l.taken && l.taken.size >= l.spots.length);   // belegt = jeder Stellplatz hat ein Auto (occ zählt Autos, cap Gäste)
         const cats = catCapacity(), medic = built.medical + built.hospital;
         const msgs = [
             ['ticket',  built.ticket === 0, 'warn', 'Chef, ohne Kasse kauft niemand einen Skipass. Stell eine an den Ortsrand.'],
@@ -6670,7 +6844,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
             guests: () => guestPool, villagesNow: () => villages, noRender: (v) => { skipRender = !!v; },
-            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt), getSave: () => getSave(), loadSave: (d) => loadSave(d),
+            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt), getSave: () => getSave(), loadSave: (d) => loadSave(d), roads: () => ({ discs: roadDiscs, lines: roadLines, lots: parkingLots }),
             // Prüfhilfe: einen Gast an dieser Stelle verletzt hinlegen (braucht Gäste im Vorrat)
             hurt: (gx, gy) => { const g = guestPool.find(q => !q.hurt && q.mesh); if (!g) return false; const w = worldPosSmooth(gx, gy); g.mesh.position.copy(w); g._prevPos?.copy?.(w); g.mesh.visible = true; startFall(g, { gx, gy }); return true; },
             buildPiste: (pts, width) => { if (width) pisteWidth = width; return buildPistePath(pts); }, loipen: () => loipen,
@@ -7309,6 +7483,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (forest?.userData?.reseat) forest.userData.reseat(cgx, cgy, outer + 2);
         if (glacier?.userData?.reseat) glacier.userData.reseat(cgx, cgy, outer + 2);
         recomputeTerrainNormals();
+        reseatRoads(gx0, gy0, gx1, gy1);
     };
     /**
      * Steilste Abwärtsrichtung (Falllinie) an einer Stelle. Danach richten
@@ -8130,6 +8305,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             // ----- Hauptstraße -----
             for (let k = 1; k < plan.mainWay.length; k++) clearForestAlongPath([plan.mainWay[k - 1], plan.mainWay[k]]);
             const mainRoad = addRoadCurve(plan.mainWay, 4.2);         // Ortseingang -> Kante
+            // Am Ortseingang endet die Fahrbahn in einem Wendeplatz statt stumpf im Schnee …
+            {
+                const k0 = mainRoad.findIndex(c => occAt(Math.round(c.gx), Math.round(c.gy)) !== OCC_BUILD);
+                const e0 = mainRoad[Math.max(0, k0)];
+                if (e0) addRoadDisc(e0.gx, e0.gy, 3.1);
+            }
+            // … und am Kartenrand läuft sie ins Umland weiter.
+            if (mainRoad.length > 2) addRoadBeyond(mainRoad[mainRoad.length - 1], mainRoad[mainRoad.length - 3], 4.2);
             const entryKeyV = roadKey(bx, by);
             roadEntries.push({ key: entryKeyV, gx: bx, gy: by });
             if (!carEntryKey) carEntryKey = entryKeyV;
@@ -8194,7 +8377,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             const vSpots = [];
             {
                 const COLS = 5, ROWS = 2;
-                const colStep = 1.9, rowStep = 2.6;
+                const colStep = 2.0, rowStep = 3.08;      // Mitte der aufgemalten Buchten
                 // längs = quer zur Zufahrtsrichtung, damit die Autos von der
                 // Straße aus direkt in die Lücke einbiegen
                 // Einfahrtsrichtung aus dem Pad-Yaw ableiten
@@ -9235,12 +9418,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (type === 'parking' || type === 'parkgarage') {
             const pry2 = g.rotation.y, padY2 = st.minY + 0.14;
             // Parkhaus: große Kapazität -> viele Stellplätze auf dem Vorplatz
-            const cols = type === 'parkgarage' ? [-5, -3, -1, 1, 3, 5] : [-3.5, -1.75, 0, 1.75, 3.5];
-            const zz = type === 'parkgarage' ? 6 : 2.5;
+            // Parkplatz: genau die aufgemalten Buchten, beide Reihen (vorher nur eine Reihe neben den Linien)
+            const cols = type === 'parkgarage' ? [-5, -3, -1, 1, 3, 5] : [-3, -1, 1, 3];
+            const zz = type === 'parkgarage' ? 6 : 1.54;
             const toWorld = (cx, z2) => ({ x: wx + cx * Math.cos(pry2) + z2 * Math.sin(pry2), z: wz - cx * Math.sin(pry2) + z2 * Math.cos(pry2) });
             const spots = type === 'parkgarage'
                 ? cols.flatMap(cx => [toWorld(cx, zz), toWorld(cx, zz + 2.4)])   // zwei Reihen = doppelte Kapazität
-                : cols.map(cx => toWorld(cx, zz));
+                : cols.flatMap(cx => [toWorld(cx, zz), toWorld(cx, -zz)]);
             const lot = { gx: gr.gx, gy: gr.gy, padY: padY2, spots, cap: spots.length * 10, occ: 0, basePrice: type === 'parkgarage' ? 20 : 10, price: null, income: 0, ticketPos: mainTicketPos,
                           rowYaw: pry2 };
             // ===== EINFAHRT ZUR STRASSE =====

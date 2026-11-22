@@ -2551,8 +2551,22 @@ export function makeParking(w = 8, d = 8) {
     // Stützsockel nach unten, damit der Platz an Hängen nicht frei schwebt
     const base = new THREE.Mesh(new THREE.BoxGeometry(w, 1.6, d), new THREE.MeshStandardMaterial({ color: 0x6b7280, roughness: 0.95 }));
     base.position.y = -0.75; base.receiveShadow = true; g.add(base);
-    const pad = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), new THREE.MeshStandardMaterial({ color: 0x2b2f36, roughness: 0.95 }));
+    const pad = new THREE.Mesh(new THREE.BoxGeometry(w, 0.12, d), new THREE.MeshStandardMaterial({ color: 0x737a85, roughness: 0.95 }));
     pad.position.y = 0.06; pad.receiveShadow = true; g.add(pad);
+    // Blaues P-Schild an der Ecke, damit der Platz auch aus der Ferne als Parkplatz zu lesen ist
+    {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.2, 0.1), new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.6 }));
+        post.position.set(-w / 2 + 0.35, 1.1, d / 2 - 0.35); post.castShadow = true; g.add(post);
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.08), new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.5 }));
+        plate.position.set(-w / 2 + 0.35, 2.3, d / 2 - 0.35); plate.castShadow = true; g.add(plate);
+        const white = new THREE.MeshStandardMaterial({ color: 0xf4f6fa, roughness: 0.6 });
+        for (const z of [0.045, -0.045]) {                     // das „P“ aus drei Balken, beidseitig
+            for (const [x, y, bw, bh] of [[-0.14, 0, 0.12, 0.6], [0.02, 0.24, 0.3, 0.12], [0.02, 0.0, 0.3, 0.12], [0.14, 0.12, 0.1, 0.34]]) {
+                const b = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, 0.02), white);
+                b.position.set(plate.position.x + (z > 0 ? x : -x), plate.position.y + y, plate.position.z + z); g.add(b);
+            }
+        }
+    }
     const lineMat = new THREE.MeshStandardMaterial({ color: 0xe6eaf0, roughness: 0.7 });
     // Stellplatz-Markierungen: kurze Striche für vordere & hintere Reihe + Mittelgang frei
     const bay = 2.0;

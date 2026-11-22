@@ -378,6 +378,21 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - Bodenlifte (Förderband, Teller-, Schlepplift) roden beim Bau den Wald entlang der Trasse und beschneien sie
   (`constructLift`). Gerodet werden die Bäume selbst (`clearForestAlongPath`), die Bodenart bleibt.
 
+## Straßen und Parkplätze
+- **Straßenbett** (`gradeRoad` in `Scene3D.js`): jede Straße (Ortszufahrt, Stich, selbst gebaute) formt das Gelände
+  unter sich – längs geglättet, quer eben, weich auslaufend; Bauplätze und Wasser bleiben unberührt. Ohne das
+  verschwand das Band hinter Kuppen im Boden. Die Bänder merken sich ihre Stützpunkte (`roadSeats`, `roadDiscs`)
+  und setzen sich mit `reseatRoads` neu auf, wenn sich der Boden ändert (`flattenUnderBuilding` ruft es auf).
+- **Aussehen** (`roadRibbon`): mittelgrauer Asphalt (dunkler wirkt im Bild wie ein Loch), gestrichelte Mittellinie,
+  Schneewall je Seite (`bankMat`, an den Schnee angeglichen). An Einmündungen nehmen sich die Bänder gegenseitig
+  die Wallstücke heraus (`roadLines`, `openBanks`) – egal, welche Straße zuerst da war.
+- **Zufahrt:** am Ortseingang ein Wendeplatz (`addRoadDisc`), am Kartenrand läuft die Straße im Umland weiter
+  (`addRoadBeyond`, ohne Bett, nur Kulisse – Autos erscheinen weiterhin am Rand).
+- **Stellplätze** liegen genau auf den aufgemalten Buchten von `makeParking` (beide Reihen: 8 je gebautem Parkplatz,
+  10 am Ortsparkplatz). `lot.occ` zählt Autos, `lot.cap` Gäste – „voll" heißt: jeder Stellplatz belegt
+  (`lot.taken.size >= lot.spots.length`) und kürzlich wurde ein Auto abgewiesen (`sim.parkingRejects`).
+- Prüfen: `__mtCam.roads()` liefert Bänder, Platten und Parkplätze.
+
 ## Spielstände (3D)
 - Gespeichert wird nicht die Szene, sondern **was der Spieler getan hat**: jede Bauaktion der Reihe nach
   (`logAction` in `Scene3D.js`), dazu Kontostand und Kennzahlen. `getSave()` liefert das als schlichtes Objekt,
