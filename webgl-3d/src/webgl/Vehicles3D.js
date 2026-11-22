@@ -614,10 +614,10 @@ export function makeSkiInstructor(idx = 0) {
 // Gemeinsame, gerundete Körperteile der Gäste (einmal angelegt, von allen Figuren geteilt):
 // Oberschenkel, Rumpf und Arme sind Kapseln statt Kisten – aus der Nähe wirken die Leute nicht mehr eckig.
 const GUEST_GEO = {
-    thigh: new THREE.CapsuleGeometry(0.052, 0.18, 3, 8).scale(1, 1, 1.2),
-    torso: new THREE.CapsuleGeometry(0.1, 0.11, 3, 10).scale(1.12, 1, 0.88),
-    arm: new THREE.CapsuleGeometry(0.038, 0.23, 3, 7),
-    boot: new THREE.CapsuleGeometry(0.05, 0.08, 3, 7).rotateX(Math.PI / 2).scale(1, 0.8, 1)
+    thigh: new THREE.CapsuleGeometry(0.052, 0.18, 2, 6).scale(1, 1, 1.2),
+    torso: new THREE.CapsuleGeometry(0.1, 0.11, 2, 8).scale(1.12, 1, 0.88),
+    arm: new THREE.CapsuleGeometry(0.038, 0.23, 2, 6),
+    boot: new THREE.CapsuleGeometry(0.05, 0.08, 2, 6).rotateX(Math.PI / 2).scale(1, 0.8, 1)
 };
 export function makeSkier(colorIdx = 0) {
     const g = new THREE.Group();

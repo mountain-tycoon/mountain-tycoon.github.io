@@ -3292,6 +3292,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             return { gx: a.gx + (b.gx - a.gx) * f, gy: a.gy + (b.gy - a.gy) * f };
         };
         const cats = [];   // {mesh, off}
+        if (import.meta.env.DEV && window.__mtCam) window.__mtCam.cats = () => cats;      // nur beim Entwickeln: Zustand der Raupen prüfen
         /**
          * Darf eine Pistenraupe hier fahren? Wald, Wasser, Fels und die
          * Grundflächen von Gebäuden sind tabu — gefahren wird auf freien
@@ -3300,6 +3301,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const catPassable = (gx, gy, maxSlope = 11) => {
             const x = Math.round(gx), y = Math.round(gy);
             if (x < 1 || y < 1 || x >= gridSize - 1 || y >= gridSize - 1) return false;
+            // Auf einer Piste ist IMMER frei: sie ist gerodet und gewalzt, auch wenn die Bodenart darunter noch Wald
+            // heißt oder der Hang steil ist. Sonst mieden die Raupen genau die Pisten, die sie pflegen sollen.
+            try { if (pisteCover && pisteCover.o1[y * gridSize + x] !== 0) return true; } catch { /* ganz am Anfang gibt es die Tabelle noch nicht */ }
             const lc = world.landcover[y * gridSize + x];
             if (lc === 1 || lc === 5 || lc === 6) return false;     // Wald
             if (lc === 2) return false;                             // Wasser
@@ -3514,42 +3518,82 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 // Erst wenn die Garage FERTIG gebaut ist, fährt eine Raupe aus.
                 if (i >= cap || !garagePos || !garageReady) { c.mesh.visible = false; continue; }
                 c.mesh.visible = true;
-                const tt = Math.max(0, (t * (c.speed || 0.0075)) + c.off);
-                const cyc = tt % 1;
-                // Jede Runde eine ANDERE Piste — so werden nach und nach alle präpariert
-                const cnum = Math.floor(tt);
-                const route = allPistes.length ? allPistes[(cnum * cats.length + i) % allPistes.length] : null;
-                const at = (p) => route ? pisteAt(route.path, p) : routeAt(p);
-                if (cyc < 0.10) {                                        // aus der Garage rausfahren
-                    const f = cyc / 0.10;
-                    const start = at(1);
-                    const rawX = garagePos.gx + (start.gx - garagePos.gx) * f;
-                    const rawY = garagePos.gy + (start.gy - garagePos.gy) * f;
-                    const w = catAvoid(rawX, rawY, garagePos.gx, garagePos.gy);
-                    c._target = w;
-                } else if (cyc > 0.92) {                                 // zurück in die Garage
-                    const f = (cyc - 0.92) / 0.08;
-                    const end = at(1);
-                    const rawX = end.gx + (garagePos.gx - end.gx) * f;
-                    const rawY = end.gy + (garagePos.gy - end.gy) * f;
-                    const w = catAvoid(rawX, rawY, end.gx, end.gy);
-                    c._target = w;
-                } else {                                                 // Piste rauf und runter walzen
-                    const raw = ((cyc - 0.10) / 0.82) * 2;
-                    const p = raw > 1 ? 2 - raw : raw;
-                    const g2 = at(1 - p);
-                    // PRÄPARIEREN: der überfahrene Abschnitt wird sofort frisch.
-                    // Dahinter sieht die Piste damit wieder tadellos aus.
-                    if (route && route.bed && route.bed.groom) {
-                        const gr2 = route.bed.groom;
-                        const idx2 = Math.round((1 - p) * (gr2.length - 1));
-                        for (let k = idx2 - 2; k <= idx2 + 2; k++) {
-                            if (k >= 0 && k < gr2.length) gr2[k] = 1;
+                // ===== ARBEITSWEISE =====
+                // Die Raupe fährt nicht mehr nach der Uhr hin und her, sondern dorthin, wo Arbeit ist: Sie nimmt
+                // sich die Piste mit dem schlechtesten Zustand (die noch keine andere Raupe hat), fährt zur
+                // nächstgelegenen Stelle dieser Piste, walzt sie in zwei versetzten Bahnen ab und wechselt dann
+                // direkt zur nächsten – zurück in die Garage geht es erst, wenn alles in Ordnung ist.
+                // Gewalzt wird IMMER unter der Raupe, also auch auf jeder Piste, die sie unterwegs kreuzt.
+                const here = worldToGrid(c.mesh.position.x, c.mesh.position.z);
+                const need = (r) => { const g2 = r.bed && r.bed.groom; if (!g2) return 0; let sum = 0; for (let k = 0; k < g2.length; k++) sum += g2[k]; return 1 - sum / g2.length; };
+                const pickJob = () => {
+                    let best = null, bs = 0.22;                              // erst ab spürbarem Verschleiß ausrücken
+                    for (const r of allPistes) {
+                        if (r._cat && r._cat !== c && cats.includes(r._cat) && r._cat._job === r) continue;
+                        const nd = need(r); if (nd < 0.22) continue;
+                        const d = Math.min(...[r.path[0], r.path[r.path.length - 1]].map(q => Math.hypot(q.gx - here.gx, q.gy - here.gy)));
+                        const sc = nd + 0.3 / (1 + d / 40);                  // schlechter Zustand zählt, Nähe auch
+                        if (sc > bs) { bs = sc; best = r; }
+                    }
+                    return best;
+                };
+                if (c._job && !allPistes.includes(c._job)) { c._job = null; c._st = 'home'; }
+                if (!c._st) c._st = 'idle';
+                if (c._st === 'idle') {
+                    const job = pickJob();
+                    if (!job) { c.mesh.visible = false; continue; }          // nichts zu tun: bleibt in der Garage
+                    c._job = job; job._cat = c; c._st = 'to'; c._pass = 0;
+                }
+                c.mesh.visible = true;
+                const route = c._job;
+                if (c._st === 'to' && route) {
+                    // Einstieg an der nächstgelegenen Stelle der Piste, von dort zuerst zum näheren Ende
+                    if (c._i == null) {
+                        let bi = 0, bd = Infinity;
+                        route.path.forEach((q, k) => { const d = Math.hypot(q.gx - here.gx, q.gy - here.gy); if (d < bd) { bd = d; bi = k; } });
+                        c._i = bi; c._dirS = bi < route.path.length / 2 ? -1 : 1;
+                    }
+                    const q = route.path[c._i];
+                    c._target = catAvoid(q.gx, q.gy, here.gx, here.gy);
+                    c._toT = (c._toT || 0) + (t - (c._toPrev ?? t)); c._toPrev = t;
+                    if (Math.hypot(q.gx - here.gx, q.gy - here.gy) < 3 || c._toT > 40) { c._st = 'work'; c._toT = 0; }      // spätestens nach 40 s zählt: angekommen
+                } else if (c._st === 'work' && route) {
+                    // die Piste entlang: Wegpunkt für Wegpunkt, jede Bahn seitlich versetzt
+                    const p = route.path, k = Math.max(0, Math.min(p.length - 1, c._i));
+                    const a2 = p[Math.max(0, k - 1)], b2 = p[Math.min(p.length - 1, k + 1)], l2 = Math.hypot(b2.gx - a2.gx, b2.gy - a2.gy) || 1;
+                    const lane = (c._pass % 2 ? -1 : 1) * Math.min(2.2, (route.snowW || 2.6) * 0.45);
+                    const tgx = p[k].gx - (b2.gy - a2.gy) / l2 * lane, tgy = p[k].gy + (b2.gx - a2.gx) / l2 * lane;
+                    c._target = catPassable(tgx, tgy) ? { gx: tgx, gy: tgy } : catAvoid(tgx, tgy, here.gx, here.gy);
+                    // weiter zum nächsten Wegpunkt: wenn der Zielpunkt erreicht ist – oder die Raupe nicht mehr
+                    // vorankommt (Ausweichpunkt, Hindernis): dann wird der Punkt übersprungen statt ewig angefahren
+                    c._stT = (c._stT || 0) + (t - (c._stPrev ?? t)); c._stPrev = t;
+                    if (!c._stAt || Math.hypot(c._stAt.gx - here.gx, c._stAt.gy - here.gy) > 0.6) { c._stAt = { gx: here.gx, gy: here.gy }; c._stT = 0; }
+                    if (Math.hypot(c._target.gx - here.gx, c._target.gy - here.gy) < 2.2 || Math.hypot(p[k].gx - here.gx, p[k].gy - here.gy) < 2.6 || c._stT > 3) {
+                        c._stT = 0;
+                        c._i += c._dirS;
+                        if (c._i < 0 || c._i >= p.length) {                  // Ende erreicht: wenden, nach zwei vollen Bahnen fertig
+                            c._dirS = -c._dirS; c._i = Math.max(0, Math.min(p.length - 1, c._i + c._dirS * 2)); c._pass++;
+                            if (c._pass >= 3 || need(route) < 0.06) {
+                                route._cat = null; c._job = null; c._i = null;
+                                const next = pickJob();
+                                if (next) { c._job = next; next._cat = c; c._st = 'to'; c._pass = 0; } else c._st = 'home';
+                            }
                         }
                     }
-                    const safe = catPassable(g2.gx, g2.gy) ? g2 : catAvoid(g2.gx, g2.gy, g2.gx, g2.gy);
-                    c._target = safe;
+                } else {                                                     // zurück in die Garage
+                    c._st = 'home';
+                    c._target = catAvoid(garagePos.gx, garagePos.gy, here.gx, here.gy);
+                    // angekommen: vor dem Tor (die Halle selbst ist Baufläche) – oder wenn es nicht mehr näher geht.
+                    // Gibt es inzwischen wieder Arbeit, dreht sie gleich um.
+                    c._hT = (c._hT || 0) + (t - (c._hPrev ?? t)); c._hPrev = t;
+                    if (!c._hAt || Math.hypot(c._hAt.gx - here.gx, c._hAt.gy - here.gy) > 0.6) { c._hAt = { gx: here.gx, gy: here.gy }; c._hT = 0; }
+                    const again = pickJob();
+                    if (again) { c._job = again; again._cat = c; c._st = 'to'; c._pass = 0; c._i = null; c._hT = 0; }
+                    else if (Math.hypot(garagePos.gx - here.gx, garagePos.gy - here.gy) < 6 || c._hT > 3) { c._st = 'idle'; c._i = null; c._hT = 0; c.mesh.visible = false; continue; }
                 }
+                // walzen, wo sie gerade fährt (ein paarmal je Sekunde genügt)
+                c._gAcc = (c._gAcc || 0) + (t - (c._gT ?? t)); c._gT = t;
+                if (c._gAcc > 0.3) { c._gAcc = 0; groomAround(here.gx, here.gy, c.model === '600' ? 3.0 : c.big ? 2.4 : 1.7); }
                 if (c.mesh.userData.update) c.mesh.userData.update(t);
                 // FAHRZEUGMODELL: Die Raupe FÄHRT zum Zielpunkt — sie wird
                 // nicht hingezogen. Lenken mit begrenzter Drehrate, Vortrieb
@@ -3558,7 +3602,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 const dtc = Math.min(0.1, t - (c._tPrev ?? t));
                 c._tPrev = t;
                 if (!c._prevVisible) {                                   // am Tor einsetzen
-                    const gp = worldPosSmooth(c._target.gx, c._target.gy);
+                    const gp = worldPosSmooth(garagePos.gx, garagePos.gy);
                     c.mesh.position.set(gp.x, gp.y, gp.z);
                     c._hdg = null;
                 } else driveCat(c, dtc);
@@ -3831,10 +3875,12 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const Q_MAX = QUALITY.length - 1;
     let qTier = smallTouch ? 4 : 5;              // Startstufe: Handy vorsichtiger als Rechner
     try {
-        // 'mt.quality2': seit es zwei Stufen darunter gibt; der alte Wert zählte zwei Stufen höher
-        const old = parseInt(localStorage.getItem('mt.quality'), 10);
-        const now = parseInt(localStorage.getItem('mt.quality2'), 10);
-        const stored = Number.isFinite(now) ? now : Number.isFinite(old) ? old + 2 : NaN;
+        // 'mt.quality3': neu gezählt, seit Bäume und Figuren wieder sparsamer sind (Nov. 2026). Zwischenzeitlich
+        // waren sie zu aufwendig – viele Geräte sind dabei auf die unterste Stufe (ohne Schatten) gefallen und
+        // dort geblieben. Der alte Stand gilt deshalb nur als Anhalt: zwei Stufen darüber, mindestens mit Schatten.
+        const prev = parseInt(localStorage.getItem('mt.quality2'), 10);
+        const now = parseInt(localStorage.getItem('mt.quality3'), 10);
+        const stored = Number.isFinite(now) ? now : Number.isFinite(prev) ? Math.max(2, Math.min(qTier, prev + 2)) : NaN;
         if (stored >= 0 && stored <= Q_MAX) qTier = stored;      // letzter Stand dieses Geräts
     } catch { /* privater Modus */ }
     /** Bildgröße, Auflösung und Blickwinkel an Fenster und Qualitätsstufe anpassen. */
@@ -3870,7 +3916,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             if (sun.shadow.map) { sun.shadow.map.dispose(); sun.shadow.map = null; }   // wird in neuer Größe neu angelegt
         }
         applySize();
-        try { localStorage.setItem('mt.quality2', String(qTier)); } catch { /* privater Modus */ }
+        try { localStorage.setItem('mt.quality3', String(qTier)); } catch { /* privater Modus */ }
     };
     applyQuality();
     // Messung: mittlere Bildrate je Zwei-Sekunden-Fenster. Pausen (Tab im Hintergrund)
@@ -3899,7 +3945,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 if (++qFails[qTier] >= 2) qCap = qTier - 1;
             }
             qTier--; qGood = 0; qWarm = 3; applyQuality();
-        } else if (fps > 54 && qTier < Math.min(Q_MAX, qCap) && !probing) {
+        } else if (fps > 54 && qTier < Math.min(Q_MAX, qCap) && !probing && !(skiRun && skiRun.active())) {      // beim Selbstfahren keine Probe-Stufe hinauf: jeder Wechsel stockt
             if (++qGood >= qNeed) { qTier++; qGood = 0; qWarm = 3; qProbe = 3; applyQuality(); }
         } else if (fps <= 54) qGood = 0;
     };
@@ -4543,6 +4589,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // 0.0012 ergibt bei denselben Bedingungen rund alle 30 Sekunden einen
     // Sturz, also durchgehend ein bis zwei Verletzte im Gebiet.
     const FALL_RATE = 0.0012;
+    let playerRescue = false;        // die Spielfigur fährt gerade selbst Rettung (dann rückt sonst niemand aus)
     const injured = [];              // wartende Verletzte
     const rescues = [];              // laufende Einsätze
     // (Einzel-Meshes ersetzt durch heliFleet / sledFleet)
@@ -4656,7 +4703,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
 
     /** Startet einen Einsatz für den ersten wartenden Verletzten. */
     function dispatchRescue() {
-        if (!injured.length) return;
+        if (!injured.length || playerRescue) return;       // der Spieler ist selbst mit Skidoo oder Heli unterwegs: er holt sie
         syncFleet(heliFleet, 'hospital', makeRescueHeli);
         syncFleet(sledFleet, 'medical', makeRescueSled);
         // Freie Fahrzeuge mit Station
@@ -4875,6 +4922,60 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             }
             if (downwash) updateDownwash(downwash, wpB.x, wpB.y + 0.15, wpB.z, wash, t);
         }
+    }
+    // ===== FUNK =====
+    // Die Betriebsleitung meldet sich per Funk, wenn im Gebiet etwas fehlt oder schiefläuft – immer nur das
+    // Dringendste, jedes Thema höchstens alle paar Minuten. Die Liste ist nach Dringlichkeit geordnet.
+    const radio = { wait: 22, last: {}, t: 0 };
+    function radioTick(dt) {
+        radio.t += dt; radio.wait -= dt;
+        if (!onRadio || replaying || radio.wait > 0) return;
+        const lifts = guestRoutes.filter(r => r.kind === 'lift'), pistes = guestRoutes.filter(r => r.kind === 'piste');
+        const guests = sim.active + sim.carActive, hurt = injured.length;
+        const longWait = injured.some(g => (g.hurtT || 0) > 22);
+        const queue = lifts.reduce((m, r) => Math.max(m, (r.queue || []).length), 0);
+        const fullLots = parkingLots.length > 0 && parkingLots.every(l => l.occ >= l.cap * 0.95);
+        const cats = catCapacity(), medic = built.medical + built.hospital;
+        const msgs = [
+            ['ticket',  built.ticket === 0, 'warn', 'Chef, ohne Kasse kauft niemand einen Skipass. Stell eine an den Ortsrand.'],
+            ['lift',    built.ticket > 0 && lifts.length === 0, 'warn', 'Die Kasse steht – jetzt fehlt eine Bahn den Hang hinauf.'],
+            ['piste',   lifts.length > 0 && pistes.length === 0, 'warn', 'Die Leute kommen hoch, aber nicht runter: wir brauchen eine Piste von der Bergstation ins Tal.'],
+            ['money',   money < 0, 'warn', 'Die Kasse ist im Minus. Erst Einnahmen abwarten, bevor wir weiterbauen.'],
+            ['hurtWait', longWait, 'warn', medic ? 'Ein Verletzter wartet schon viel zu lange! Schnapp dir Skidoo oder Heli und hol ihn.' : 'Ein Verletzter liegt auf der Piste und niemand kommt – wir brauchen dringend eine Sanitätsstation.'],
+            ['hurtMany', hurt >= 3, 'warn', medic ? `${hurt} Verletzte warten auf Hilfe. Eine zweite Station oder die Klinik mit Heli würde helfen.` : `${hurt} Verletzte und keine Bergrettung. Bau eine Sanitätsstation!`],
+            ['medic',   medic === 0 && guests > 45, 'tip', 'Bei so viel Betrieb passiert bald etwas. Eine Sanitätsstation wäre jetzt klug.'],
+            ['groom',   sim.groom < 50 && pistes.length > 0, 'warn', cats ? 'Die Pisten sind völlig zerfahren, die Raupen kommen nicht nach. Noch eine Garage – oder fahr selbst eine Runde.' : 'Die Pisten sind zerfahren und wir haben keine Pistenraupe. Bau eine Garage.'],
+            ['queue',   queue >= 14, 'warn', `An der Talstation stehen ${queue} Leute an. Eine zweite Bahn oder eine größere entlastet.`],
+            ['toilet',  built.toilet === 0 && guests > 35, 'warn', 'Die Gäste suchen verzweifelt ein WC. Toiletten kosten wenig und heben die Laune.'],
+            ['gastro',  totalGastro() === 0 && guests > 25, 'warn', 'Hunger am Berg! Keine einzige Hütte – ein Imbiss oder eine Hütte bringt Geld und gute Laune.'],
+            ['gastro2', totalGastro() > 0 && guests > 70 * totalGastro(), 'tip', 'Die Hütten sind überlaufen. Eine weitere Einkehr lohnt sich.'],
+            ['beds',    totalBeds() === 0 && guests > 80, 'tip', 'Alle fahren abends wieder heim. Mit einer Pension oder einem Hotel bleiben sie über Nacht.'],
+            ['parking', fullLots, 'tip', 'Die Parkplätze sind voll, Autos drehen wieder um. Mehr Stellplätze oder eine Bushaltestelle.'],
+            ['mood',    sim.satisfaction < 48 && guests > 20, 'warn', 'Die Stimmung kippt. Schau nach Wartezeiten, Pistenzustand und Einkehr.'],
+            ['powder',  (weather.powder || 0) > 0.85 && pistes.length > 0, 'good', 'Es hat kräftig geschneit – abseits der Pisten liegt jetzt richtig Tiefschnee. Wer fährt die erste Spur?'],
+            ['fine',    guests > 30 && sim.satisfaction > 82 && sim.groom > 75, 'good', 'Läuft rund hier oben: volle Pisten, gute Laune. Weiter so!']
+        ];
+        for (const [id, cond, tone, text] of msgs) {
+            if (!cond || radio.t - (radio.last[id] ?? -1e9) < (tone === 'good' ? 420 : 170)) continue;
+            radio.last[id] = radio.t; radio.wait = 28;
+            onRadio({ id, tone, text });
+            return;
+        }
+        radio.wait = 6;
+    }
+    /** Alle Pisten- und Loipenbänder im Umkreis (Rasterkoordinaten) frisch walzen; liefert die Zahl der Abschnitte. */
+    function groomAround(gx, gy, rad) {
+        let n = 0;
+        for (const bed of pisteBeds) {
+            if (!bed.groom || !bed.grid) continue;
+            const grid = bed.grid, gi = bed.gIdx, last = bed.groom.length - 1;
+            for (let v = 0, k = 0; v < gi.length; v++, k += 2) {
+                if (Math.abs(grid[k] - gx) > rad || Math.abs(grid[k + 1] - gy) > rad) continue;
+                const i = Math.min(last, gi[v]);
+                if (bed.groom[i] < 0.98) { bed.groom[i] = 1; n++; }
+            }
+        }
+        return n;
     }
     /** Geborgener Gast: erholt sich und startet wieder unten. */
     function finishRescue(g) {
@@ -6493,7 +6594,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
             guests: () => guestPool, villagesNow: () => villages, noRender: (v) => { skipRender = !!v; },
-            walkers: () => _dbgWalkers, buildPiste: (pts, width) => { if (width) pisteWidth = width; return buildPistePath(pts); }, loipen: () => loipen,
+            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim,
+            // Prüfhilfe: einen Gast an dieser Stelle verletzt hinlegen (braucht Gäste im Vorrat)
+            hurt: (gx, gy) => { const g = guestPool.find(q => !q.hurt && q.mesh); if (!g) return false; const w = worldPosSmooth(gx, gy); g.mesh.position.copy(w); g._prevPos?.copy?.(w); g.mesh.visible = true; startFall(g, { gx, gy }); return true; },
+            buildPiste: (pts, width) => { if (width) pisteWidth = width; return buildPistePath(pts); }, loipen: () => loipen,
             // Gäste und Anlagen vorspulen (Prüfungen): n Schritte zu je dt Sekunden; `each` wird nach jedem Schritt gerufen
             fastForward: (n, dt, each) => { let tt = clock.getElapsedTime(); for (let i = 0; i < n; i++) { tt += dt; for (const u of updaters) u(tt); updateGuests(tt, dt); loipen.update(dt, true); if (each) each(i); } },
             // Gebäude oder Anlage ohne Bauzeit hinstellen (Prüfungen)
@@ -6523,7 +6627,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         }
         // Ökonomie: alle ~1s ein Tick, danach HUD aktualisieren
         sim.timeAcc += dt;
-        if (sim.timeAcc >= 1) { simTick(sim.timeAcc); sim.timeAcc = 0; emitStats(); if (selectedSel && onSelect) onSelect(infoFor(selectedSel)); }
+        if (sim.timeAcc >= 1) { radioTick(sim.timeAcc); simTick(sim.timeAcc); sim.timeAcc = 0; emitStats(); if (selectedSel && onSelect) onSelect(infoFor(selectedSel)); }
         updateGuests(t, dt);
         updateRescues(t, dt);
         if (!(skiRun && skiRun.active())) orbit.step();     // laufender Kameraflug
@@ -9139,7 +9243,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     let demolishMode = false;
     let onBuildDone = null;
     let onBuildHint = null;      // Grund, warum gerade nicht gebaut werden kann (HUD)
-    let onToast = null;          // kurze Meldung im HUD (Diagnose)
+    let onToast = null;          // kurze Meldung im HUD
+    let onRadio = null;          // Funkspruch der Betriebsleitung (siehe radioTick)
     const onDemolish = (e) => {
         if (!demolishMode || skiPick || (skiRun && skiRun.active())) return;
         if (!isTap(e)) return;
@@ -9484,20 +9589,33 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             settle: (mesh, dx, dz) => settleCat(mesh, { dx, dy: dz }),
             night: () => 1 - dayNow,
             /** Alles im Umkreis frisch walzen (Pisten und Loipen). */
-            groom: (wx, wz, rad) => {
-                const gx = (wx + half) / tile, gy = (wz + half) / tile;
-                let n = 0;
-                for (const bed of pisteBeds) {
-                    if (!bed.groom || !bed.grid) continue;
-                    const grid = bed.grid, gi = bed.gIdx, last = bed.groom.length - 1;
-                    for (let v = 0, k = 0; v < gi.length; v++, k += 2) {
-                        if (Math.abs(grid[k] - gx) > rad || Math.abs(grid[k + 1] - gy) > rad) continue;
-                        const i = Math.min(last, gi[v]);
-                        if (bed.groom[i] < 0.98) { bed.groom[i] = 1; n++; }
-                    }
-                }
-                return n;
-            }
+            groom: (wx, wz, rad) => groomAround((wx + half) / tile, (wz + half) / tile, rad)
+        },
+        // Rettung selbst fahren: Skidoo an der Sanitätsstation, Heli an der Klinik
+        rescue: {
+            stations: () => placedBuildings.filter(b => b.type === 'medical' || b.type === 'hospital')
+                .map(b => ({ x: b.rec.x, z: b.rec.z, kind: b.type === 'hospital' ? 'heli' : 'sled' })),
+            make: (kind) => (kind === 'heli' ? makeRescueHeli() : makeRescueSled()),
+            settle: (mesh, dx, dz) => settleCat(mesh, { dx, dy: dz }),
+            night: () => 1 - dayNow,
+            active: (v) => { playerRescue = !!v; },
+            waiting: () => injured.filter(g => g.state === 'down' && !g.carried && g.mesh).map(g => ({ g, x: g.mesh.position.x, z: g.mesh.position.z })),
+            pickup: (g) => {
+                const i = injured.indexOf(g);
+                if (i < 0 || g.state !== 'down') return false;
+                injured.splice(i, 1); g.carried = true; g.mesh.visible = false;
+                if (g.mark) g.mark.visible = false;
+                return true;
+            },
+            /** Abgeliefert: der Gast erholt sich, es gibt eine Prämie. */
+            deliver: (g) => {
+                finishRescue(g);
+                money += 350; sim.revenue += 350; sim.dayRevenue += 350; if (onMoney) onMoney(money);
+                sim.satisfaction = Math.min(100, sim.satisfaction + 1.5);
+                sim.rescuedByPlayer = (sim.rescuedByPlayer || 0) + 1;
+            },
+            /** Fahrt abgebrochen: der Verletzte liegt wieder dort, wo er lag, und wartet. */
+            drop: (g) => { g.carried = false; g.mesh.visible = true; if (g.state === 'down' && !injured.includes(g)) injured.push(g); }
         },
         launches: () => placedBuildings.filter(b => b.type === 'paraglide').map(b => ({ x: b.rec.x, z: b.rec.z })),
         loipeDir: (wx, wz) => loipen.dirAt((wx + half) / tile, (wz + half) / tile),
@@ -9671,6 +9789,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         setOnBuildDone(cb){ onBuildDone = cb; },
         setOnBuildHint(cb){ onBuildHint = cb; },
         setOnToast(cb){ onToast = cb; },
+        setOnRadio(cb){ onRadio = cb; },
         setOnSelect(cb){ onSelect = cb; },
         /**
          * Kamera zum Problem führen. `kind` ist 'stranded' oder 'injured'.

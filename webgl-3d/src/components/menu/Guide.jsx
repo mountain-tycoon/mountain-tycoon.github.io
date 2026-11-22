@@ -24,7 +24,7 @@ const FLOW = [
     ['Level wählen', 'Die Kampagne beginnt im Schwarzwald. Jedes Level hat Aufgaben; das nächste öffnet sich, sobald sie erfüllt sind.'],
     ['Kasse, Lift, Piste', 'Dein Gebiet ist anfangs leer – nur Ort und Zufahrt stehen. Bau eine Kasse beim Ort, einen Lift den Hang hinauf und eine Piste zurück ins Tal.'],
     ['Gäste und Geld', 'Gäste kaufen an der Kasse den Skipass und fahren los. Mit den Einnahmen baust du weiter: mehr Lifte und Pisten, Hütten, Beschneiung, Pistenraupen.'],
-    ['Aufgaben erfüllen', 'Kontostand und Aufgaben hast du im Spiel immer im Blick. Sind alle erledigt, ist das Level geschafft. Der Stand wird von selbst gesichert.'],
+    ['Aufgaben erfüllen', 'Die Betriebsleitung meldet sich per Funk, wenn etwas fehlt oder ein Ziel in Reichweite ist. Kontostand und Aufgaben hast du im Spiel immer im Blick. Sind alle erledigt, ist das Level geschafft. Der Stand wird von selbst gesichert.'],
     ['Selbst fahren', 'Tippe auf „Fahren" und setz deine Figur irgendwo im Gebiet ab: Pisten, Lifte, Funpark und Halfpipe gehören dir.']
 ];
 
@@ -48,6 +48,7 @@ const CONTROLS = [
         ['Loipe', 'gelenkt wird von selbst – du gibst nur die Kraft vor: viel Kraft treibt den Puls hoch, zu lange macht müde'],
         ['Gleitschirm', 'am Startplatz abheben und ins Tal gleiten – mit Steilspirale, Wingover und Looping; der Wind fliegt mit'],
         ['Pistenraupe', 'an einer Garage einsteigen und selbst walzen: Gas, lenken, bremsen'],
+        ['Skidoo und Heli', 'an Sanitätsstation bzw. Klinik einsteigen, Verletzte holen und abliefern'],
         ['Schießstand', 'ziehen = zielen, „Schuss" löst aus – hoher Puls lässt das Visier wackeln'],
         ['Eisbahn', 'durch den Eingang aufs Eis: laufen, mit „bremsen" springen – am Puck wird daraus der Schuss aufs Tor']
     ]]

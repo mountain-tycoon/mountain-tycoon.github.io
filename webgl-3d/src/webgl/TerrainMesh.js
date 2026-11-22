@@ -252,9 +252,9 @@ export function buildForest(world, gridSize, opts = {}) {
     // Tanne: breiter und voller, drei Etagen
     const firGeo = mergeGeos([
         stem(0.08, 0.12, 0.5, 0.25),
-        treeTier(0.95, 1.05, 0.4, 6, { rot: 0.3, shade: 0.84, base: true, notch: 0.62 }),
-        treeTier(0.72, 1.0, 0.95, 6, { rot: 0.9, shade: 0.94, notch: 0.62 }),
-        treeTier(0.45, 0.95, 1.5, 5, { rot: 1.6, shade: 1.04, notch: 0.62 })
+        // (zwei Etagen wie früher: mit dreien kostete jede Tanne die Hälfte mehr – zu viel für ältere Geräte)
+        treeTier(0.95, 1.2, 0.4, 6, { rot: 0.3, shade: 0.86, base: true, notch: 0.62 }),
+        treeTier(0.62, 1.15, 1.25, 5, { rot: 0.9, shade: 1.0, notch: 0.62 })
     ]);
     // Laubbaum: Krone aus drei kantigen, unregelmäßig verbeulten Ballen (flach schattiert wie die Nadelbäume),
     // unten dunkler, oben heller.
@@ -270,9 +270,9 @@ export function buildForest(world, gridSize, opts = {}) {
         return g2;
     };
     const broadGeo = mergeGeos([
-        lump(0.62, 0, 1.18, 0, 1, 1.3),
-        lump(0.44, 0.36, 1.4, 0.14, 0, 4.1),
-        lump(0.4, -0.32, 1.32, -0.16, 0, 7.7)
+        lump(0.64, 0, 1.18, 0, 0, 1.3),
+        lump(0.46, 0.36, 1.4, 0.14, 0, 4.1),
+        lump(0.42, -0.32, 1.32, -0.16, 0, 7.7)
     ]);
     {   // Krone unten dunkler, oben heller (dasselbe Material wie die Nadelbäume verlangt ein Farbattribut)
         const p = broadGeo.attributes.position, c = new Float32Array(p.count * 3);
@@ -289,10 +289,11 @@ export function buildForest(world, gridSize, opts = {}) {
         };
         const tipOf = (len, from, yaw, tilt, f = 1) => [from[0] + Math.sin(tilt) * Math.cos(yaw) * len * f, from[1] + Math.cos(tilt) * len * f, from[2] - Math.sin(tilt) * Math.sin(yaw) * len * f];
         const parts = [stick(0.11, 0.05, 1.5, [0, 0, 0], 0, 0.03)];
-        [[0.62, 0.3, 0.95, 0.62], [0.8, 2.3, 0.9, 0.6], [0.98, 4.3, 0.8, 0.56], [1.12, 1.4, 0.7, 0.5], [1.26, 5.5, 0.6, 0.42]].forEach(([y, yaw, tilt, len]) => {
+        // vier Hauptäste, zwei davon mit Zweig – sparsam, denn JEDER Laubbaum trägt dieses Geäst
+        [[0.66, 0.3, 0.95, 0.62, 1], [0.86, 2.3, 0.9, 0.6, 0], [1.06, 4.3, 0.8, 0.54, 1], [1.24, 1.4, 0.65, 0.45, 0]].forEach(([y, yaw, tilt, len, twig]) => {
             const from = [0, y, 0];
             parts.push(stick(0.04, 0.014, len, from, yaw, tilt));
-            parts.push(stick(0.018, 0.006, len * 0.5, tipOf(len, from, yaw, tilt, 0.55), yaw + 0.9, tilt * 0.55));    // Zweig
+            if (twig) parts.push(stick(0.018, 0.006, len * 0.5, tipOf(len, from, yaw, tilt, 0.55), yaw + 0.9, tilt * 0.55));
         });
         return mergeGeos(parts);
     })();
@@ -338,7 +339,7 @@ export function buildForest(world, gridSize, opts = {}) {
     const instBroad = new THREE.InstancedMesh(broadGeo, mat, Math.max(1, groups[2].length));
     instBroad.castShadow = true;
     const instTrunk = new THREE.InstancedMesh(trunkGeo, trunkMat, Math.max(1, groups[2].length));
-    instTrunk.castShadow = true;                       // das Geäst der kahlen Bäume wirft Schatten
+    // (kein Schattenwurf des Geästs: das wären Zehntausende Zusatzdreiecke im Schattendurchgang)
 
     const dummy = new THREE.Object3D();
     const col = new THREE.Color();
@@ -409,13 +410,11 @@ export function buildForest(world, gridSize, opts = {}) {
     const capGeoSpruce = mergeGeos([
         treeTier(0.68, 1.05, 0.42, 5, { rot: 0.0, cap: 0.42 }),
         treeTier(0.56, 1.0, 0.95, 5, { rot: 0.7, cap: 0.4 }),
-        treeTier(0.43, 0.95, 1.45, 4, { rot: 1.5, cap: 0.36 }),
-        treeTier(0.28, 0.88, 1.95, 4, { rot: 2.1, cap: 0.3 })
+        treeTier(0.43, 0.95, 1.45, 4, { rot: 1.5, cap: 0.36 })
     ]);
     const capGeoFir = mergeGeos([
-        treeTier(0.95, 1.05, 0.4, 6, { rot: 0.3, cap: 0.42, notch: 0.62 }),
-        treeTier(0.72, 1.0, 0.95, 6, { rot: 0.9, cap: 0.4, notch: 0.62 }),
-        treeTier(0.45, 0.95, 1.5, 5, { rot: 1.6, cap: 0.34, notch: 0.62 })
+        treeTier(0.95, 1.2, 0.4, 6, { rot: 0.3, cap: 0.42, notch: 0.62 }),
+        treeTier(0.62, 1.15, 1.25, 5, { rot: 0.9, cap: 0.38, notch: 0.62 })
     ]);
     // Laubbaum: kleinere Haube nur auf dem Scheitel – darunter bleibt ein grüner Rand
     // (vorher saß sie wie ein Helm über der ganzen Krone).

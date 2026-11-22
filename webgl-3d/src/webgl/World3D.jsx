@@ -718,6 +718,12 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                         {ski.flying?.wind && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: ski.flying.wind.gust ? '#fcd34d' : '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>{ski.flying.wind.gust ? 'Bö · ' : ''}{ski.flying.wind.from} {ski.flying.wind.kmh} km/h</span>}
                         {ski.powder > 0 && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>Tiefschnee {ski.powder} cm</span>}
                         {ski.driving && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2' }}>{ski.driving}</span>}
+                        {ski.rescue && (
+                            <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: ski.rescue.carry ? '#86efac' : ski.rescue.waiting ? '#fcd34d' : '#9aa0a8', fontVariantNumeric: 'tabular-nums' }}>
+                                {ski.rescue.carry ? 'Verletzter an Bord · Station' : ski.rescue.waiting ? `${ski.rescue.waiting} ${ski.rescue.waiting === 1 ? 'Verletzter wartet' : 'Verletzte warten'}` : 'kein Notfall'}
+                                {ski.rescue.guide ? ` ${ski.rescue.guide.arrow} ${ski.rescue.guide.m} m` : ''}
+                            </span>
+                        )}
                         {hasPower && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginLeft: 10, alignSelf: 'center' }}>
                                 <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase', color: ski.spent ? '#f87171' : '#9aa0a8' }}>{ski.spent ? 'Erschöpft' : 'Kraft'}</span>
@@ -770,7 +776,7 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                 )}
                 {(ski.cat || ski.driving) && (
                     <button onClick={onCat} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
-                        {ski.driving ? 'Aussteigen' : 'Pistenraupe fahren'}{touch ? '' : ' (P)'}
+                        {ski.driving ? 'Aussteigen' : ski.cat === 'heli' ? 'Rettungsheli fliegen' : ski.cat === 'sled' ? 'Skidoo fahren' : 'Pistenraupe fahren'}{touch ? '' : ' (P)'}
                     </button>
                 )}
                 {ski.launch && (
@@ -795,7 +801,9 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                 )}
                 {!ski.riding && !ski.resting && !aim && !ski.hint && (touch ? ski.kmh < 4 : true) && (
                     <div style={{ ...chip, color: '#c8ccd2', fontSize: 11.5, lineHeight: 1.45 }}>
-                        {ski.driving
+                        {ski.driving === 'Rettungsheli'
+                            ? (touch ? 'Bild halten = fliegen · Seitentasten drehen · ohne Gas landet er' : 'W fliegen · A / D drehen · S bremsen · ohne Gas landet er · P aussteigen')
+                            : ski.driving
                             ? (touch ? 'Bild halten = Gas · Seitentasten lenken · beide = bremsen, dann rückwärts' : 'W Gas · A / D lenken · S bremsen, dann rückwärts · P aussteigen')
                             : ski.flying
                             ? (touch ? 'Lange einlenken = Steilspirale · links–rechts im Takt = Wingover · schnell, dann bremsen = Looping' : 'A / D lenken · lange halten = Steilspirale · im Takt wechseln = Wingover · W, dann S = Looping')
@@ -842,7 +850,35 @@ const World3D = ({ level, onExit, initialSave = null }) => {
     const [wonDismissed, setWonDismissed] = useState(false);
     const [selInfo, setSelInfo] = useState(null);   // Infofeld für angeklicktes Objekt
     const [buildHint, setBuildHint] = useState('');  // Grund, warum es gerade nicht baubar ist
-    const [toast, setToast] = useState('');           // kurze Meldung (Diagnose), verschwindet nach 25 s
+    const [radioMsg, setRadioMsg] = useState(null);     // Funkspruch der Betriebsleitung { tone, text }
+    const radioAt = useRef(0);
+    const [toast, setToast] = useState('');
+    // Funk, Teil zwei: ist länger nichts gemeldet worden, erinnert die Leitung an das nächste offene Ziel –
+    // bevorzugt eines, das schon in Reichweite ist – und meldet sich, wenn eines geschafft ist.
+    const statsRef = useRef(null);
+    const doneRef = useRef(null);
+    useEffect(() => {
+        if (!level?.objectives?.length) return undefined;
+        const say = (m) => { radioAt.current = Date.now(); setRadioMsg(m); clearTimeout(window.__radioT); window.__radioT = setTimeout(() => setRadioMsg(null), 11000); };
+        const iv = setInterval(() => {
+            const st = statsRef.current;
+            if (!st) return;
+            const res = level.objectives.map(o => ({ o, r: evaluateObjective(o, st) }));
+            const done = res.filter(x => x.r.done).map(x => objectiveLabel(x.o));
+            if (doneRef.current) {
+                const fresh = done.filter(l => !doneRef.current.includes(l));
+                const left = res.length - done.length;
+                if (fresh.length && left > 0) { doneRef.current = done; say({ tone: 'good', text: `Ziel geschafft: ${fresh[0]}. Noch ${left} ${left === 1 ? 'Ziel' : 'Ziele'} bis zum nächsten Gebiet.` }); return; }
+            }
+            doneRef.current = done;
+            if (Date.now() - radioAt.current < 75000) return;
+            const open = res.filter(x => !x.r.done).sort((a, b) => b.r.pct - a.r.pct)[0];
+            if (!open) return;
+            const near = open.r.pct > 0.6;
+            say({ tone: 'tip', text: `${near ? 'Fast geschafft' : 'Nächstes Ziel'}: ${objectiveLabel(open.o)} – Stand ${formatObjectiveValue(open.o, open.r.current)}.` });
+        }, 9000);
+        return () => clearInterval(iv);
+    }, [level]);           // kurze Meldung (Diagnose), verschwindet nach 25 s
     const rvMenu = useReveal(false);
     const rvBuild = useReveal(!!openCat || !!active);
     const rvGoals = useReveal(false);
@@ -867,11 +903,13 @@ const World3D = ({ level, onExit, initialSave = null }) => {
         api.setOnMoney((m) => setMoney(m));
         api.setOnBuildDone(() => setActive(null));
         api.setOnBuildHint?.((h) => setBuildHint(h || ''));
+        api.setOnRadio?.((m) => { radioAt.current = Date.now(); setRadioMsg(m); clearTimeout(window.__radioT); window.__radioT = setTimeout(() => setRadioMsg(null), 11000); });
         api.setOnToast?.((m) => { setToast(m); clearTimeout(window.__toastT); window.__toastT = setTimeout(() => setToast(''), 25000); });
         api.setOnSelect?.((info) => setSelInfo(info));
         api.setOnPending?.((p) => setPendingAct(p));
         api.setOnSki?.((info) => setSki(info));
         api.setOnStats((st) => {
+            statsRef.current = st;
             setStats(st);
             if ((level?.objectives?.length > 0) && level.objectives.every(o => evaluateObjective(o, st).done)) {
                 wonRef.current = true;
@@ -1450,6 +1488,15 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             <div style={{ position: 'fixed', left: 0, right: 0, bottom: skiing ? `calc(96px + ${SAFE_B})` : compact ? aboveBar : 20, zIndex: 13, boxSizing: 'border-box',
                           padding: `0 calc(8px + ${SAFE_R}) 0 calc(8px + ${SAFE_L})`,
                           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, pointerEvents: 'none' }}>
+                {radioMsg && (
+                    <div onClick={() => setRadioMsg(null)}
+                         style={{ ...chip, pointerEvents: 'auto', cursor: 'pointer', maxWidth: 'min(560px, 100%)', boxSizing: 'border-box', textAlign: 'left',
+                                  display: 'flex', flexDirection: 'column', gap: 3, padding: '9px 14px',
+                                  borderLeft: `3px solid ${radioMsg.tone === 'warn' ? '#fcd34d' : radioMsg.tone === 'good' ? '#86efac' : 'rgba(232,238,246,0.6)'}` }}>
+                        <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9aa0a8' }}>Funk · {radioMsg.who || 'Betriebsleitung'}</span>
+                        <span style={{ fontSize: 13, lineHeight: 1.4, color: '#e8eef6' }}>{radioMsg.text}</span>
+                    </div>
+                )}
                 {toast && (
                     <div style={{ ...chip, pointerEvents: 'auto', color: '#e8eaed', fontSize: 12, maxWidth: 'min(90vw, 100%)', boxSizing: 'border-box',
                                   background: 'rgba(7,15,30,0.94)', border: '1px solid rgba(255,255,255,0.35)',

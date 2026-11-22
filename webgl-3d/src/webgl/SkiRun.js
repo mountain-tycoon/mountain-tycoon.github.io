@@ -253,8 +253,45 @@ export function createSkiRun(deps) {
     let launchOffer = null, glide = null, canopy = null;
     // Tiefschnee abseits der Piste (0…1 ≙ bis rund 60 cm, je nach Wetter): bremst, macht träge, staubt
     let deepS = 0;
-    // Pistenraupe selbst fahren: Garage in Reichweite, laufende Fahrt
+    // Fahrzeuge selbst fahren: Pistenraupe (Garage), Skidoo (Sanitätsstation), Rettungsheli (Klinik).
+    // `catOffer` = Fahrzeug in Reichweite { kind, x, z }, `drive` = laufende Fahrt.
     let catOffer = null, drive = null;
+    // Walzspur der eigenen Raupe abseits der Pisten: ein breites, geripptes Band – darauf fährt es sich wie auf der Piste
+    const CT_N = 420, CT_STEP = 0.8;
+    const ctPos = new Float32Array(CT_N * 2 * 3).fill(-1e5), ctUv = new Float32Array(CT_N * 2 * 2);
+    const ctGeo = new THREE.BufferGeometry();
+    ctGeo.setAttribute('position', new THREE.BufferAttribute(ctPos, 3));
+    ctGeo.setAttribute('uv', new THREE.BufferAttribute(ctUv, 2));
+    { const idx = []; for (let i = 0; i < CT_N - 1; i++) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } ctGeo.setIndex(idx); }
+    const ctTex = (() => {                      // Rillen der Walze: feine Streifen längs der Fahrt
+        const c = document.createElement('canvas'); c.width = 64; c.height = 8;
+        const g = c.getContext('2d');
+        for (let x = 0; x < 64; x++) { const k = 232 + Math.round(Math.sin(x / 64 * Math.PI * 2 * 9) * 12); g.fillStyle = `rgb(${k},${k + 3},${k + 8})`; g.fillRect(x, 0, 1, 8); }
+        const t2 = new THREE.CanvasTexture(c); t2.wrapS = t2.wrapT = THREE.RepeatWrapping;
+        return t2;
+    })();
+    const catTrail = new THREE.Mesh(ctGeo, new THREE.MeshStandardMaterial({ map: ctTex, roughness: 0.8, side: THREE.DoubleSide,
+        polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    catTrail.frustumCulled = false; catTrail.receiveShadow = true;
+    const ctPts = [];                           // Mittelpunkte der Spur (für „hier ist gewalzt")
+    let ctLast = null, ctGap = true, ctLen = 0;
+    const stepCatTrail = (draw, width) => {
+        if (ctLast && Math.hypot(pos.x - ctLast.x, pos.z - ctLast.z) < CT_STEP) return;
+        ctLast = { x: pos.x, z: pos.z };
+        ctPos.copyWithin(0, 6); ctUv.copyWithin(0, 4);
+        const o = (CT_N - 1) * 6, ou = (CT_N - 1) * 4, rx = Math.cos(th), rz = -Math.sin(th), hw = draw ? width : 0;
+        ctLen += CT_STEP;
+        for (let k = 0; k < 2; k++) {
+            const sgn = k ? 1 : -1, x = pos.x + rx * hw * sgn, z = pos.z + rz * hw * sgn;
+            ctPos[o + k * 3] = x; ctPos[o + k * 3 + 1] = surfaceAt(x, z) + 0.07; ctPos[o + k * 3 + 2] = z;
+            ctUv[ou + k * 2] = k * Math.max(1, width / 1.4); ctUv[ou + k * 2 + 1] = ctLen * 0.2;
+        }
+        if (!draw || ctGap) for (let k = 0; k < 6; k++) ctPos[o - 6 + k] = ctPos[o + k];      // nach einer Lücke kein Band quer durchs Bild
+        ctGap = !draw;
+        if (draw) { ctPts.push({ x: pos.x, z: pos.z, w: width }); if (ctPts.length > CT_N) ctPts.shift(); }
+        ctGeo.attributes.position.needsUpdate = true; ctGeo.attributes.uv.needsUpdate = true;
+    };
+    const onCatTrack = (x, z) => { for (let i = ctPts.length - 1; i >= 0; i--) { const q = ctPts[i]; if (Math.abs(q.x - x) < q.w && Math.abs(q.z - z) < q.w) return true; } return false; };
     // Eisbahn: Schlittschuhlaufen mit kleinem Sprung und Eishockey (Puck führen, aufs Tor schießen)
     const rinkAt = deps.rinkAt || (() => null);
     let ice = false, brakeHeld = false, iceTip = false, boardT = 0;
@@ -294,7 +331,7 @@ export function createSkiRun(deps) {
     const lifts = () => routes().filter(r => r.kind === 'lift' && r.top && r.bottom);
     /** Abstand zur nächsten Pistenachse (in Einheiten), grob über die Wegpunkte. */
     const onPisteAt = (x, z) => {
-        if (loipeAt(x, z)) return true;
+        if (loipeAt(x, z) || (ctPts.length && onCatTrack(x, z))) return true;
         const gx = toG(x), gy = toG(z);
         for (const r of pistes()) {
             const w = (r.snowW || 3) + 1;
@@ -397,8 +434,9 @@ export function createSkiRun(deps) {
                 wind: glide.wind ? { kmh: Math.round(glide.wind.ws * KMH), gust: glide.wind.gust,
                     from: Math.abs(glide.wind.tail) > Math.abs(glide.wind.side) ? (glide.wind.tail > 0 ? 'Rückenwind' : 'Gegenwind') : (glide.wind.side > 0 ? 'Wind von links' : 'Wind von rechts') } : null } : null,
             powder: !ride && !rest && !shoot && !glide && !drive && deepS > 0.15 ? Math.round(deepS * 12) * 5 : 0,
-            cat: !ride && !rest && !shoot && !glide && !drive && !!catOffer,
+            cat: !ride && !rest && !shoot && !glide && !drive && catOffer ? catOffer.kind : null,
             driving: drive ? drive.name : null,
+            rescue: drive && drive.kind !== 'cat' ? { waiting: (drive.list || []).length, carry: !!drive.carry, saved: drive.saved, guide: drive.guide } : null,
             range: !ride && !rest && !shoot && !!rangeOffer,
             shooting: shoot ? { left: shoot.shots, hits: shoot.hits, done: shoot.done > 0, ring: shoot.ring / (camera.fov * Math.PI / 180), marks: shoot.sh.targets.map(m => !!m.userData.hit) } : null,
             timer: race ? fmtS(race.t) : null,
@@ -711,9 +749,10 @@ export function createSkiRun(deps) {
             for (const h of deps.huts()) { const d = Math.hypot(h.x - pos.x, h.z - pos.z); if (d < bd) { bd = d; hutOffer = h; } }
         }
         catOffer = null;
-        if (v < 3 && deps.cat) {
+        if (v < 3) {
             let bd = 11;
-            for (const r of deps.cat.garages()) { const d = Math.hypot(r.x - pos.x, r.z - pos.z); if (d < bd) { bd = d; catOffer = r; } }
+            if (deps.cat) for (const r of deps.cat.garages()) { const d = Math.hypot(r.x - pos.x, r.z - pos.z); if (d < bd) { bd = d; catOffer = { kind: 'cat', x: r.x, z: r.z }; } }
+            if (deps.rescue) for (const r of deps.rescue.stations()) { const d = Math.hypot(r.x - pos.x, r.z - pos.z) - (r.kind === 'heli' ? 4 : 0); if (d < bd) { bd = d; catOffer = { kind: r.kind, x: r.x, z: r.z }; } }
         }
         launchOffer = null;
         if (v < 5.5 && deps.launches) {
@@ -756,20 +795,51 @@ export function createSkiRun(deps) {
         if (!spent && spentAcc >= 1) { spent = true; say('Erschöpft – Kraft raus und den Puls herunterkommen lassen', 3.5); }
         if (spent && pulse < 128) { spent = false; spentAcc = 0; }
     };
+    /** Rettung: Verletzte in der Nähe aufnehmen, an der eigenen Station abliefern. */
+    const stepRescue = (dt) => {
+        const d = drive, R = deps.rescue, slow = Math.abs(v) < 2.6;
+        d.scan -= dt;
+        if (d.scan <= 0) { d.scan = 0.4; d.list = R.waiting(); }
+        let goal = null;
+        if (d.carry) {
+            goal = d.home;
+            if (slow && Math.hypot(d.home.x - pos.x, d.home.z - pos.z) < (d.kind === 'heli' ? 10 : 8)) {
+                R.deliver(d.carry); d.carry = null; d.saved++; score += 150;
+                if (d.mesh.userData.patient) d.mesh.userData.patient.visible = false;
+                if (d.mesh.userData.victim) { d.mesh.userData.victim.visible = false; d.mesh.userData.setWinch(0.05); }
+                say('Abgeliefert – gut gemacht! +350 € · +150 Punkte', 3.5); sound.thump(0.3); d.scan = 0;
+            }
+        } else {
+            let bd = Infinity;
+            for (const q of d.list || []) { const dd = Math.hypot(q.x - pos.x, q.z - pos.z); if (dd < bd) { bd = dd; goal = q; } }
+            if (goal && slow && bd < (d.kind === 'heli' ? 5.5 : 3.2) && R.pickup(goal.g)) {
+                d.carry = goal.g; d.scan = 0;
+                if (d.mesh.userData.patient) d.mesh.userData.patient.visible = true;
+                if (d.mesh.userData.victim) { d.mesh.userData.victim.visible = true; d.mesh.userData.setWinch(Math.max(0.3, d.alt * 0.5)); }
+                say('Verletzter an Bord – zurück zur Station', 3.5);
+                goal = d.home;
+            }
+        }
+        // Wegweiser fürs HUD: Entfernung und Richtung zum Ziel, relativ zur Fahrtrichtung
+        if (goal) {
+            let a = Math.atan2(goal.x - pos.x, goal.z - pos.z) - th; a = Math.atan2(Math.sin(a), Math.cos(a));
+            d.guide = { m: Math.round(Math.hypot(goal.x - pos.x, goal.z - pos.z) * 3.3 / 10) * 10, arrow: ['↑', '↖', '←', '↙', '↓', '↘', '→', '↗'][((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8] };
+        } else d.guide = null;
+    };
     /**
-     * Pistenraupe: „vorwärts" gibt Gas, „bremsen" hält an und fährt dann rückwärts, links/rechts lenkt (die
-     * Raupe dreht auch im Stand). Was sie überfährt, ist frisch gewalzt.
+     * Raupe und Skidoo: „vorwärts" gibt Gas, „bremsen" hält an und fährt dann rückwärts, links/rechts lenkt (die
+     * Raupe dreht auch im Stand). Was die Raupe überfährt, ist frisch gewalzt – abseits der Pisten bleibt eine Walzspur.
      */
     const stepCat = (dt, inp, t) => {
-        const d = drive, vmax = d.vmax * (isForest(pos.x, pos.z) ? 0.35 : 1);
+        const d = drive, sled = d.kind === 'sled', vmax = d.vmax * (isForest(pos.x, pos.z) ? 0.35 : 1);
         const want = inp.tuck && !inp.brake ? vmax : inp.brake ? (v > 0.3 ? 0 : -vmax * 0.45) : 0;
-        v += (want - v) * ease(want === 0 || Math.sign(want) !== Math.sign(v) ? 2.6 : 1.1, dt);
+        v += (want - v) * ease(want === 0 || Math.sign(want) !== Math.sign(v) ? 2.6 : sled ? 1.6 : 1.1, dt);
         const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
         steerS += (steer - steerS) * ease(4, dt);
-        th -= steerS * 0.85 * (v < -0.1 ? -1 : 1) * dt;
+        th -= steerS * (sled ? 1.5 * Math.min(1, Math.abs(v) / 1.5 + 0.25) : 0.85) * (v < -0.1 ? -1 : 1) * dt;
         const dx = Math.sin(th), dz = Math.cos(th);
         const nx = pos.x + dx * v * dt, nz = pos.z + dz * v * dt;
-        const why = blockedAt(nx + dx * Math.sign(v || 1) * 1.6, nz + dz * Math.sign(v || 1) * 1.6);
+        const why = blockedAt(nx + dx * Math.sign(v || 1) * (sled ? 0.8 : 1.6), nz + dz * Math.sign(v || 1) * (sled ? 0.8 : 1.6));
         if (why && Math.abs(v) > 0.05) {
             if (Math.abs(v) > 1 && bumpT <= 0) { bumpT = 4; say(why === 'water' ? 'Wasser – hier geht es nicht weiter' : why === 'edge' ? 'Ende des Skigebiets' : why === 'rock' ? 'Fels im Weg' : 'Gebäude im Weg'); }
             v = 0;
@@ -777,13 +847,54 @@ export function createSkiRun(deps) {
         bumpT -= dt;
         pos.y = surfaceAt(pos.x, pos.z); lastGround = pos.y;
         d.mesh.position.set(pos.x, pos.y, pos.z);
-        deps.cat.settle(d.mesh, dx, dz);
+        (sled ? deps.rescue : deps.cat).settle(d.mesh, dx, dz);
         if (d.mesh.userData.update) d.mesh.userData.update(t);
-        if (d.mesh.userData.setNight) d.mesh.userData.setNight(deps.cat.night());
-        // walzen: hinter dem Fahrzeug, in seiner Breite
-        d.acc += dt;
-        if (d.acc > 0.12 && Math.abs(v) > 0.4) { d.acc = 0; d.done += deps.cat.groom(pos.x - dx * 1.2, pos.z - dz * 1.2, d.width); }
-        stepDust(dt, Math.abs(v) > 1 && hasSnowAt(toG(pos.x), toG(pos.z)) ? 22 : 0, 0);
+        if (d.mesh.userData.setNight) d.mesh.userData.setNight((sled ? deps.rescue : deps.cat).night());
+        const snowHere = hasSnowAt(toG(pos.x), toG(pos.z));
+        if (sled) stepRescue(dt);
+        else {
+            // walzen: hinter dem Fahrzeug, in seiner Breite – auf der Piste das Band, abseits eine eigene Spur
+            d.acc += dt;
+            if (d.acc > 0.12 && Math.abs(v) > 0.4) { d.acc = 0; d.done += deps.cat.groom(pos.x - dx * 1.2, pos.z - dz * 1.2, d.width); }
+            const offPiste = snowHere && Math.abs(v) > 0.3 && !loipeAt(pos.x, pos.z) && !pistes().some(r => { const p = r.path, gx = toG(pos.x), gy = toG(pos.z); for (let i = 0; i < p.length; i += 2) if (Math.hypot(p[i].gx - gx, p[i].gy - gy) < (r.snowW || 3) + 0.5) return true; return false; });
+            stepCatTrail(offPiste, d.width * 0.55);
+        }
+        stepDust(dt, Math.abs(v) > 1 && snowHere ? (sled ? 40 : 22) : 0, 0);
+    };
+    /**
+     * Rettungsheli: „vorwärts" hebt ab und fliegt (Flughöhe hält er selbst), links/rechts dreht, ohne Gas sinkt er
+     * und landet. Über einem Verletzten langsam werden – die Winde holt ihn an Bord.
+     */
+    const stepHeli = (dt, inp, t) => {
+        const d = drive, ud = d.mesh.userData;
+        const steer = (inp.right ? 1 : 0) - (inp.left ? 1 : 0);
+        steerS += (steer - steerS) * ease(3, dt);
+        th -= steerS * 1.25 * dt;
+        const gas = inp.tuck && !inp.brake;
+        v += ((gas ? d.vmax : 0) - v) * ease(inp.brake ? 2.2 : gas ? 0.8 : 0.9, dt);
+        const dx = Math.sin(th), dz = Math.cos(th);
+        const nx = pos.x + dx * v * dt, nz = pos.z + dz * v * dt;
+        if (Math.abs(nx) > half - 6 || Math.abs(nz) > half - 6) { v = 0; if (bumpT <= 0) { bumpT = 4; say('Ende des Skigebiets'); } } else { pos.x = nx; pos.z = nz; }
+        bumpT -= dt;
+        // Flughöhe: mit Gas oder in Fahrt oben, sonst sinken und aufsetzen (über Gebäuden und Wasser bleibt er in der Luft)
+        const ground = Math.max(solidAt(pos.x, pos.z), surfaceAt(pos.x, pos.z));
+        // landen: überall im Freien – und an der eigenen Klinik (dort ist Baufläche, aber der Landeplatz)
+        const blk = blockedAt(pos.x, pos.z), canLand = !blk || (blk === 'building' && Math.hypot(d.home.x - pos.x, d.home.z - pos.z) < 13);
+        d.base += (ground - d.base) * ease(2.5, dt); if (d.base < ground) d.base = ground;
+        const wantAlt = gas || v > 1.4 || !canLand ? 8 : d.carry === null && d.hover > 0 ? 2.2 : 0;
+        d.alt += (wantAlt - d.alt) * ease(wantAlt > d.alt ? 1.3 : 0.9, dt);
+        pos.y = d.base + d.alt; lastGround = ground;
+        d.mesh.position.copy(pos);
+        d.mesh.rotation.order = 'YXZ';
+        d.mesh.rotation.set(v / d.vmax * 0.2, th, -steerS * 0.22 * Math.min(1, v / 4));
+        ud.setRotor(1);
+        if (ud.update) ud.update(t, dt);
+        if (ud.setNight) ud.setNight(deps.rescue.night());
+        stepRescue(dt);
+        // über einem Verletzten in Reichweite: tief schweben statt landen (die Winde arbeitet)
+        d.hover = !d.carry && d.guide && d.guide.m < 30 ? 1 : 0;
+        if (d.alt < 3 && hasSnowAt(toG(pos.x), toG(pos.z))) burstDust(2);
+        stepDust(dt, 0, 0);
     };
     /** Gleitschirm: gemächlich ins Tal. Links/rechts lenkt, „vorwärts" = schneller und steiler, Bremsen = langsamer. */
     const stepGlide = (dt, inp) => {
@@ -915,7 +1026,7 @@ export function createSkiRun(deps) {
             }
             return;
         }
-        if (drive) return;                                  // sitzt in der Kabine der Raupe
+        if (drive) return;                                  // sitzt im Fahrzeug
         if (glide) {
             // am Schirm: Beine leicht angezogen, Hände oben an den Steuerleinen, in der Kurve geneigt
             mesh.position.copy(pos);
@@ -1018,14 +1129,15 @@ export function createSkiRun(deps) {
             return;
         }
         if (drive) {
-            // Raupe: Kamera hoch dahinter, damit man die gewalzte Bahn und das Schild vorn sieht
+            // Fahrzeug: Kamera dahinter – bei der Raupe hoch (man sieht die gewalzte Bahn), beim Skidoo dicht, beim Heli weit
             let d = th - camTh; d = Math.atan2(Math.sin(d), Math.cos(d));
             camTh += d * ease(2, dt);
-            const cx = Math.sin(camTh), cz = Math.cos(camTh), k = ease(5, dt), back = 8.5 + drive.width;
+            const kind = drive.kind, cx = Math.sin(camTh), cz = Math.cos(camTh), k = ease(5, dt);
+            const back = kind === 'heli' ? 13 : kind === 'sled' ? 6 : 8.5 + drive.width, up = kind === 'heli' ? 4.5 : kind === 'sled' ? 2.6 : 4.4;
             const wx = pos.x - cx * back, wz = pos.z - cz * back;
             camPos.x += (wx - camPos.x) * k; camPos.z += (wz - camPos.z) * k;
-            camPos.y += (Math.max(pos.y + 4.4, solidAt(wx, wz) + 1.6) - camPos.y) * k;
-            camLook.lerp(_a.set(pos.x + cx * 3, pos.y + 1.0, pos.z + cz * 3), k);
+            camPos.y += (Math.max(pos.y + up, solidAt(wx, wz) + 1.6) - camPos.y) * k;
+            camLook.lerp(_a.set(pos.x + cx * 3, pos.y + (kind === 'heli' ? 0.4 : 1.0), pos.z + cz * 3), k);
             camera.position.copy(camPos); camera.lookAt(camLook);
             if (Math.abs(fov0 - camera.fov) > 0.05) { camera.fov += (fov0 - camera.fov) * ease(3, dt); camera.updateProjectionMatrix(); }
             return;
@@ -1185,7 +1297,12 @@ export function createSkiRun(deps) {
         stop() {
             if (!on) return null;
             endShoot();
-            if (drive) { scene.remove(drive.mesh); drive = null; }
+            if (drive) {
+                if (drive.carry) deps.rescue.drop(drive.carry);
+                if (drive.kind !== 'cat') deps.rescue.active(false);
+                scene.remove(drive.mesh); drive = null;
+            }
+            scene.remove(catTrail); ctPts.length = 0; ctPos.fill(-1e5); ctLast = null; ctGap = true;
             if (canopy) scene.remove(canopy);
             glide = null; mesh.userData.setPoles(true);
             on = false; ride = null; offer = null; rest = null; race = null;
@@ -1234,34 +1351,46 @@ export function createSkiRun(deps) {
             return true;
         },
         fire,
-        /** In die Pistenraupe steigen (nahe einer Garage) bzw. wieder aussteigen. */
+        /** In das Fahrzeug in Reichweite steigen (Raupe, Skidoo, Heli) bzw. wieder aussteigen. */
         toggleCat() {
             if (!on || ride || rest || shoot || glide) return false;
             if (drive) {
-                // aussteigen: neben die Raupe stellen, sie bleibt nicht stehen (fährt zurück in die Garage)
+                if (drive.kind === 'heli' && drive.alt > 0.6) { say('Erst landen: Gas loslassen und aufsetzen lassen', 2.6); return false; }
+                // aussteigen: neben das Fahrzeug stellen (es fährt von selbst zurück an seinen Platz)
                 const rx = Math.cos(th), rz = -Math.sin(th);
                 let spot = null;
-                for (const s of [1, -1]) { const q = { x: pos.x + rx * s * 2.6, z: pos.z + rz * s * 2.6 }; if (!blockedAt(q.x, q.z)) { spot = q; break; } }
-                const groomed = drive.done;
-                scene.remove(drive.mesh); drive = null;
+                for (const sd of [1, -1]) { const q = { x: pos.x + rx * sd * 2.6, z: pos.z + rz * sd * 2.6 }; if (!blockedAt(q.x, q.z)) { spot = q; break; } }
+                const d = drive;
+                if (d.carry) { deps.rescue.drop(d.carry); }
+                if (d.kind !== 'cat') deps.rescue.active(false);
+                scene.remove(d.mesh); drive = null;
                 mesh.visible = true;
                 if (spot) { pos.x = spot.x; pos.z = spot.z; }
                 pos.y = surfaceAt(pos.x, pos.z); lastGround = pos.y; v = 0; steerS = 0; camTh = th;
-                say(groomed > 0 ? 'Ausgestiegen – die Piste ist frisch gewalzt' : 'Ausgestiegen', 2.6);
+                say(d.kind === 'cat' ? (d.done > 0 ? 'Ausgestiegen – die Piste ist frisch gewalzt' : 'Ausgestiegen')
+                    : d.saved > 0 ? `Ausgestiegen – ${d.saved} ${d.saved === 1 ? 'Verletzter' : 'Verletzte'} versorgt` : 'Ausgestiegen', 2.8);
                 emitT = 0;
                 return true;
             }
-            if (!catOffer || !deps.cat) return false;
-            const m = deps.cat.make(), model = m.userData.model || '300';
-            scene.add(m);
-            drive = { mesh: m, name: `PistenBully ${model}`, vmax: model === '600' ? 3.6 : model === '500' ? 4.0 : 4.4,
-                width: model === '600' ? 3.4 : model === '500' ? 2.8 : 2.0, acc: 0, done: 0 };
+            if (!catOffer) return false;
+            const kind = catOffer.kind, src = kind === 'cat' ? deps.cat : deps.rescue;
+            const m = kind === 'cat' ? src.make() : src.make(kind), model = m.userData.model || '300';
+            scene.add(m); scene.add(catTrail);
+            drive = kind === 'cat'
+                ? { kind, mesh: m, name: `PistenBully ${model}`, vmax: model === '600' ? 3.6 : model === '500' ? 4.0 : 4.4,
+                    width: model === '600' ? 3.4 : model === '500' ? 2.8 : 2.0, acc: 0, done: 0 }
+                : { kind, mesh: m, name: kind === 'heli' ? 'Rettungsheli' : 'Skidoo', vmax: kind === 'heli' ? 12 : 7.5, width: 1, acc: 0, done: 0,
+                    home: { x: catOffer.x, z: catOffer.z }, carry: null, saved: 0, scan: 0, list: [], guide: null, alt: 0, base: pos.y, hover: 0 };
+            if (kind !== 'cat') deps.rescue.active(true);
             v = 0; vy = 0; air = false; jump = null; race = null; crashT = 0; steerS = 0; deepS = 0;
             walking = false; striding = false; skating = false; autoSk = false; ice = false;
             mesh.visible = false; catOffer = null;
-            m.position.copy(pos); deps.cat.settle(m, Math.sin(th), Math.cos(th));
-            say(deps.touch?.() ? 'Pistenraupe: Bild halten = Gas · Seitentasten lenken · beide = bremsen, dann rückwärts'
-                : 'Pistenraupe: W Gas · A / D lenken · S bremsen, dann rückwärts – was du überfährst, ist frisch gewalzt', 6);
+            m.visible = true; m.position.copy(pos);
+            if (kind !== 'heli') src.settle(m, Math.sin(th), Math.cos(th));
+            const T = deps.touch?.();
+            say(kind === 'cat' ? (T ? 'Pistenraupe: Bild halten = Gas · Seitentasten lenken · beide = bremsen, dann rückwärts' : 'Pistenraupe: W Gas · A / D lenken · S bremsen, dann rückwärts – was du überfährst, ist frisch gewalzt')
+                : kind === 'sled' ? (T ? 'Skidoo: Bild halten = Gas · Seitentasten lenken. Zum Verletzten fahren, langsam werden – dann zurück zur Station' : 'Skidoo: W Gas · A / D lenken · S bremsen. Zum Verletzten fahren, langsam werden – dann zurück zur Station')
+                : (T ? 'Heli: Bild halten = abheben und fliegen · Seitentasten drehen. Über dem Verletzten langsam werden – ohne Gas landet er' : 'Heli: W abheben und fliegen · A / D drehen · S bremsen. Über dem Verletzten langsam werden – ohne Gas landet er'), 7);
             emitT = 0;
             return true;
         },
@@ -1308,7 +1437,7 @@ export function createSkiRun(deps) {
                 shoot.t += dt; shoot.cool -= dt;
                 if (shoot.done > 0) { shoot.done -= dt; if (shoot.done <= 0) endShoot(); }
             }
-            else if (drive) stepCat(dt, readInput(), t);
+            else if (drive) (drive.kind === 'heli' ? stepHeli : stepCat)(dt, readInput(), t);
             else if (glide) stepGlide(dt, readInput());
             else if (ride) stepRide(dt); else s = stepSki(dt, readInput());
             sound.update({ v, carve: glide ? 0 : Math.abs(steerS) + brakeS, air: air || !!glide, snow: !walking && !drive, ride: !!ride || !!drive, cabin: !!(ride && ride.inside) });
@@ -1327,7 +1456,7 @@ export function createSkiRun(deps) {
         /** Ort der Figur (die Szene richtet den Schatten darauf aus). */
         where: () => pos,
         /** Nur für Prüfungen beim Entwickeln. */
-        __state: () => ({ deep: deepS, drive: drive && { groomed: drive.done, name: drive.name }, catOffer: !!catOffer, wind: glide && glide.wind, sport, power, spent, autoSk, glide: glide && { alt: glide.alt }, launch: !!launchOffer, ice, pulse, skating, nordic, shoot: shoot && { ax: shoot.ax, ay: shoot.ay, shots: shoot.shots, hits: shoot.hits }, range: !!rangeOffer, x: pos.x, y: pos.y, z: pos.z, th, v, air, score, crash: crashT > 0, trick: !!jump, ride: !!ride, offer: !!offer, hint: hintT > 0 ? hint : '', ahead: blockedAt(pos.x + Math.sin(th), pos.z + Math.cos(th)), forest: isForest(pos.x, pos.z) }),
+        __state: () => ({ deep: deepS, drive: drive && { groomed: drive.done, name: drive.name, kind: drive.kind, carry: !!drive.carry, saved: drive.saved, alt: drive.alt, guide: drive.guide, waiting: (drive.list || []).length }, catOffer: catOffer && catOffer.kind, track: ctPts.length, wind: glide && glide.wind, sport, power, spent, autoSk, glide: glide && { alt: glide.alt }, launch: !!launchOffer, ice, pulse, skating, nordic, shoot: shoot && { ax: shoot.ax, ay: shoot.ay, shots: shoot.shots, hits: shoot.hits }, range: !!rangeOffer, x: pos.x, y: pos.y, z: pos.z, th, v, air, score, crash: crashT > 0, trick: !!jump, ride: !!ride, offer: !!offer, hint: hintT > 0 ? hint : '', ahead: blockedAt(pos.x + Math.sin(th), pos.z + Math.cos(th)), forest: isForest(pos.x, pos.z) }),
         /** Abstand Kamera–Figur (für den Dunst). */
         viewDist: () => 8,
         dispose() { sound.dispose(); dustTex.dispose(); ac?.abort(); if (mesh) scene.remove(mesh); scene.remove(dust); scene.remove(tow); camera.near = NEAR0; on = false; }

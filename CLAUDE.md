@@ -46,7 +46,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   als Karten von unten) und `coarse` (Finger → andere Hinweistexte). Nichts darf nur per Drüberfahren
   erreichbar sein. Eigene Kamera-Knöpfe gibt es bewusst nicht – die Gesten genügen.
 - **Bildqualität** regelt sich selbst: Stufen `QUALITY` (0–6: Auflösung, Schatten, Glühen, Glättung) und Messung
-  `qualityFrame` in `Scene3D.js` (Stand je Gerät in `localStorage['mt.quality2']`). Die beiden untersten Stufen sind
+  `qualityFrame` in `Scene3D.js` (Stand je Gerät in `localStorage['mt.quality3']`). ACHTUNG: wird die Szene
+  spürbar aufwendiger, fallen ältere Geräte auf Stufe 0 (ohne Schatten) und bleiben dort – so geschehen im
+  Nov. 2026 nach aufwendigeren Bäumen. Dreiecke je Baum deshalb beim alten Budget halten; beim Selbstfahren
+  wird nicht auf Probe hochgeschaltet (jeder Wechsel stockt). Die beiden untersten Stufen sind
   für alte Geräte (gröber als der Bildschirm, zuletzt ohne Schatten). Schatten werden in JEDEM Bild neu gerechnet
   (`shEvery: 1`): sie nur jedes n-te Bild zu rechnen ergab abwechselnd kurze und lange Bilder – auf dem Tablet ein
   sichtbares Zittern. Nicht wieder einführen. Herunter geht es bei unter 30 Bildern/s
@@ -226,6 +229,24 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   im Wald nur Schritttempo, Gebäude/Wasser/Kartenrand halten auf. Was sie überfährt, wird frisch gewalzt
   (`groom` setzt `bed.groom` aller Pisten- und Loipenbänder im Umkreis auf 1). „Aussteigen" stellt die Figur daneben.
 
+- Abseits der Pisten hinterlässt die eigene Raupe eine Walzspur (`stepCatTrail`: geripptes Band der letzten rund
+  300 m); darauf fährt es sich wie auf der Piste (`onCatTrack` zählt in `onPisteAt` mit).
+
+## Rettung selbst fahren
+- Nahe einer Sanitätsstation steht das Skidoo bereit, nahe einer Klinik der Heli (`catOffer.kind`, dieselbe Taste P;
+  `deps.rescue` in der Szene). Solange der Spieler fährt, rückt sonst niemand aus (`playerRescue`).
+- `stepRescue`: in der Nähe eines Verletzten langsam werden nimmt ihn auf (`pickup`), an der eigenen Station
+  langsam werden liefert ihn ab (`deliver`: Prämie, Laune, Punkte). Das HUD zeigt Zahl der Wartenden sowie
+  Richtung und Entfernung zum Ziel. Wer mit einem Verletzten aussteigt, legt ihn wieder ab (`drop`).
+- Skidoo: fährt wie die Raupe, nur schneller. Heli (`stepHeli`): „vorwärts" hebt ab und fliegt, die Flughöhe hält
+  er selbst, ohne Gas sinkt und landet er (im Freien oder an der eigenen Klinik); aussteigen geht nur am Boden.
+
+## Funk
+- `radioTick` in `Scene3D.js`: die Betriebsleitung meldet das jeweils Dringendste (keine Kasse/Bahn/Piste, Verletzte,
+  zerfahrene Pisten, Schlangen, WC, Einkehr, Betten, Parkplätze, Stimmung – dazu Lob und Tiefschnee), jedes Thema
+  höchstens alle paar Minuten. `World3D.jsx` zeigt den Spruch (`radioMsg`) und ergänzt Erinnerungen an das nächste
+  offene Ziel sowie „Ziel geschafft". Neue Probleme einfach in die Liste `msgs` einreihen (Reihenfolge = Dringlichkeit).
+
 ## Tiefschnee
 - `weather.powder` (0…1 ≙ bis rund 60 cm): wächst bei Schneefall, setzt sich danach über Minuten (tagsüber
   schneller). Abseits von Piste und Loipe (`deepS` in `SkiRun.js`) bremst er, die Ski drehen träger, die Figur sinkt
@@ -320,6 +341,11 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `LOADING_LEVELS` und zwei Bilder: `public/levels/<id>.png` (Nummer, Name, Land sind Teil der Grafik) und
   `public/loading/<id>.png`. `python3 tools/make-level-cards.py` baut beide aus einem Bildschirmfoto und schreibt
   nach dem Umstellen der Reihenfolge die Nummern auf den Karten neu.
+- Pistenraupen arbeiten nach Bedarf (Zustände `idle`/`to`/`work`/`home` im Raupen-Updater): eine freie Raupe nimmt
+  sich die Piste mit dem schlechtesten Zustand, fährt zur nächstgelegenen Stelle, walzt sie in versetzten Bahnen
+  ab und wechselt direkt zur nächsten; in die Garage geht es erst, wenn nichts mehr zu tun ist. Gewalzt wird immer
+  unter der Raupe (`groomAround`), auch auf Pisten, die sie nur kreuzt. Pisten sind für sie immer befahrbar
+  (`catPassable` fragt zuerst `pisteCover`). Kommt sie nicht voran, überspringt sie den Wegpunkt.
 - Pistenraupen: drei Klassen – PB 300, PB 500, PB 600 Winde (`garage…`, `garage5_…`, `garage6_…`; `makeSnowcat`
   in `Vehicles3D.js`, Modell '300' | '500' | '600'). Größere Klassen präparieren mehr (`groomRate`). Am Ende von
   `makeSnowcat` werden alle festen Teile je Material zu einem Netz verschmolzen (rund 30 statt 200 Zeichenaufrufe
