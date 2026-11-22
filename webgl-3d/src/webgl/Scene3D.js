@@ -5021,7 +5021,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             ev.left -= dt;
             if (ev.def.tick) ev.def.tick(dt);
             if (ev.left <= 0) { const d = ev.def; ev = null; d.end(); evWait = 210 + Math.random() * 120; if (onEvent) onEvent(null); return; }
-            if (onEvent) onEvent({ name: ev.def.name, goal: ev.def.goal, left: Math.ceil(ev.left) });
+            // nur melden, wenn die Sekunde umspringt – sonst zeichnet das HUD in jedem Bild neu und verschluckt Klicks
+            const sec = Math.ceil(ev.left);
+            if (sec !== ev.shown) { ev.shown = sec; if (onEvent) onEvent({ name: ev.def.name, goal: ev.def.goal, left: sec }); }
             return;
         }
         evWait -= dt;
@@ -6668,7 +6670,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
             guests: () => guestPool, villagesNow: () => villages, noRender: (v) => { skipRender = !!v; },
-            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt),
+            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt), getSave: () => getSave(), loadSave: (d) => loadSave(d),
             // Prüfhilfe: einen Gast an dieser Stelle verletzt hinlegen (braucht Gäste im Vorrat)
             hurt: (gx, gy) => { const g = guestPool.find(q => !q.hurt && q.mesh); if (!g) return false; const w = worldPosSmooth(gx, gy); g.mesh.position.copy(w); g._prevPos?.copy?.(w); g.mesh.visible = true; startFall(g, { gx, gy }); return true; },
             buildPiste: (pts, width) => { if (width) pisteWidth = width; return buildPistePath(pts); }, loipen: () => loipen,
@@ -8903,6 +8905,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const onDown = (e) => {
         lastPointerType = e.pointerType || 'mouse';
         if (isTouchEvent(e)) {
+            // Erster Finger einer neuen Berührung: liegen noch alte Einträge herum (Loslassen ging verloren), wären
+            // sonst alle weiteren Antipper „Gesten“ – und es ließe sich nichts mehr bauen.
+            if (e.isPrimary) { touchIds.clear(); gestureSeen = false; }
             touchIds.add(e.pointerId);
             if (touchIds.size > 1) { gestureSeen = true; return; }   // zweiter Finger: Geste, kein Antippen
         }
