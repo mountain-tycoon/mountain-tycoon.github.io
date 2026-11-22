@@ -62,6 +62,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   `landcover === 2`; die Bodenfarbe darunter kommt aus `waterBedColor`.
 - **Gondelkabinen** der 4er-/6er-/8er-Bahnen kommen aus `makeCabinKit` in `Buildings3D.js`: Form einmal je
   Bahn, jede Kabine nur vier Teile. Teile, die sich ein Material teilen, tragen ihre Farbe als Eckfarbe.
+- **Stimmung:** Die Farbabstimmung (`gradePass`) folgt Tageszeit und Wetter (Abschnitt „STIMMUNG" in
+  `applyDaylight`): am hellen Tag die gewohnten Werte, gegen Abend golden mit kühlen Schatten und mehr Kontrast,
+  nachts kühl und gedämpft (Fenster und Strahler stechen heraus, etwas mehr Glühen über `moodBloom`), bei
+  Schneefall flach und blass. Nur die Stellwerte ändern sich – der Ausgabepfad bleibt, wie er ist.
 - **Farben:** Die Bildaufbereitung (Composer) gibt die Werte ohne Tonwert-/Farbraumstufe aus; das Bild ist darauf
   abgestimmt. Nicht nebenbei auf den direkten Renderpfad oder eine Ausgabestufe umstellen.
 - **Fallstrick:** `vertexColors: true` nur setzen, wenn die Geometrie ein Farbattribut hat – sonst wird das
@@ -71,7 +75,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Silhouette bei rund 50 Dreiecken je Fichte, Unterseite nur am untersten Kranz, Stamm dreikantig und offen).
   Eckfarben schattieren von innen (dunkel) nach außen (hell); deshalb trägt das Baum-Material jetzt
   `vertexColors` und ALLE drei Baumformen ein Farbattribut. Die Schneehauben sind dieselben Sterne, nur der
-  obere Teil (`cap`). Das Umland nutzt `treeTier` ebenfalls. Standorte sind gewürfelt und in der Zelle versetzt
+  obere Teil (`cap`). Das Umland nutzt `treeTier` ebenfalls. Laubbäume: Krone aus drei verbeulten, flach
+  schattierten Ballen (`lump`); der Stamm trägt Geäst (`trunkGeo`), das unter der Krone verschwindet. Gut ein
+  Drittel steht kahl (`bare`): dort ist die Krone auf null skaliert und nur Stamm und Geäst sind zu sehen –
+  wer Baum-Matrizen setzt, muss Krone und Stamm deshalb getrennt behandeln (siehe `place` und `reseat`). Standorte sind gewürfelt und in der Zelle versetzt
   (`treeCell`, `treeJitter`) – kein Raster, keine Reihen.
 - **Ausprobieren:** nur bei `npm run dev` gibt es `window.__mtCam` (Kamera stellen: `orbit.setState`,
   Tageszeit: `clock`/`CYCLE`, Qualitätsstufe: `quality.set`, Wetter: `weather`, Geländepunkt unter einem

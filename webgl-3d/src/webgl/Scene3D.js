@@ -6290,6 +6290,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // ===== TAG-/ABEND-ZYKLUS =====
     const dayBg = scene.background.clone();
     const eveBg = new THREE.Color(0x35496f);       // dämmriges Blau (heller als früher: die Nacht soll spielbar bleiben)
+    const _moodLift = new THREE.Color(0x121c28), _moodLiftDusk = new THREE.Color(0x10262e), _moodLiftNight = new THREE.Color(0x0e1c3c);
+    const _moodGain = new THREE.Color(0xfff8ee), _moodGainGold = new THREE.Color(0xffd9a0), _moodGainNight = new THREE.Color(0xdde6ff);
+    let moodBloom = 0;                              // zusätzliches Glühen in Dämmerung und Nacht
     const daySun = new THREE.Color(0xfff2dc), eveSun = new THREE.Color(0xffb36b); // warmes Abendlicht
     const moonSun = new THREE.Color(0xbfd3f2);     // kühles Mondlicht für die Nacht
     // Sekunden pro voller Zyklus (Tag->Abend->Nacht->Tag). Früher 110 s: da dämmerte es
@@ -6335,6 +6338,20 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         sun.color.copy(eveSun).lerp(daySun, day);
         if (deepNight > 0) sun.color.lerp(moonSun, deepNight * 0.85);
         if (glow > 0) sun.color.lerp(glowSun, glow * 0.75);
+        // ===== STIMMUNG =====
+        // Die Farbabstimmung des Bildes folgt Tageszeit und Wetter. Am hellen Tag gelten die gewohnten Werte;
+        // gegen Abend wird das Licht golden mit kühlen Schatten und mehr Kontrast, nachts kühl und gedämpft
+        // (die warmen Fenster und Strahler stechen dann heraus), bei Schneefall flach und blass.
+        if (gradePass) {
+            const u = gradePass.uniforms, fall = Math.max(0, Math.min(1, weather.snowfall || 0));
+            const gold = dusk * (0.5 + 0.5 * glow) * (1 - fall * 0.7);
+            u.uContrast.value = 1.04 + 0.07 * gold + 0.03 * deepNight - 0.05 * fall;
+            u.uSat.value = 0.94 + 0.09 * gold - 0.13 * deepNight - 0.12 * fall;
+            u.uVignette.value = 0.16 + 0.1 * dusk + 0.14 * deepNight;
+            u.uLift.value.copy(_moodLift).lerp(_moodLiftDusk, dusk * 0.6).lerp(_moodLiftNight, deepNight * 0.9);
+            u.uGain.value.copy(_moodGain).lerp(_moodGainGold, gold).lerp(_moodGainNight, deepNight * 0.8);
+            moodBloom = 0.1 * gold + 0.14 * deepNight;
+        }
         hemiLight.intensity = 0.85 + 0.30 * (1 - day);
         ambientLight.intensity = 0.26 + 0.16 * (1 - day);
         sun.position.set(-worldSpan * 0.35, worldSpan * (0.25 + 0.6 * day), worldSpan * (0.5 - 0.4 * day));
@@ -6547,7 +6564,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 // Nah am Gelände strahlten Schneekappen und Dächer als weiße Höfe aus. Das
                 // Glühen nimmt deshalb mit der Nähe ab und ist erst im Überblick voll da.
                 const far = Math.max(0, Math.min(1, (viewDistNow() - 26) / Math.max(1, worldSpan * 0.42 - 26)));
-                bloomPass.strength = 0.09 + 0.25 * far;        // im Überblick 0.34 wie bisher
+                bloomPass.strength = 0.09 + 0.25 * far + moodBloom;        // im Überblick 0.34 wie bisher; abends und nachts etwas mehr
                 bloomPass.radius = 0.46 + 0.26 * far;
                 bloomPass.threshold = 0.96 - 0.10 * far;
             }

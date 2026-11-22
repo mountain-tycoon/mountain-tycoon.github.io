@@ -256,19 +256,46 @@ export function buildForest(world, gridSize, opts = {}) {
         treeTier(0.72, 1.0, 0.95, 6, { rot: 0.9, shade: 0.94, notch: 0.62 }),
         treeTier(0.45, 0.95, 1.5, 5, { rot: 1.6, shade: 1.04, notch: 0.62 })
     ]);
-    // Laubbaum: unregelmäßige Krone aus drei versetzten Kugeln
-    const blob = (r, x, y, z, ws = 6, hs = 4) => { const b = new THREE.SphereGeometry(r, ws, hs); b.scale(1, 0.85, 1); b.translate(x, y, z); return b; };
+    // Laubbaum: Krone aus drei kantigen, unregelmäßig verbeulten Ballen (flach schattiert wie die Nadelbäume),
+    // unten dunkler, oben heller.
+    const lump = (r, x, y, z, detail, seed) => {
+        const g2 = new THREE.IcosahedronGeometry(r, detail).toNonIndexed(), p = g2.attributes.position;
+        for (let i = 0; i < p.count; i++) {
+            // dieselbe Ecke (mehrfach vorhanden) bekommt denselben Versatz: aus ihrer Lage gewürfelt
+            const px = p.getX(i), py = p.getY(i), pz = p.getZ(i);
+            const hsh = Math.sin(px * 91.7 + py * 47.3 + pz * 71.1 + seed) * 43758.5453, k = 0.8 + (hsh - Math.floor(hsh)) * 0.42;
+            p.setXYZ(i, px * k, py * k * 0.86, pz * k);
+        }
+        g2.translate(x, y, z); g2.computeVertexNormals();
+        return g2;
+    };
     const broadGeo = mergeGeos([
-        blob(0.62, 0, 1.15, 0),
-        blob(0.42, 0.34, 1.42, 0.12, 5, 3),
-        blob(0.38, -0.3, 1.35, -0.14, 5, 3)
+        lump(0.62, 0, 1.18, 0, 1, 1.3),
+        lump(0.44, 0.36, 1.4, 0.14, 0, 4.1),
+        lump(0.4, -0.32, 1.32, -0.16, 0, 7.7)
     ]);
     {   // Krone unten dunkler, oben heller (dasselbe Material wie die Nadelbäume verlangt ein Farbattribut)
         const p = broadGeo.attributes.position, c = new Float32Array(p.count * 3);
-        for (let i = 0; i < p.count; i++) { const k = 0.74 + 0.34 * Math.max(0, Math.min(1, (p.getY(i) - 0.7) / 1.1)); c[i * 3] = k; c[i * 3 + 1] = k; c[i * 3 + 2] = k; }
+        for (let i = 0; i < p.count; i++) { const k = 0.72 + 0.4 * Math.max(0, Math.min(1, (p.getY(i) - 0.7) / 1.1)); c[i * 3] = k; c[i * 3 + 1] = k; c[i * 3 + 2] = k; }
         broadGeo.setAttribute('color', new THREE.BufferAttribute(c, 3));
     }
-    const trunkGeo  = new THREE.CylinderGeometry(0.08, 0.11, 0.7, 4, 1, true); trunkGeo.translate(0, 0.35, 0);
+    // Stamm MIT Geäst: unter einer Krone verschwindet es im Laub, beim kahlen Baum (Krone ausgeblendet) ist es
+    // der ganze Baum – Hauptäste schräg nach oben, dazu ein paar Zweige.
+    const trunkGeo = (() => {
+        const stick = (r0, r1, len, from, yaw, tilt) => {
+            const c = new THREE.CylinderGeometry(r1, r0, len, 3, 1, true).toNonIndexed();
+            c.translate(0, len / 2, 0); c.rotateZ(-tilt); c.rotateY(yaw); c.translate(from[0], from[1], from[2]);
+            return c;
+        };
+        const tipOf = (len, from, yaw, tilt, f = 1) => [from[0] + Math.sin(tilt) * Math.cos(yaw) * len * f, from[1] + Math.cos(tilt) * len * f, from[2] - Math.sin(tilt) * Math.sin(yaw) * len * f];
+        const parts = [stick(0.11, 0.05, 1.5, [0, 0, 0], 0, 0.03)];
+        [[0.62, 0.3, 0.95, 0.62], [0.8, 2.3, 0.9, 0.6], [0.98, 4.3, 0.8, 0.56], [1.12, 1.4, 0.7, 0.5], [1.26, 5.5, 0.6, 0.42]].forEach(([y, yaw, tilt, len]) => {
+            const from = [0, y, 0];
+            parts.push(stick(0.04, 0.014, len, from, yaw, tilt));
+            parts.push(stick(0.018, 0.006, len * 0.5, tipOf(len, from, yaw, tilt, 0.55), yaw + 0.9, tilt * 0.55));    // Zweig
+        });
+        return mergeGeos(parts);
+    })();
 
     // Damit die Bäume in Schatten und Dämmerung nicht ins Schwarze absaufen,
     // bekommen sie ein schwaches Eigenleuchten. WICHTIG: das muss ein GRÜNTON
@@ -300,7 +327,7 @@ export function buildForest(world, gridSize, opts = {}) {
     // skaliert und graubraun eingefärbt, was den Wald aufbricht.
     spots.forEach((s, i) => {
         s.type = s.winter ? 0 : pick(s.idx);
-        s.bare = s.type === 2 && (((s.idx * 668265263) >>> 24) & 15) < 2;   // ~12% der Laubbäume
+        s.bare = s.type === 2 && (((s.idx * 668265263) >>> 24) & 15) < 6;   // gut ein Drittel der Laubbäume steht im Winter kahl
         groups[s.type].push(s);
     });
 
@@ -311,6 +338,7 @@ export function buildForest(world, gridSize, opts = {}) {
     const instBroad = new THREE.InstancedMesh(broadGeo, mat, Math.max(1, groups[2].length));
     instBroad.castShadow = true;
     const instTrunk = new THREE.InstancedMesh(trunkGeo, trunkMat, Math.max(1, groups[2].length));
+    instTrunk.castShadow = true;                       // das Geäst der kahlen Bäume wirft Schatten
 
     const dummy = new THREE.Object3D();
     const col = new THREE.Color();
@@ -330,12 +358,14 @@ export function buildForest(world, gridSize, opts = {}) {
             const scl = 0.65 + ((s.idx * 2654435761 >>> 28) & 7) / 9;
             dummy.position.set(wx, wy, wz);
             // Kahle Bäume: schmale Krone, dafür etwas höher — wirkt wie Geäst
-            const wsc = s.bare ? scl * 0.42 : scl;
-            dummy.scale.set(wsc, scl * (0.85 + ((s.idx >> 3) & 7) / 18) * (s.bare ? 1.15 : 1), wsc);
+            // Kahle Bäume: die Krone ist ausgeblendet, zu sehen ist nur Stamm und Geäst (etwas höher gewachsen)
+            const hgt = scl * (0.85 + ((s.idx >> 3) & 7) / 18);
+            dummy.scale.set(scl, hgt * (s.bare ? 1.15 : 1), scl);
             dummy.rotation.y = (s.idx % 12) * 0.52;
             dummy.updateMatrix();
-            target.setMatrixAt(i, dummy.matrix);
             if (trunkTarget) trunkTarget.setMatrixAt(i, dummy.matrix);
+            if (s.bare) { dummy.scale.setScalar(0.001); dummy.updateMatrix(); }
+            target.setMatrixAt(i, dummy.matrix);
             // Farbe: Grundton aus dem Level + leichte Variation je Baum
             // ===== FARBSPIEL IM WALD =====
             // Statt eines Einheitsgrüns bekommt jeder Baum eine eigene Nuance:
@@ -446,14 +476,14 @@ export function buildForest(world, gridSize, opts = {}) {
             const idx = sp.gy * gridSize + sp.gx;
             const tp = treePos(sp.gx, sp.gy), wx = tp[0], wy = tp[1], wz = tp[2];
             const scl = 0.65 + ((idx * 2654435761 >>> 28) & 7) / 9;
-            const wsc = sp.bare ? scl * 0.42 : scl;
             dummy.position.set(wx, wy, wz);
-            dummy.scale.set(wsc, scl * (0.85 + ((idx >> 3) & 7) / 18) * (sp.bare ? 1.15 : 1), wsc);
+            dummy.scale.set(scl, scl * (0.85 + ((idx >> 3) & 7) / 18) * (sp.bare ? 1.15 : 1), scl);
             dummy.rotation.set(0, (idx % 12) * 0.52, 0);
             dummy.updateMatrix();
+            if (sp.meshIdx === 2 && instTrunk) instTrunk.setMatrixAt(sp.index, dummy.matrix);
+            if (sp.bare) { dummy.scale.setScalar(0.001); dummy.updateMatrix(); }       // Krone bleibt ausgeblendet
             const m = meshes[sp.meshIdx];
             if (m) m.setMatrixAt(sp.index, dummy.matrix);
-            if (sp.meshIdx === 2 && instTrunk) instTrunk.setMatrixAt(sp.index, dummy.matrix);
             // Schneehaube folgt exakt derselben Transformation
             const si = snowInsts[sp.snowMesh ?? sp.meshIdx];
             if (si && sp.snowIdx != null) {
