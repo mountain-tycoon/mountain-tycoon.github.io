@@ -4432,9 +4432,12 @@ function runBanner(text, w = 5.2, h = 0.9, poleH = 3.0, bg = 0x0f172a, fg = 0xff
         foot.position.set(sx * w / 2, 0.06, 0); g.add(foot);
     }
     const tex = makeLabelTexture(text, fg, bg);
-    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, side: THREE.DoubleSide });
-    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.2, h), mat);
-    cloth.position.y = poleH - h / 2 - 0.08; cloth.castShadow = true; g.add(cloth);
+    // zwei Stoffbahnen Rücken an Rücken: die Schrift ist von oben UND von unten richtig herum zu lesen
+    const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7 });
+    for (const ry of [0, Math.PI]) {
+        const cloth = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.2, h), mat);
+        cloth.position.set(0, poleH - h / 2 - 0.08, ry ? -0.012 : 0.012); cloth.rotation.y = ry; cloth.castShadow = !ry; g.add(cloth);
+    }
     // Querrohr oben
     const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, w, 6), RUN_POLE);
     bar.rotation.z = Math.PI / 2; bar.position.y = poleH; g.add(bar);
@@ -4511,7 +4514,7 @@ function runFlood(h = 5.2) {
         housing.position.set(-0.5 + i * 0.33, h - 0.15, -0.02); housing.rotation.x = -0.55; g.add(housing);
     }
     // weicher Lichtkegel (nachts sichtbar)
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0xfff3cf, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0xfff3cf, transparent: true, opacity: 0, depthWrite: false, side: THREE.FrontSide, blending: THREE.AdditiveBlending });
     // Kegel: Spitze OBEN an der Lampe, weitet sich zum Boden hin und ist
     // zur Strecke (+z) geneigt — ConeGeometry hat die Spitze bei +y.
     const ch = h - 0.4, tilt = 0.55;
@@ -4624,16 +4627,17 @@ export function makeRunDressing(type, len) {
         g.add(pennantRun(-5.6, -hl + 1, hl - 1));
         g.add(pennantRun(5.6, -hl + 1, hl - 1));
     } else if (type === 'kicker') {
-        for (const sx of [-1, 1]) g.add(groundEl(runPole(1.4, RUN_ORANGE), sx * 2.2, 0.4));
-        for (const sx of [-1, 1]) g.add(groundEl(runPole(1.0, RUN_ORANGE), sx * 2.2, hl - 1.2));
+        for (const sx of [-1, 1]) g.add(groundEl(runPole(1.4, RUN_ORANGE), sx * 3.1, 0.2));
+        for (const sx of [-1, 1]) g.add(groundEl(runPole(1.0, RUN_ORANGE), sx * 3.1, hl - 1.2));
     } else {
         // Funpark: Banner, Wimpel, Rails neben der Linie
         g.add(groundEl(runBanner(name, 5.0, 0.85, 3.0, 0x7c2d12, 0xffedd5), 0, -hl + 0.5));
-        g.add(pennantRun(-3.4, -hl + 1, hl - 1));
-        g.add(pennantRun(3.4, -hl + 1, hl - 1));
-        g.add(groundEl(runRail(3.0), 2.2, -hl * 0.2));
-        if (len >= 10) g.add(groundEl(runRail(3.6), -2.2, hl * 0.45));
-        for (const sx of [-1, 1]) g.add(groundEl(runPole(1.2, RUN_ORANGE), sx * 2.0, hl * 0.1));
+        g.add(pennantRun(-4.6, -hl + 1, hl - 1));
+        g.add(pennantRun(4.6, -hl + 1, hl - 1));
+        // Rails und Markierstangen stehen NEBEN der Sprunglinie (die Sprünge sind rund vier Kacheln breit)
+        g.add(groundEl(runRail(3.0), 4.0, -hl * 0.2));
+        if (len >= 10) g.add(groundEl(runRail(3.6), -4.0, hl * 0.45));
+        for (const sx of [-1, 1]) g.add(groundEl(runPole(1.2, RUN_ORANGE), sx * 3.2, hl * 0.1));
     }
     return g;
 }

@@ -6010,11 +6010,13 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                         sway *= 0.2;
                         // Absprungkanten (u 0..1) je Anlage — passend zu SCULPT; die
                         // Flugphase dauert ~4.5 Kacheln, unabhängig von der Anlagenlänge
-                        const tables = rn.type === 'kicker' ? [0.5] : rn.type === 'funpark_s' ? [0.45] : rn.type === 'funpark' ? [0.28, 0.6] : [0.22, 0.48, 0.75];
+                        const tables = (PARK[rn.type]?.jumps || []).map(jd => (jd[0] + 1) / 2);
+                        // auf der glatten Schneeform fahren (sie liegt etwas über dem groben Gelände)
+                        if (PARK[rn.type]) runLift += parkHeight(rn, gx + px * sway * 0.2, gy + py * sway * 0.2);
                         const flight = 4.5 / Math.max(6, rn.s1 - rn.s0);
                         for (const tc of tables) {
                             const j = (u - tc) / flight;             // 0 Absprung .. 1 Landung
-                            if (j > 0 && j < 1) { g._run.air = Math.sin(j * Math.PI); g._run.jp = j; g._run.big = rn.type === 'funpark_l' || rn.type === 'funpark'; runLift = g._run.air * (rn.type === 'kicker' ? 3.4 : rn.type === 'funpark_l' ? 3.8 : 3.0); }
+                            if (j > 0 && j < 1) { g._run.air = Math.sin(j * Math.PI); g._run.jp = j; g._run.big = rn.type === 'funpark_l' || rn.type === 'funpark'; runLift += g._run.air * (rn.type === 'kicker' ? 3.4 : rn.type === 'funpark_l' ? 3.8 : 3.0); }
                         }
                     }
                     if (!g._usedRun || g._usedRun !== rn) {          // einmal je Anlage: Laune-Bonus
@@ -6474,9 +6476,11 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         for (const f of floodlights) {
             f.lampMat.emissiveIntensity = 0.2 + night * 2.2;
             if (f.glow) {
-                const on = night > 0.12;
+                // Strahler der Anlagen (Funpark, Halfpipe, Rennstrecke): Kegel nur als Hauch und erst bei Dunkelheit –
+                // kräftig sahen sie aus wie gelbe Zelte
+                const on = f.isFlood ? night > 0.35 : night > 0.12;
                 f.glow.visible = on;
-                if (on) f.glow.material.opacity = 0.12 + night * 0.3;
+                if (on) f.glow.material.opacity = f.isFlood ? night * 0.07 : 0.12 + night * 0.3;
             }
         }
         return day;
@@ -7240,9 +7244,28 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const tableJump = (u, c, h, lenU) => {
         const r = (u - c) / lenU;                  // −1 Anlaufbeginn .. 0 Absprung .. +1 Landung
         if (r < -1 || r > 1.1) return 0;
-        if (r <= 0) return h * sm((r + 1) / 1) * (0.55 + 0.45 * sm((r + 1)));   // ansteigend, oben flacher
-        if (r < 0.12) return h * (1 - r / 0.12);                                 // Kante
-        return -h * 0.25 * bump(r, 0.45, 0.45);                                  // kleine Landemulde
+        // Tisch-Sprung wie im echten Park: Anlauf, der zum Absprung hin steiler wird (Kick), dann ein flacher
+        // Tisch, dahinter die Landung als gleichmäßiger Hang zurück auf die Piste.
+        if (r > 1.3) return 0;
+        if (r <= 0) return h * (1 - Math.cos((r + 1) * Math.PI / 2));            // Anlauf mit Kick
+        if (r < 0.45) return h * (1 - 0.1 * r / 0.45);                           // Tisch, ganz leicht fallend
+        return h * 0.9 * (1 - sm((r - 0.45) / 0.85));                            // Landehang
+    };
+    // Sprünge je Anlage: [Lage des Absprungs (u), Höhe, Anlauflänge (Anteil der halben Anlagenlänge)], dazu
+    // die halbe Breite und kleine Wellen am Ende. Gelände, Schneeform und Fahrfläche lesen dieselbe Tabelle.
+    const PARK = {
+        kicker:    { w: 2.0, jumps: [[-0.1, 1.5, 0.75]], rollers: [] },
+        funpark_s: { w: 2.0, jumps: [[-0.2, 0.9, 0.6]], rollers: [] },
+        funpark:   { w: 2.2, jumps: [[-0.35, 1.0, 0.45], [0.55, 0.9, 0.35]], rollers: [] },
+        funpark_l: { w: 2.4, jumps: [[-0.55, 0.9, 0.3], [0.0, 1.2, 0.34], [0.55, 0.9, 0.3]], rollers: [] }
+    };
+    const parkShape = (type) => (u, a) => {
+        const P = PARK[type], w = 1 - sm((Math.abs(a) - P.w) / 1.3);
+        if (w <= 0) return 0;
+        let y = 0;
+        for (const [c, h, l] of P.jumps) y += tableJump(u, c, h, l);
+        for (const [c, wd, h] of P.rollers) y += bump(u, c, wd) * h;
+        return y * w;
     };
     const SCULPT = {
         halfpipe: (u, a) => {
@@ -7265,22 +7288,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             const shellY = x <= 1.4 ? 0 : x >= 4.7 ? 3.3 : 3.3 - Math.sqrt(Math.max(0, 3.3 * 3.3 - (x - 1.4) * (x - 1.4)));
             return (shellY - 3.3) - 0.9 + 0.05;
         },
-        kicker: (u, a) => {
-            const w = 1 - sm((Math.abs(a) - 1.7) / 1.4);
-            return tableJump(u, 0.0, 2.4, 0.8) * w;          // Anlauf ~3 Kacheln, 2.4 m Tisch
-        },
-        funpark_s: (u, a) => {
-            const w = 1 - sm((Math.abs(a) - 1.5) / 1.4);
-            return (tableJump(u, -0.1, 1.0, 0.45) + bump(u, 0.7, 0.2) * 0.45) * w;
-        },
-        funpark: (u, a) => {
-            const w = 1 - sm((Math.abs(a) - 1.6) / 1.5);
-            return (tableJump(u, -0.45, 1.1, 0.32) + tableJump(u, 0.2, 1.4, 0.32) + bump(u, 0.75, 0.14) * 0.5) * w;
-        },
-        funpark_l: (u, a) => {
-            const w = 1 - sm((Math.abs(a) - 1.8) / 1.6);
-            return (tableJump(u, -0.55, 1.1, 0.25) + tableJump(u, -0.05, 1.7, 0.3) + tableJump(u, 0.5, 1.2, 0.25) + bump(u, 0.85, 0.1) * 0.4) * w;
-        },
         racecourse: (u, a) => 0                    // Rennstrecke: Piste bleibt, nur Tore
     };
     // Halfpipe: Mulde eisig-blau (je tiefer, desto kräftiger), Deckkante als
@@ -7295,7 +7302,49 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const wall = x < 2.2 ? 0 : Math.min(1, (x - 2.2) / 2.2);
         return Math.max(lip, wall * 0.55);
     };
-    for (const k of ['kicker', 'funpark_s', 'funpark', 'funpark_l']) SCULPT[k].tint = (u, a, dh) => Math.min(0.6, Math.abs(dh) * 0.5);
+    // (Keine Einfärbung des Geländes mehr: über Kicker und Funpark liegt jetzt die glatte Schneeform.)
+    // ===== GLATTE SCHNEEFORM DER PARK-ANLAGEN =====
+    // Das Gelände hat nur einen Stützpunkt je Kachel – ein Sprung daraus sieht aus wie ein Zackenhaufen. Kicker und
+    // Funpark verändern das Gelände deshalb gar nicht mehr: sie sind eine fein gerasterte Schneefläche AUF der Piste.
+    // Dieselbe Rechnung (`parkHeight`) ist die Fahrfläche der Spielfigur und der Gäste.
+    /** Höhe der Schneeform über der Piste an dieser Stelle (Rasterkoordinaten). */
+    const parkHeight = (rn, fgx, fgy) => {
+        const rx = fgx - rn.gx, ry = fgy - rn.gy, along = rx * rn.dx + ry * rn.dy, across = -rx * rn.dy + ry * rn.dx;
+        if (Math.abs(along) > rn.hl) return 0;
+        const h = parkShape(rn.type)(along / rn.hl, across);
+        return h + 0.075 * Math.min(1, Math.abs(h) / 0.15);            // liegt knapp über dem Pistenband
+    };
+    const parkSnowMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, transparent: true });
+    matchSnowLook(parkSnowMat, snowU, 'snow-look-park');
+    /** Schneefläche der Anlage in den Koordinaten ihres Modells (lokal +z = bergab, +x = −quer). */
+    const makeParkSnow = (rn, baseY) => {
+        const P = PARK[rn.type], STEP = 0.25, W = P.w + 1.5, L = rn.hl;
+        const nx = Math.round(W * 2 / STEP), nz = Math.round(L * 2 / STEP);
+        const pos = [], col = [], idx = [];
+        for (let iz = 0; iz <= nz; iz++) for (let ix = 0; ix <= nx; ix++) {
+            const along = -L + iz * STEP, across = -W + ix * STEP, u = along / L;
+            const gx = rn.gx + along * rn.dx - across * rn.dy, gy = rn.gy + along * rn.dy + across * rn.dx;
+            const h = parkHeight(rn, gx, gy);
+            pos.push(-across * tile, yAtSmooth(gx, gy) + h - baseY, along * tile);
+            // Schnee, an steilen Flanken leicht eisig; am Absprung eine blaue Kante wie im Park.
+            // Wo keine Form liegt, ist die Fläche durchsichtig: sie läuft ohne Rand in die Piste aus.
+            let lip = 0;
+            for (const [c, , l] of P.jumps) { const r = (u - c) / l; if (r > -0.07 && r <= 0.005 && Math.abs(across) < P.w) lip = 1; }
+            const ice = Math.min(1, Math.abs(h) * 0.25), alpha = Math.min(1, Math.abs(h) / 0.14);
+            if (lip) col.push(0.16, 0.42, 0.84, alpha); else col.push(0.95 - ice * 0.07, 0.97 - ice * 0.03, 1.0, alpha);
+        }
+        for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) {
+            const a = iz * (nx + 1) + ix, b = a + 1, c = a + nx + 1, d = c + 1;
+            idx.push(a, b, c, b, d, c);          // lokal +x = −quer: so zeigt die Fläche nach oben
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+        geo.setIndex(idx); geo.computeVertexNormals();
+        const m = new THREE.Mesh(geo, parkSnowMat);
+        m.castShadow = true; m.receiveShadow = true; m.renderOrder = 2;
+        return m;
+    };
     function fallLineAt(cgx, cgy, len) {
         const R = Math.max(3, len * 0.5);
         let best = null, bestDrop = -1e9;
@@ -8878,10 +8927,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             const fall = run ? { rot: run.rot, dx: run.dx, dy: run.dy } : fallLineAt(gr.gx, gr.gy, DIRECTED[type]);
             placeRot = fall.rot;
             const sculptFn = SCULPT[type] || null;
-            // Diagnose (Konsole): Höhe von Heightmap UND Mesh an der Anlagenmitte vor/nach dem Modellieren
-            const _vi = Math.round(gr.gy) * gridSize + Math.round(gr.gx);
-            const _pa = terrain.geometry.attributes.position;
-            const _before = { hm: +(heightmap[_vi] * hScale).toFixed(2), mesh: +_pa.getY(_vi).toFixed(2) };
             let strip;
             try {
                 strip = flattenRunStrip(gr.gx, gr.gy, fall, DIRECTED[type], def.r, sculptFn);
@@ -8889,13 +8934,6 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 console.error('[Anlage] Fehler beim Modellieren des Geländes:', err);
                 if (onToast) onToast('FEHLER beim Modellieren: ' + (err && err.message));
                 strip = { midY: yAtSmooth(gr.gx, gr.gy), pitch: 0, roll: 0 };
-            }
-            {
-                const after = { hm: +(heightmap[_vi] * hScale).toFixed(2), mesh: +_pa.getY(_vi).toFixed(2) };
-                const msg = 'Diagnose ' + type + ': Mitte (' + Math.round(gr.gx) + ',' + Math.round(gr.gy) + ') · Höhe vorher ' + _before.hm + ' / Mesh ' + _before.mesh
-                    + ' → nachher ' + after.hm + ' / Mesh ' + after.mesh + ' · sculpt ' + !!sculptFn + ' · plane ' + !!(sculptFn && sculptFn.plane) + ' · v' + _pa.version + ' · Gletscher ' + (world.landcover[_vi] === 8 ? 'JA (nachgesetzt)' : 'nein');
-                console.log('[Anlage] ' + msg);
-                if (onToast) onToast(msg);
             }
             placeY = strip.midY;
             // Die Form steckt jetzt im Gelände; die Ausstattung (Tore, Banner,
@@ -8907,6 +8945,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             // mit blauen Kanten) IN der Geländemulde — die weiche Mulde allein
             // ist im Schnee kaum zu erkennen. Die Schale folgt dem Hang (Nicken/
             // Wanken), ihre Decks liegen auf dem Pistenniveau.
+            if (PARK[type]) g.add(makeParkSnow({ type, gx: gr.gx, gy: gr.gy, dx: fall.dx, dy: fall.dy, hl: DIRECTED[type] * 0.5, r: def.r }, placeY + 0.05));
             if (type === 'halfpipe') {
                 const shell = makeHalfpipeShell(15);
                 shell.rotation.order = 'YXZ';
@@ -8921,7 +8960,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 // ausblenden — nicht nur das der Zielpiste. Liegt eine zweite
                 // (überlappend gezogene oder kreuzende) Piste über der Pipe,
                 // deckte deren Band die Mulde sonst weiter zu.
-                const hl = DIRECTED[type] * 0.5, sculpted = !!SCULPT[type] && type !== 'racecourse';
+                // Nur die Halfpipe unterbricht das Pistenband (ihre Schale ersetzt es). Kicker und Funpark
+                // sind Schneeformen IN der Piste: das Band bleibt liegen und wird nur auf die neue Höhe
+                // nachgesetzt – die Schanzen wachsen aus der gewalzten Fläche heraus.
+                const hl = DIRECTED[type] * 0.5, sculpted = type === 'halfpipe';
                 const hideFn = sculpted
                     ? (gx2, gy2) => {
                         const ax = gx2 - gr.gx, ay = gy2 - gr.gy;
@@ -9403,6 +9445,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const ri = rinkAt(wx, wz);
         if (ri && Math.abs(ri.lx) < ri.rink.hw && Math.abs(ri.lz) < ri.rink.hd) return ri.y;
         const q = skiRunAt(wx, wz);
+        if (q && PARK[q.type]) {                       // Kicker/Funpark: auf der glatten Schneeform fahren, nicht auf dem groben Gelände
+            return base + parkHeight(q.rn, (wx + half) / tile, (wz + half) / tile);
+        }
         if (!q || q.type !== 'halfpipe' || !q.rn.strip) return base;
         const u = Math.abs(q.along / q.hl), x = Math.abs(q.across) / tile;
         if (u > 0.9 || x >= 4.9) return base;

@@ -137,8 +137,12 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   (`hop`), nach Sprüngen federt sie ab und wirft eine Schneewolke (`burstDust`). Die Kamera weitet mit dem Tempo
   den Bildwinkel, legt sich in die Kurve und rüttelt bei hoher Fahrt leicht. Hinter den Skiern bleiben Spuren
   (`stepTrail`, ein Band der letzten Meter).
-- Anlagen (`skiRunAt` in der Szene liefert Art, Lage längs/quer und Achse): Kicker und Funpark stehen im Gelände,
-  der Sprung ergibt sich aus der Fahrphysik. Halfpipe: gefahren wird auf der SCHALE (`skiSurfaceAt`, dieselbe
+- Anlagen (`skiRunAt` in der Szene liefert Art, Lage längs/quer und Achse): Kicker und Funpark sind glatte
+  Schneeformen AUF der Piste (`PARK`, `parkShape`, `makeParkSnow` in `Scene3D.js`): Tischsprünge mit Anlauf,
+  Tisch und Landehang, blaue Absprungkante, zum Rand hin durchsichtig auslaufend. Sie verändern das Gelände NICHT
+  (ein Stützpunkt je Kachel ergab nur Zackenhaufen) und unterbrechen das Pistenband nicht – nur die Halfpipe
+  ersetzt es durch ihre Schale. `parkHeight` ist zugleich die Fahrfläche für Spielfigur (`skiSurfaceAt`) und Gäste;
+  der Sprung ergibt sich aus der Fahrphysik. Die Lichtkegel der Anlagen-Strahler sind nur ein Hauch (`isFlood`). Halfpipe: gefahren wird auf der SCHALE (`skiSurfaceAt`, dieselbe
   Formel wie bei den Gästen), nicht in der tieferen Mulde; in der Rinne gibt es etwas Schwung dazu, an der Kante
   geht es hoch, die Fahrtrichtung wird an der Pipe-Achse gespiegelt, und die Figur treibt in der Luft zurück in
   die Wand und talwärts. Die Kamera steht dort über der Rinne und schaut sie hinunter (nie hinter dem
