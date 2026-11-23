@@ -157,7 +157,9 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Anlage oder mit kräftigem Absprung). Gelandet wird sauber, wenn auf halbe Drehungen bzw. ganze Salti
   ausgedreht ist – dann gibt es Namen und Punkte (Pipe ×1,5), sonst einen Sturz (`crashT`).
 - Einkehr: nahe einem Gastro-Gebäude (`HUT_NAMES`) bietet das HUD „Einkehren" an (`toggleHut`): Ski geschultert,
-  die Kamera kreist langsam um die Stelle, Blick durch Ziehen drehbar.
+  die Kamera kreist langsam um die Stelle, Blick durch Ziehen drehbar. Dazu zwei Stammtisch-Spiele im HUD (`HutGames`
+  in `World3D.jsx`): „17 und 4" gegen den Wirt und Nageln (Zeiger pendelt, in der Mitte zuschlagen, drei Schläge).
+  Gespielt wird um Punkte (`skiAddScore`).
 - Ton: `SkiSound.js` erzeugt alles aus Rauschen und Summern (Fahrtwind, Kanten, Liftsurren, Landung), keine
   Dateien. Start erst aus einer Eingabe heraus; „Ton an/aus" im HUD, gespeichert in `localStorage['mt.skiSound']`.
 - Lift: nahe einer Talstation bietet das HUD die Bergfahrt an. Die Figur wartet auf das nächste Fahrzeug der
@@ -229,6 +231,9 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   im Wald nur Schritttempo, Gebäude/Wasser/Kartenrand halten auf. Was sie überfährt, wird frisch gewalzt
   (`groom` setzt `bed.groom` aller Pisten- und Loipenbänder im Umkreis auf 1). „Aussteigen" stellt die Figur daneben.
 
+- Schnee schieben: auf Schnee füllt sich das Schild (`drive.load`, im HUD „Schild … %"), auf aperem Boden legt die Raupe
+  daraus ein Schneeband, bis der Vorrat leer ist. Das Band ist die Walzspur und vergeht mit ihr; für die Spielfigur
+  zählt es als Schnee (`onCatTrack`).
 - Abseits der Pisten hinterlässt die eigene Raupe eine Walzspur (`stepCatTrail`: geripptes Band der letzten rund
   300 m); darauf fährt es sich wie auf der Piste (`onCatTrack` zählt in `onPisteAt` mit).
 
@@ -238,8 +243,16 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - `stepRescue`: in der Nähe eines Verletzten langsam werden nimmt ihn auf (`pickup`), an der eigenen Station
   langsam werden liefert ihn ab (`deliver`: Prämie, Laune, Punkte). Das HUD zeigt Zahl der Wartenden sowie
   Richtung und Entfernung zum Ziel. Wer mit einem Verletzten aussteigt, legt ihn wieder ab (`drop`).
-- Skidoo: fährt wie die Raupe, nur schneller. Heli (`stepHeli`): „vorwärts" hebt ab und fliegt, die Flughöhe hält
-  er selbst, ohne Gas sinkt und landet er (im Freien oder an der eigenen Klinik); aussteigen geht nur am Boden.
+- Skidoo (`makeRescueSled` in `Vehicles3D.js`, auch das gelbe der Werkstatt): fährt wie die Raupe, nur schneller und
+  wendiger; es legt sich in die Kurve, hebt beim Gasgeben die Nase und nickt beim Bremsen (`userData.setLean`, alles
+  außer dem Akja hängt dafür in `core`). Die Materialfarben sind Kennfarben fürs Umfärben – nicht ändern.
+- Heli (`stepHeli`): „vorwärts" fliegt, „bremsen" hält an und setzt dann langsam zurück, links/rechts dreht. Steigen und
+  Sinken macht der Pilot selbst (R / F, am Handy die Tasten ▲ ▼ – `HeliPad`); die Höhe zählt über Grund, über einem Hang
+  steigt er also mit. Gas am Boden hebt ein Stück ab. Aufnehmen geht nur tief (`HELI.pickAlt`) und langsam über dem
+  Verletzten, abliefern gelandet an der eigenen Klinik; über Häusern, Wasser und Fels setzt er nicht auf.
+- Leitsystem (`stepBeacon`, für Skidoo und Heli): eine Lichtsäule mit Ring steht über dem Ziel – rot über dem nächsten
+  Verletzten, grün über der eigenen Station. Das HUD zeigt Pfeil, Entfernung und beim Heli die Höhe; nah am Ziel sagt
+  es an, was fehlt (tiefer, langsamer, landen).
 
 ## Funk
 - `radioTick` in `Scene3D.js`: die Betriebsleitung meldet das jeweils Dringendste (keine Kasse/Bahn/Piste, Verletzte,

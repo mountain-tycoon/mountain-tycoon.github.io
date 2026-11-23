@@ -866,53 +866,71 @@ export function makeAlertMark(color = 0xef4444) {
  * wird. Das Blaulicht blinkt über `userData.update`.
  */
 export function makeRescueSled() {
-    const g = new THREE.Group();
-    const red = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.5 });
+    // Motorschlitten mit Fahrer und Akja. Alles außer dem Akja hängt in `core`, damit sich der Schlitten in die Kurve
+    // legen und beim Gasgeben die Nase heben kann (`userData.setLean`). Die Farben der Materialien sind Kennfarben:
+    // die Werkstatt färbt Rumpf (0xdc2626), Fahrer (0xf97316) und Blinklicht (0x60a5fa) um.
+    const g = new THREE.Group(), core = new THREE.Group();
+    g.add(core);
+    const red = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.42, metalness: 0.1 });
     const dark = new THREE.MeshStandardMaterial({ color: 0x1f2937, roughness: 0.8 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.26, 1.15), red);
-    body.position.y = 0.34; body.castShadow = true; g.add(body);
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.34), red);
-    nose.position.set(0, 0.3, 0.66); nose.rotation.x = -0.25; g.add(nose);
-    const shield = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.24),
-        new THREE.MeshStandardMaterial({ color: 0x9fb6c9, transparent: true, opacity: 0.7, side: THREE.DoubleSide }));
-    shield.position.set(0, 0.56, 0.42); shield.rotation.x = -0.5; g.add(shield);
-    const track = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.2, 0.8), dark);
-    track.position.set(0, 0.12, -0.2); g.add(track);
+    const steel = new THREE.MeshStandardMaterial({ color: 0x9aa3ad, roughness: 0.4, metalness: 0.6 });
+    const add = (geo, mat, x, y, z, rx = 0, ry = 0, rz = 0, sh = false) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); m.castShadow = sh; core.add(m); return m; };
+    // Tunnel mit Raupe (rund auslaufend), Trittbretter
+    add(new THREE.CapsuleGeometry(0.16, 0.95, 4, 10), dark, 0, 0.17, -0.3, Math.PI / 2, 0, 0).scale.set(1.15, 1, 0.85);
+    add(new THREE.BoxGeometry(0.42, 0.1, 1.05), red, 0, 0.36, -0.28, 0, 0, 0, true);
+    for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.12, 0.03, 0.9), dark, sx * 0.27, 0.2, -0.05);
+    // Haube: nach vorn abfallend und schmaler werdend, mit Scheinwerfer und Lufteinlass
+    const hood = add(new THREE.CapsuleGeometry(0.22, 0.42, 4, 12), red, 0, 0.42, 0.42, Math.PI / 2 - 0.22, 0, 0, true); hood.scale.set(1.05, 1, 0.72);
+    add(new THREE.BoxGeometry(0.36, 0.16, 0.3), red, 0, 0.3, 0.72, -0.5, 0, 0, true);
+    add(new THREE.BoxGeometry(0.2, 0.06, 0.04), new THREE.MeshStandardMaterial({ color: 0xfff6d8, emissive: 0xffe9a8, emissiveIntensity: 1.6 }), 0, 0.4, 0.83, -0.35, 0, 0);
+    add(new THREE.BoxGeometry(0.3, 0.03, 0.14), dark, 0, 0.52, 0.42, -0.22, 0, 0);
+    // Scheibe, Lenker mit Griffen, Sitzbank mit Lehne
+    add(new THREE.PlaneGeometry(0.36, 0.3), new THREE.MeshStandardMaterial({ color: 0xa9c4d8, transparent: true, opacity: 0.55, side: THREE.DoubleSide, roughness: 0.15 }), 0, 0.72, 0.38, -0.55, 0, 0);
+    add(new THREE.CylinderGeometry(0.018, 0.018, 0.5, 6), dark, 0, 0.7, 0.22, 0, 0, Math.PI / 2);
+    add(new THREE.CylinderGeometry(0.02, 0.02, 0.26, 6), steel, 0, 0.6, 0.27, -0.45, 0, 0);
+    for (const sx of [-1, 1]) add(new THREE.CylinderGeometry(0.026, 0.026, 0.1, 6), dark, sx * 0.27, 0.7, 0.22, 0, 0, Math.PI / 2);
+    add(new THREE.CapsuleGeometry(0.13, 0.52, 3, 8), dark, 0, 0.48, -0.3, Math.PI / 2, 0, 0).scale.set(1.2, 1, 0.6);
+    add(new THREE.BoxGeometry(0.3, 0.2, 0.06), dark, 0, 0.6, -0.68, 0.2, 0, 0);
+    // Vorderski an Querlenkern mit Federbein
     for (const sx of [-1, 1]) {
-        const ski = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.6), dark);
-        ski.position.set(sx * 0.22, 0.06, 0.5); g.add(ski);
-        const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.26), dark);
-        strut.position.set(sx * 0.22, 0.2, 0.5); g.add(strut);
+        const ski = add(new THREE.BoxGeometry(0.1, 0.035, 0.78), dark, sx * 0.34, 0.035, 0.52);
+        const tip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.03, 0.16), dark); tip.position.set(0, 0.04, 0.44); tip.rotation.x = -0.6; ski.add(tip);
+        add(new THREE.CylinderGeometry(0.018, 0.018, 0.36, 6), steel, sx * 0.22, 0.2, 0.52, 0, 0, sx * 0.95);
+        add(new THREE.CylinderGeometry(0.03, 0.03, 0.26, 8), red, sx * 0.3, 0.2, 0.5, 0.25, 0, sx * 0.35);
     }
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.42), dark);
-    bar.rotation.z = Math.PI / 2; bar.position.set(0, 0.62, 0.3); g.add(bar);
-    const rider = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.4, 0.2),
-        new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.7 }));
-    rider.position.set(0, 0.68, 0.02); g.add(rider);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 10),
-        new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.5 }));
-    head.position.set(0, 0.96, 0.02); g.add(head);
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8),
-        new THREE.MeshStandardMaterial({ color: 0x60a5fa, emissive: 0x2563eb, emissiveIntensity: 2 }));
-    beacon.position.set(0, 0.54, -0.42); g.add(beacon);
+    // Fahrer: nach vorn gebeugt, Arme am Lenker, Knie am Tunnel
+    const suit = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.7 });
+    const helmet = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.35 });
+    add(new THREE.CapsuleGeometry(0.13, 0.3, 3, 8), suit, 0, 0.86, -0.18, 0.42, 0, 0, true);
+    add(new THREE.SphereGeometry(0.115, 12, 10), helmet, 0, 1.16, -0.03);
+    add(new THREE.BoxGeometry(0.17, 0.06, 0.04), dark, 0, 1.17, 0.07);
+    for (const sx of [-1, 1]) {
+        add(new THREE.CapsuleGeometry(0.045, 0.34, 3, 6), suit, sx * 0.2, 0.86, 0.05, 1.15, 0, sx * -0.28);
+        add(new THREE.CapsuleGeometry(0.06, 0.3, 3, 6), suit, sx * 0.17, 0.58, -0.08, 1.25, 0, 0);
+        add(new THREE.CapsuleGeometry(0.055, 0.28, 3, 6), dark, sx * 0.2, 0.36, 0.06, 0.2, 0, 0);
+    }
+    const beacon = add(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshStandardMaterial({ color: 0x60a5fa, emissive: 0x2563eb, emissiveIntensity: 2 }), 0, 0.76, -0.68);
     // Akja am Heck: flache Wanne, der Patient wird sichtbar geschaltet
     const akja = new THREE.Group();
-    const tub = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 1.0),
-        new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.6 }));
-    tub.position.y = 0.14; akja.add(tub);
+    const tub = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.7, 3, 10), new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.6 }));
+    tub.rotation.x = Math.PI / 2; tub.scale.set(1.05, 1, 0.45); tub.position.y = 0.13; akja.add(tub);
     for (const sx of [-1, 1]) {
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.1, 1.0), dark);
-        rail.position.set(sx * 0.23, 0.16, 0); akja.add(rail);
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 1.0), dark);
+        rail.position.set(sx * 0.22, 0.2, 0); akja.add(rail);
     }
-    const draw = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5), dark);
+    const draw = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5), steel);
     draw.rotation.x = Math.PI / 2; draw.position.set(0, 0.2, 0.72); akja.add(draw);
-    const patient = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.16, 0.8),
+    const patient = new THREE.Mesh(new THREE.CapsuleGeometry(0.13, 0.5, 3, 8),
         new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.85 }));
-    patient.position.y = 0.28; patient.visible = false; akja.add(patient);
-    akja.position.set(0, 0, -1.15); g.add(akja);
+    patient.rotation.x = Math.PI / 2; patient.position.y = 0.26; patient.visible = false; akja.add(patient);
+    akja.position.set(0, 0, -1.3); g.add(akja);
     g.userData.patient = patient;
+    let bob = 0;
+    /** Schräglage (rad, + = nach rechts), Nicken (rad, + = Nase hoch) und Tempoanteil 0…1 fürs Rütteln. */
+    g.userData.setLean = (roll, pitch, speed = 0) => { core.rotation.z = -roll; core.rotation.x = -pitch; bob = speed; akja.rotation.y = roll * 0.5; };
     g.userData.update = (t) => {
         beacon.material.emissiveIntensity = 1 + Math.abs(Math.sin(t * 7)) * 3;
+        core.position.y = Math.sin(t * 31) * 0.012 * bob;
     };
     return g;
 }

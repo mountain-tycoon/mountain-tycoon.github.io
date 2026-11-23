@@ -10417,6 +10417,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         pickSki(on){ pickSki(on); },
         stopSki(){ stopSki(); },
         skiInput(part){ skiRun.setInput(part); },
+        skiAddScore(n){ skiRun.addScore(n); },
         skiTakeLift(){ return skiRun.takeLift(); },
         skiToggleHut(){ return skiRun.toggleHut(); },
         skiSound(on){ skiRun.setSound(on); },

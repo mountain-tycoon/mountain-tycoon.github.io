@@ -727,8 +727,124 @@ const RadioCard = ({ msg, person: P, canJump, compact, onJump, onClose }) => {
     );
 };
 
+/** Heli am Handy: zwei Tasten zum Steigen und Sinken (am Rechner R / F). */
+const HeliPad = ({ onInput }) => {
+    const mk = (key, label, title) => (
+        <button title={title} onPointerDown={(e) => { try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ältere Browser */ } onInput({ [key]: true }); }}
+                onPointerUp={() => onInput({ [key]: false })} onPointerCancel={() => onInput({ [key]: false })} onContextMenu={(e) => e.preventDefault()}
+                style={{ ...glass, width: 58, height: 58, borderRadius: 16, color: '#e8eef6', fontSize: 22, fontWeight: 700, cursor: 'pointer', touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}>{label}</button>
+    );
+    return (
+        <div style={{ position: 'fixed', zIndex: 21, right: `calc(14px + ${SAFE_R})`, top: '50%', transform: 'translateY(-50%)', display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'auto' }}>
+            {mk('up', '▲', 'Steigen')}{mk('down', '▼', 'Sinken')}
+        </div>
+    );
+};
+
+// ===== HÜTTENSPIELE (Einkehr) =====
+// Zwei kleine Spiele am Stammtisch: „17 und 4" gegen den Wirt und Nageln (den Hammer im richtigen Augenblick schlagen).
+// Gespielt wird um Punkte – wer verliert, zahlt die Runde nur in der Vorstellung.
+const CARD_SUITS = ['♠', '♥', '♦', '♣'];
+const CARD_NAMES = { 11: 'A', 2: 'B', 3: 'D', 4: 'K' };          // Ass 11, Bube 2, Dame 3, König 4 – wie beim 17 und 4 mit dem 32er-Blatt
+const drawCard = () => { const v = [7, 8, 9, 10, 2, 3, 4, 11][Math.floor(Math.random() * 8)]; return { v, s: CARD_SUITS[Math.floor(Math.random() * 4)], n: CARD_NAMES[v] || String(v) }; };
+const cardSum = (cards) => cards.reduce((a, c) => a + c.v, 0);
+const PlayCard = ({ c, hidden }) => (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: 34, height: 48, borderRadius: 6, margin: '0 2px',
+                   background: hidden ? 'rgba(232,238,246,0.14)' : '#f4f1e6', color: hidden ? 'transparent' : (c.s === '♥' || c.s === '♦' ? '#b91c1c' : '#111827'),
+                   border: '1px solid rgba(0,0,0,0.25)', fontWeight: 700, fontSize: 14, lineHeight: 1.1 }}>
+        <span>{hidden ? '?' : c.n}</span><span style={{ fontSize: 13 }}>{hidden ? '?' : c.s}</span>
+    </span>
+);
+const HutGames = ({ onScore, compact }) => {
+    const [game, setGame] = useState(null);                 // null | 'cards' | 'nail'
+    const [cards, setCards] = useState(null);               // { me, host, done, text }
+    const [nail, setNail] = useState(null);                 // { depth, hits, pos, text, done }
+    const raf = useRef(0);
+    const posRef = useRef(0);
+    // --- 17 und 4 ---
+    const deal = () => setCards({ me: [drawCard(), drawCard()], host: [drawCard()], done: false, text: 'Noch eine Karte – oder bleiben?' });
+    const finish = (me, host0) => {
+        const host = host0.slice();
+        while (cardSum(host) < 17) host.push(drawCard());
+        const a = cardSum(me), b = cardSum(host);
+        let text, pts = 0;
+        if (a > 21) text = `${a} – überkauft. Die Runde geht an den Wirt.`;
+        else if (b > 21 || a > b) { pts = a === 21 ? 120 : 60; text = `${a} gegen ${b} – gewonnen! +${pts} Punkte`; }
+        else if (a === b) { pts = 10; text = `${a} gegen ${b} – unentschieden. +10 Punkte`; }
+        else text = `${a} gegen ${b} – der Wirt gewinnt.`;
+        if (pts) onScore(pts);
+        setCards({ me, host, done: true, text });
+    };
+    const hit = () => { const me = [...cards.me, drawCard()]; if (cardSum(me) >= 21) finish(me, cards.host); else setCards({ ...cards, me }); };
+    // --- Nageln: der Zeiger pendelt, in der Mitte trifft der Hammer voll ---
+    useEffect(() => {
+        if (game !== 'nail' || !nail || nail.done) return undefined;
+        const t0 = performance.now();
+        const tick = () => {
+            const t = (performance.now() - t0) / 1000;
+            posRef.current = Math.sin(t * (3.4 + nail.hits * 0.5));       // −1 … 1, mit jedem Schlag schneller
+            setNail(n => (n && !n.done ? { ...n, pos: posRef.current } : n));
+            raf.current = requestAnimationFrame(tick);
+        };
+        raf.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf.current);
+    }, [game, nail?.hits, nail?.done]);                                // eslint-disable-line react-hooks/exhaustive-deps
+    const startNail = () => setNail({ depth: 0, hits: 0, pos: 0, done: false, text: 'Schlag zu, wenn der Zeiger in der Mitte steht – drei Schläge.' });
+    const strike = () => {
+        const acc = 1 - Math.min(1, Math.abs(posRef.current) / 0.85);       // 1 = genau Mitte
+        const depth = nail.depth + (acc > 0.15 ? 12 + acc * 28 : 2), hits = nail.hits + 1;
+        if (depth >= 100 || hits >= 3) {
+            const d = Math.min(100, Math.round(depth)), pts = d >= 100 ? 150 : d >= 80 ? 80 : d >= 55 ? 30 : 0;
+            if (pts) onScore(pts);
+            setNail({ depth: d, hits, pos: posRef.current, done: true, text: d >= 100 ? `Versenkt! +${pts} Punkte – die Runde zahlt der Wirt.` : pts ? `Nagel zu ${d} % drin. +${pts} Punkte` : `Nur ${d} % – daneben gehauen. Die Runde geht auf dich.` });
+        } else setNail({ ...nail, depth, hits, text: acc > 0.7 ? 'Satter Treffer!' : acc > 0.15 ? 'Getroffen.' : 'Abgerutscht …' });
+    };
+    const small = { ...btn, pointerEvents: 'auto', padding: '10px 14px' };
+    const panel = { ...glass, pointerEvents: 'auto', padding: 14, borderRadius: 16, color: '#e8eef6', width: compact ? 'min(92vw, 340px)' : 340, boxSizing: 'border-box', textAlign: 'center' };
+    const label = { fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9aa0a8' };
+    if (!game) return (
+        <div style={{ display: 'flex', gap: 8, pointerEvents: 'auto' }}>
+            <button style={small} onClick={() => { setGame('cards'); deal(); }}>17 und 4</button>
+            <button style={small} onClick={() => { setGame('nail'); startNail(); }}>Nageln</button>
+        </div>
+    );
+    if (game === 'cards' && cards) return (
+        <div style={panel}>
+            <div style={label}>Stammtisch · 17 und 4</div>
+            <div style={{ margin: '10px 0 4px' }}><span style={{ ...label, marginRight: 8 }}>Wirt</span>{cards.host.map((c, i) => <PlayCard key={i} c={c} />)}{!cards.done && <PlayCard c={{}} hidden />}</div>
+            <div style={{ margin: '6px 0 10px' }}><span style={{ ...label, marginRight: 8 }}>Du · {cardSum(cards.me)}</span>{cards.me.map((c, i) => <PlayCard key={i} c={c} />)}</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.4, minHeight: 34 }}>{cards.text}</div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 8 }}>
+                {!cards.done ? (<><button style={small} onClick={hit}>Karte</button><button style={small} onClick={() => finish(cards.me, cards.host)}>Bleiben</button></>)
+                             : (<button style={small} onClick={deal}>Noch eine Runde</button>)}
+                <button style={{ ...small, opacity: 0.8 }} onClick={() => setGame(null)}>Aufhören</button>
+            </div>
+        </div>
+    );
+    if (game === 'nail' && nail) return (
+        <div style={panel}>
+            <div style={label}>Stammtisch · Nageln</div>
+            <div style={{ position: 'relative', height: 16, margin: '14px 6px 6px', borderRadius: 8, background: 'rgba(232,238,246,0.12)' }}>
+                <div style={{ position: 'absolute', left: '42%', width: '16%', top: 0, bottom: 0, background: 'rgba(134,239,172,0.45)', borderRadius: 4 }} />
+                <div style={{ position: 'absolute', left: `calc(${50 + nail.pos * 46}% - 3px)`, top: -4, width: 6, height: 24, borderRadius: 3, background: '#fcd34d' }} />
+            </div>
+            <div style={{ height: 8, margin: '10px 6px', borderRadius: 4, background: 'rgba(232,238,246,0.12)', overflow: 'hidden' }}>
+                <div style={{ width: `${Math.min(100, nail.depth)}%`, height: '100%', background: '#e8eef6' }} />
+            </div>
+            <div style={{ ...label, marginBottom: 6 }}>Nagel {Math.min(100, Math.round(nail.depth))} % · Schlag {Math.min(3, nail.hits + (nail.done ? 0 : 1))} von 3</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.4, minHeight: 34 }}>{nail.text}</div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 8 }}>
+                {!nail.done ? <button style={{ ...small, padding: '12px 26px', border: '1px solid rgba(252,211,77,0.75)' }} onPointerDown={strike}>Schlag!</button>
+                            : <button style={small} onClick={startNail}>Noch einmal</button>}
+                <button style={{ ...small, opacity: 0.8 }} onClick={() => setGame(null)}>Aufhören</button>
+            </div>
+        </div>
+    );
+    return null;
+};
+
 /** Anzeige und Steuerung beim Selbstfahren. */
-const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, onShoot, onFire, onGlide, onCat }) => {
+const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, onShoot, onFire, onGlide, onCat, onScore }) => {
     // Zwei Lenktasten: eine = lenken, beide zugleich = bremsen
     const held = useRef({ l: false, r: false });
     const hold = (k, v) => {
@@ -786,6 +902,8 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                         {ski.flying?.wind && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: ski.flying.wind.gust ? '#fcd34d' : '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>{ski.flying.wind.gust ? 'Bö · ' : ''}{ski.flying.wind.from} {ski.flying.wind.kmh} km/h</span>}
                         {ski.powder > 0 && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>Tiefschnee {ski.powder} cm</span>}
                         {ski.driving && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2' }}>{ski.driving}</span>}
+                        {ski.heli && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: ski.heli.low ? '#86efac' : '#e8eef6', fontVariantNumeric: 'tabular-nums' }}>Höhe {ski.heli.alt} m</span>}
+                        {typeof ski.load === 'number' && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: ski.load > 5 ? '#e8eef6' : '#9aa0a8', fontVariantNumeric: 'tabular-nums' }}>Schild {ski.load} %</span>}
                         {ski.rescue && (
                             <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: ski.rescue.carry ? '#86efac' : ski.rescue.waiting ? '#fcd34d' : '#9aa0a8', fontVariantNumeric: 'tabular-nums' }}>
                                 {ski.rescue.carry ? 'Verletzter an Bord · Station' : ski.rescue.waiting ? `${ski.rescue.waiting} ${ski.rescue.waiting === 1 ? 'Verletzter wartet' : 'Verletzte warten'}` : 'kein Notfall'}
@@ -835,6 +953,7 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                 )}
                 {ski.resting && (
                     <>
+                        <HutGames onScore={onScore} compact={compact} />
                         <div style={{ ...chip, color: '#e8eef6', fontSize: 12 }}>Einkehr · {ski.resting} · {touch ? 'wischen' : 'mit der Maus ziehen'} zum Umsehen</div>
                         <button onClick={onHut} style={{ ...btn, pointerEvents: 'auto', padding: '12px 18px', border: '1px solid rgba(252,211,77,0.75)' }}>
                             Weiterfahren{touch ? '' : ' (E)'}
@@ -895,6 +1014,7 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
             </div>
             {steering && <SteerPad side="left" onHold={(v) => hold('l', v)} />}
             {steering && <SteerPad side="right" onHold={(v) => hold('r', v)} />}
+            {touch && ski.heli && <HeliPad onInput={onInput} />}
         </>
     );
 };
@@ -1139,7 +1259,7 @@ const World3D = ({ level, onExit, initialSave = null }) => {
             {/* Kopfzeile: nur der Rückweg ins Menü; alle Zahlen sitzen zentriert oben */}
             {skiing ? (
                 <SkiHud ski={ski} touch={touch} compact={compact} onStop={stopSki}
-                        onLift={() => apiRef.current?.skiTakeLift?.()} onHut={() => apiRef.current?.skiToggleHut?.()}
+                        onLift={() => apiRef.current?.skiTakeLift?.()} onHut={() => apiRef.current?.skiToggleHut?.()} onScore={(n) => apiRef.current?.skiAddScore?.(n)}
                         onSound={(v) => apiRef.current?.skiSound?.(v)}
                         onGlide={() => apiRef.current?.skiGlide?.()} onCat={() => apiRef.current?.skiCat?.()}
                         onShoot={() => apiRef.current?.skiToggleShoot?.()} onFire={() => apiRef.current?.skiFire?.()} onInput={(part) => apiRef.current?.skiInput?.(part)} />
