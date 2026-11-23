@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { buildLevelWorld } from '../engine/utils';
 import { createScene3D } from './Scene3D.js';
 import { evaluateObjective, objectiveLabel, formatObjectiveValue, markLevelCompleted, loadProgress, CAMPAIGN_LEVELS, MASSIFS } from '../constants/campaign';
@@ -755,6 +755,90 @@ const PlayCard = ({ c, hidden }) => (
         <span>{hidden ? '?' : c.n}</span><span style={{ fontSize: 13 }}>{hidden ? '?' : c.s}</span>
     </span>
 );
+/**
+ * Die Stube als Hintergrund der Stammtisch-Spiele: Holzwand, Fenster mit Bergblick und Schneefall, Kachelofen mit
+ * flackerndem Feuer, pendelnde Lampe, Wanduhr, dampfende Krüge auf dem Tisch. Alles gezeichnet (SVG) und per CSS bewegt;
+ * `memo`, damit die Stube nicht mit jedem Bild des Nagel-Zeigers neu aufgebaut wird.
+ */
+const HutScene = React.memo(() => {
+    const flakes = useMemo(() => Array.from({ length: 34 }, (_, i) => ({ x: 610 + ((i * 97) % 380), r: 1.6 + (i % 4) * 0.7, d: 5 + (i % 7) * 1.1, o: -((i * 0.83) % 9) })), []);
+    const planks = useMemo(() => Array.from({ length: 13 }, (_, i) => i * 128), []);
+    return (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 19, pointerEvents: 'auto', background: '#1a120c', animation: 'mtHutIn 0.5s ease-out' }}>
+            <style>{`
+                @keyframes mtHutIn { from { opacity: 0 } to { opacity: 1 } }
+                @keyframes mtSnow { from { transform: translate(0, -40px) } to { transform: translate(-46px, 330px) } }
+                @keyframes mtFlame { 0%,100% { transform: scale(1, 1) } 25% { transform: scale(0.92, 1.14) } 50% { transform: scale(1.06, 0.9) } 75% { transform: scale(0.96, 1.08) } }
+                @keyframes mtGlow { 0%,100% { opacity: 0.55 } 30% { opacity: 0.8 } 60% { opacity: 0.45 } 80% { opacity: 0.7 } }
+                @keyframes mtLamp { 0%,100% { transform: rotate(-3.2deg) } 50% { transform: rotate(3.2deg) } }
+                @keyframes mtPend { 0%,100% { transform: rotate(-11deg) } 50% { transform: rotate(11deg) } }
+                @keyframes mtSteam { 0% { transform: translate(0, 0) scale(0.6); opacity: 0 } 25% { opacity: 0.5 } 100% { transform: translate(8px, -70px) scale(1.5); opacity: 0 } }
+                @keyframes mtCloud { from { transform: translateX(-220px) } to { transform: translateX(420px) } }
+                @keyframes mtLift { from { transform: translate(0, 0) } to { transform: translate(190px, -84px) } }
+            `}</style>
+            <svg viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" style={{ width: '100%', height: '100%', display: 'block' }}>
+                <defs>
+                    <linearGradient id="mtSky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#6f93b8" /><stop offset="1" stopColor="#c9d9e6" /></linearGradient>
+                    <radialGradient id="mtFire" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stopColor="#ffb347" stopOpacity="0.55" /><stop offset="1" stopColor="#ffb347" stopOpacity="0" /></radialGradient>
+                    <radialGradient id="mtLampG" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stopColor="#ffd98a" stopOpacity="0.5" /><stop offset="1" stopColor="#ffd98a" stopOpacity="0" /></radialGradient>
+                    <linearGradient id="mtShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#000" stopOpacity="0.5" /><stop offset="0.35" stopColor="#000" stopOpacity="0" /><stop offset="1" stopColor="#000" stopOpacity="0.55" /></linearGradient>
+                    <clipPath id="mtWin"><rect x="600" y="170" width="400" height="300" rx="6" /></clipPath>
+                </defs>
+                {/* Holzwand */}
+                <rect width="1600" height="900" fill="#4a3220" />
+                {planks.map((x, i) => <rect key={x} x={x} y="0" width="124" height="900" fill={i % 2 ? '#523824' : '#46301e'} />)}
+                {planks.map((x) => <rect key={'l' + x} x={x + 124} y="0" width="4" height="900" fill="#2c1d12" />)}
+                <rect x="0" y="560" width="1600" height="26" fill="#2f2014" />
+                {/* Fenster mit Bergblick: Wolke zieht, Sessel fährt, es schneit */}
+                <rect x="582" y="152" width="436" height="336" rx="10" fill="#2a1b10" />
+                <g clipPath="url(#mtWin)">
+                    <rect x="600" y="170" width="400" height="300" fill="url(#mtSky)" />
+                    <g style={{ animation: 'mtCloud 46s linear infinite' }}><ellipse cx="640" cy="225" rx="70" ry="20" fill="#eef4f9" opacity="0.85" /><ellipse cx="690" cy="212" rx="46" ry="18" fill="#eef4f9" opacity="0.85" /></g>
+                    <polygon points="560,470 720,250 800,340 880,220 1040,470" fill="#dfe8f0" />
+                    <polygon points="720,250 752,296 728,300 704,290" fill="#f7fafc" /><polygon points="880,220 918,278 888,286 858,268" fill="#f7fafc" />
+                    <polygon points="560,470 700,360 820,420 930,350 1040,470" fill="#eef3f8" />
+                    <polygon points="600,470 640,404 660,430 690,392 720,470" fill="#27412f" /><polygon points="900,470 930,410 952,438 978,400 1000,470" fill="#27412f" />
+                    <line x1="640" y1="440" x2="960" y2="300" stroke="#3b4652" strokeWidth="2" />
+                    <g style={{ animation: 'mtLift 13s linear infinite' }}><line x1="700" y1="414" x2="700" y2="430" stroke="#3b4652" strokeWidth="2" /><rect x="691" y="430" width="18" height="10" rx="2" fill="#c0392b" /></g>
+                    <g style={{ animation: 'mtLift 13s linear infinite', animationDelay: '-6.5s' }}><line x1="700" y1="414" x2="700" y2="430" stroke="#3b4652" strokeWidth="2" /><rect x="691" y="430" width="18" height="10" rx="2" fill="#c0392b" /></g>
+                    {flakes.map((f, i) => <circle key={i} cx={f.x} cy="160" r={f.r} fill="#fff" opacity="0.9" style={{ animation: `mtSnow ${f.d}s linear infinite`, animationDelay: `${f.o}s` }} />)}
+                </g>
+                <rect x="796" y="170" width="8" height="300" fill="#2a1b10" /><rect x="600" y="316" width="400" height="8" fill="#2a1b10" />
+                <rect x="570" y="482" width="460" height="16" rx="3" fill="#33220f" />
+                <path d="M600 170 q50 150 -14 300 h-30 v-300z" fill="#8c2f2a" opacity="0.92" /><path d="M1000 170 q-50 150 14 300 h30 v-300z" fill="#8c2f2a" opacity="0.92" />
+                {/* Kachelofen mit Feuer */}
+                <rect x="150" y="300" width="250" height="290" rx="10" fill="#3d6b55" /><rect x="136" y="280" width="278" height="30" rx="6" fill="#2f5243" />
+                {[0, 1, 2].map(r => [0, 1, 2].map(c => <rect key={r + '-' + c} x={166 + c * 76} y={324 + r * 46} width="66" height="38" rx="5" fill="#4a7f66" opacity="0.6" />))}
+                <rect x="208" y="478" width="134" height="96" rx="8" fill="#140c07" />
+                <g style={{ transformOrigin: '275px 572px', animation: 'mtFlame 0.9s ease-in-out infinite' }}>
+                    <path d="M230 572 q10 -60 30 -44 q8 -40 26 -10 q22 -20 30 54z" fill="#ff8a1f" /><path d="M250 572 q8 -36 22 -26 q10 -20 20 26z" fill="#ffd257" />
+                </g>
+                <circle cx="275" cy="530" r="210" fill="url(#mtFire)" style={{ animation: 'mtGlow 1.7s ease-in-out infinite' }} />
+                {/* Wanduhr mit Pendel */}
+                <rect x="1210" y="170" width="92" height="118" rx="8" fill="#2f2014" /><circle cx="1256" cy="216" r="30" fill="#efe6d0" /><line x1="1256" y1="216" x2="1256" y2="196" stroke="#222" strokeWidth="3" /><line x1="1256" y1="216" x2="1270" y2="222" stroke="#222" strokeWidth="3" />
+                <g style={{ transformOrigin: '1256px 288px', animation: 'mtPend 2s ease-in-out infinite' }}><line x1="1256" y1="288" x2="1256" y2="372" stroke="#b08d3c" strokeWidth="4" /><circle cx="1256" cy="380" r="14" fill="#c9a14a" /></g>
+                {/* Hängelampe */}
+                <g style={{ transformOrigin: '800px 0px', animation: 'mtLamp 5.5s ease-in-out infinite' }}>
+                    <line x1="800" y1="0" x2="800" y2="96" stroke="#1c120a" strokeWidth="4" /><path d="M740 132 q60 -62 120 0z" fill="#1f150c" /><ellipse cx="800" cy="134" rx="58" ry="8" fill="#ffe2a1" />
+                    <circle cx="800" cy="170" r="250" fill="url(#mtLampG)" />
+                </g>
+                {/* Tisch mit Krügen, Brotzeitbrett und Karten */}
+                <rect x="0" y="690" width="1600" height="210" fill="#5d3f26" /><rect x="0" y="690" width="1600" height="14" fill="#7a5433" />
+                {[0, 1].map(k => (
+                    <g key={k} transform={`translate(${k ? 1270 : 220} 0)`}>
+                        <rect x="0" y="612" width="74" height="96" rx="9" fill="#d9c9a8" /><rect x="0" y="612" width="74" height="16" rx="8" fill="#f7f1e3" /><path d="M74 632 q38 4 34 34 q-2 26 -34 26" fill="none" stroke="#d9c9a8" strokeWidth="11" />
+                        {[0, 1, 2].map(i => <circle key={i} cx={22 + i * 16} cy="600" r="12" fill="#fff" opacity="0" style={{ transformBox: 'fill-box', transformOrigin: 'center', animation: 'mtSteam 3.4s ease-out infinite', animationDelay: `${-i * 1.1 - k * 0.6}s` }} />)}
+                    </g>
+                ))}
+                <ellipse cx="480" cy="712" rx="96" ry="18" fill="#7d5a36" /><rect x="430" y="690" width="60" height="18" rx="6" fill="#e3c27a" /><circle cx="520" cy="700" r="12" fill="#b23b2e" />
+                <g transform="translate(1090 676) rotate(-12)"><rect width="42" height="60" rx="5" fill="#f4f1e6" stroke="#2a1b10" /><text x="21" y="38" textAnchor="middle" fontSize="24" fill="#b91c1c">♥</text></g>
+                <g transform="translate(1130 684) rotate(9)"><rect width="42" height="60" rx="5" fill="#f4f1e6" stroke="#2a1b10" /><text x="21" y="38" textAnchor="middle" fontSize="24" fill="#111827">♠</text></g>
+                <rect width="1600" height="900" fill="url(#mtShade)" />
+            </svg>
+        </div>
+    );
+});
+
 const HutGames = ({ onScore, compact }) => {
     const [game, setGame] = useState(null);                 // null | 'cards' | 'nail'
     const [cards, setCards] = useState(null);               // { me, host, done, text }
@@ -808,8 +892,9 @@ const HutGames = ({ onScore, compact }) => {
             <button style={small} onClick={() => { setGame('nail'); startNail(); }}>Nageln</button>
         </div>
     );
+    const stage = { position: 'fixed', inset: 0, zIndex: 20, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: '5vh', boxSizing: 'border-box', pointerEvents: 'none' };   // unten am Tisch – das Fenster bleibt frei
     if (game === 'cards' && cards) return (
-        <div style={panel}>
+        <><HutScene /><div style={stage}><div style={panel}>
             <div style={label}>Stammtisch · 17 und 4</div>
             <div style={{ margin: '10px 0 4px' }}><span style={{ ...label, marginRight: 8 }}>Wirt</span>{cards.host.map((c, i) => <PlayCard key={i} c={c} />)}{!cards.done && <PlayCard c={{}} hidden />}</div>
             <div style={{ margin: '6px 0 10px' }}><span style={{ ...label, marginRight: 8 }}>Du · {cardSum(cards.me)}</span>{cards.me.map((c, i) => <PlayCard key={i} c={c} />)}</div>
@@ -819,10 +904,10 @@ const HutGames = ({ onScore, compact }) => {
                              : (<button style={small} onClick={deal}>Noch eine Runde</button>)}
                 <button style={{ ...small, opacity: 0.8 }} onClick={() => setGame(null)}>Aufhören</button>
             </div>
-        </div>
+        </div></div></>
     );
     if (game === 'nail' && nail) return (
-        <div style={panel}>
+        <><HutScene /><div style={stage}><div style={panel}>
             <div style={label}>Stammtisch · Nageln</div>
             <div style={{ position: 'relative', height: 16, margin: '14px 6px 6px', borderRadius: 8, background: 'rgba(232,238,246,0.12)' }}>
                 <div style={{ position: 'absolute', left: '42%', width: '16%', top: 0, bottom: 0, background: 'rgba(134,239,172,0.45)', borderRadius: 4 }} />
@@ -838,7 +923,7 @@ const HutGames = ({ onScore, compact }) => {
                             : <button style={small} onClick={startNail}>Noch einmal</button>}
                 <button style={{ ...small, opacity: 0.8 }} onClick={() => setGame(null)}>Aufhören</button>
             </div>
-        </div>
+        </div></div></>
     );
     return null;
 };

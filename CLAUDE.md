@@ -159,7 +159,8 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - Einkehr: nahe einem Gastro-Gebäude (`HUT_NAMES`) bietet das HUD „Einkehren" an (`toggleHut`): Ski geschultert,
   die Kamera kreist langsam um die Stelle, Blick durch Ziehen drehbar. Dazu zwei Stammtisch-Spiele im HUD (`HutGames`
   in `World3D.jsx`): „17 und 4" gegen den Wirt und Nageln (Zeiger pendelt, in der Mitte zuschlagen, drei Schläge).
-  Gespielt wird um Punkte (`skiAddScore`).
+  Gespielt wird um Punkte (`skiAddScore`). Solange ein Spiel läuft, liegt die gezeichnete Stube dahinter (`HutScene`: SVG mit
+  CSS-Bewegung – Feuer im Ofen, Schneefall und Sessel vor dem Fenster, pendelnde Lampe, Uhr, dampfende Krüge).
 - Ton: `SkiSound.js` erzeugt alles aus Rauschen und Summern (Fahrtwind, Kanten, Liftsurren, Landung), keine
   Dateien. Start erst aus einer Eingabe heraus; „Ton an/aus" im HUD, gespeichert in `localStorage['mt.skiSound']`.
 - Lift: nahe einer Talstation bietet das HUD die Bergfahrt an. Die Figur wartet auf das nächste Fahrzeug der
