@@ -4612,10 +4612,21 @@ export function makeRunDressing(type, len) {
         // Start-Tor oben, Zielbogen unten, Tore im Wechsel, Tribüne am Ziel
         g.add(groundEl(runBanner('START', 5.4, 0.9, 3.2, 0x0f172a, 0xffffff), 0, -hl + 0.6));
         g.add(groundEl(runBanner('ZIEL', 6.2, 1.1, 3.6, 0xdc2626, 0xffffff), 0, hl - 0.8));
-        const gates = Math.max(4, Math.round(len / 11));
+        const gates = Math.max(4, Math.round(len / 14));
+        // Blau gefärbte Ideallinie im Schnee (wie bei echten Rennen): schwingt außen um jedes Tor
+        {
+            const dashMat = new THREE.MeshBasicMaterial({ color: 0x2563eb, transparent: true, opacity: 0.6, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+            const dashGeo = new THREE.PlaneGeometry(0.16, 0.95); dashGeo.rotateX(-Math.PI / 2);
+            const lineX = (z) => 2.3 * Math.cos(Math.PI * Math.max(0, Math.min(1, (z + hl - 2.5) / (len - 5.5))) * gates - Math.PI / 2);
+            for (let z = -hl + 1.5; z < hl - 2; z += 1.6) {
+                const x0 = lineX(z), x1 = lineX(z + 0.8);
+                const dash = new THREE.Mesh(dashGeo, dashMat); dash.rotation.y = Math.atan2(x1 - x0, 0.8);
+                g.add(groundEl(dash, (x0 + x1) / 2, z + 0.4, 0.07));
+            }
+        }
         for (let i = 0; i < gates; i++) {
             const t = (i + 0.5) / gates, z = -hl + 2.5 + t * (len - 5.5);
-            const side = i % 2 === 0 ? 1 : -1, x = side * 2.2;
+            const side = i % 2 === 0 ? 1 : -1, x = side * 1.5;
             const mat = i % 2 === 0 ? RUN_RED : RUN_BLUE;
             g.add(groundEl(runPole(1.7, mat), x - side * 0.45, z));
             g.add(groundEl(runPole(1.7, mat), x + side * 0.45, z));

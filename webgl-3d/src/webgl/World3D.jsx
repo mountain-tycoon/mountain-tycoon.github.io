@@ -605,7 +605,7 @@ const ConfirmBar = ({ p, fmt, onOk, onCancel, onRotate, onUndo }) => {
     let sub;
     if (p.kind === 'liftStart') sub = 'Jetzt die Bergstation antippen';
     else if (p.kind === 'roadStart') sub = 'Jetzt das Ende antippen';
-    else if (p.kind === 'demolish') sub = 'Erstattung ' + fmt(Math.abs(p.cost || 0));
+    else if (p.kind === 'demolish') sub = (p.label ? p.label + ' · ' : '') + 'Erstattung ' + fmt(Math.abs(p.cost || 0));
     else if (p.kind === 'piste') sub = p.count + (p.count === 1 ? ' Punkt' : ' Punkte') + (p.count >= 2 ? ' · ' + fmt(p.cost || 0) : '');
     else sub = fmt(p.cost || 0);
     const bad = !step && !p.ok;
@@ -1100,8 +1100,8 @@ const World3D = ({ level, onExit, initialSave = null }) => {
     const activeItem = activeCat ? activeCat.items.find(i => i.key === active) : null;
     const hint = () => {
         if (active === 'demolish') return touch
-            ? 'Gebäude antippen, dann mit ✓ abreißen (60 % Erstattung)'
-            : 'Klicke auf ein gebautes Gebäude zum Abreißen (60% Erstattung)';
+            ? 'Gebäude oder Piste antippen, dann mit ✓ abreißen'
+            : 'Gebäude anklicken zum Abreißen (60 % Erstattung) · Piste anklicken und mit ✓ bestätigen (30 %)';
         if (!activeItem) return null;
         if (activeItem.tool === 'lift') {
             const max = liftMax;

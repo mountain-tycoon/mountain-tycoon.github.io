@@ -277,8 +277,9 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Outfit-Speicher (`getCanopyChoice`, `canopyColors`).
 
 ## Rennstrecke als Spiel
-- Die Rennstrecke ist 54 Kacheln lang (`DIRECTED.racecourse`), Tore alle rund 11 Kacheln im Wechsel bei ±2,2 (enger
-  schafft man die Kurven bei Tempo nicht – ausprobiert). Dieselbe Formel steht an drei Stellen und muss zusammenpassen:
+- Die Rennstrecke ist 84 Kacheln lang (`DIRECTED.racecourse`), Tore alle rund 14 Kacheln im Wechsel bei ±1,5 (enger
+  oder stärker versetzt schafft man die Kurven bei Tempo nicht – ausprobiert), dazu eine blau gestrichelte Ideallinie
+  im Schnee. Dieselbe Formel steht an drei Stellen und muss zusammenpassen:
   `makeRunDressing` (Stangen), die Gäste-Linie in `updateGuests` und `raceSetup` (Tore fürs Selbstfahren, aus dem
   gebauten Modell gerechnet). Dazu Fangzäune und karierte Ziellinie.
 - `SkiRun.js`: jedes Tor muss auf seiner Seite AUSSEN umfahren werden, sonst `RACE_PEN` Strafzeit. Im Ziel gibt es
@@ -290,6 +291,21 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   Medaille, steigt die Prämie.
 - Prüfen: `__mtCam.runAt(x, z)` liefert Tore und Richtzeit; eine Fahrt lässt sich mit `ski().start/setInput/step` vorspulen
   (zwischen zwei Fahrten `ski().stop()`).
+
+## Pisten abreißen, Lawine, Luftverkehr
+- **Piste abreißen** (`removePiste` in `Scene3D.js`): Abriss-Werkzeug auf eine Piste (`pisteRouteAt`) merkt sie vor (rote
+  Linie, immer mit Bestätigung – auch mit der Maus), 30 % Erstattung. Entfernt wird alles, was `buildPistePath` in die
+  Szene gelegt hat (`rt.parts` = die Szenen-Kinder ab `sceneMark`), dazu Anlagen auf der Piste; Gäste planen neu.
+  Spielstand-Aktion `dp` (Anfangspunkt der Piste). Loipen und Lifte lassen sich weiterhin nicht abreißen.
+- **Lawine** (Ereignis `EVENTS.avalanche`): `planAvalanche` sucht oberhalb einer Piste eine Falllinie, `startAvalanche`
+  lässt die Staubwolke hinunterlaufen (`updateAvalanche` im Bildtakt), `avalancheDamage` setzt getroffene
+  Pistenabschnitte auf Zustand 0, legt eine getroffene Bahn über den Pannen-Ablauf still (`startBreakdown(L,
+  'avalanche')`), verschüttet bis zu zwei Fahrer und legt den Lawinenkegel als Netz hin (bis zum Ende des Ereignisses).
+  Prüfen: `__mtCam.avalanche()`, `avaStep(t, dt)`, `avaState()`.
+- **Luftverkehr** (`AirTraffic3D.js`, `updateAir`): solange eine Werbekampagne läuft (`eco.ad.daysLeft > 0`), fliegt alle
+  ein bis zwei Minuten ein Flugzeug mit Banner („SKI <Ort> – JETZT!") quer übers Gebiet. Steht ein Gleitschirm-Startplatz,
+  starten tagsüber ab und zu Gäste (höchstens drei zugleich), gleiten zum Hauptort und bringen bei der Landung eine kleine
+  Gebühr. Prüfen: `__mtCam.air().force('plane' | 'glider')`, `airStep(t, dt)`, `air().state()`.
 
 ## Liftpannen und Werkstatt
 - `updateBreakdowns` in `Scene3D.js`: alle paar Minuten (`BREAK`) bleibt eine fertige Anlage stehen (`route.broken`),

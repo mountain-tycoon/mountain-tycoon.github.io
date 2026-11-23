@@ -21,6 +21,7 @@ import { createLoipen, LOIPE_W } from './Loipe3D.js';
 import { makeBiathlonRange, BIATHLON_R } from './Biathlon3D.js';
 import { makeIceRink } from './IceRink3D.js';
 import { makeGliderLaunch, LAUNCH_R } from './Paraglider3D.js';
+import { createAirTraffic } from './AirTraffic3D.js';
 // ===== POSTPROCESSING =====
 // Hebt die Bildqualität deutlich: weiches Glühen an hellen Kanten (Schnee,
 // Sonne, Lichter), Kantenglättung und ein abschließendes Color-Grading.
@@ -1577,7 +1578,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const RIDE_THROUGH = ['kicker', 'halfpipe', 'racecourse'];
     // Laenge der Durchfahrt je Anlage (in Kacheln). Diese Anlagen werden
     // von oben nach unten durchfahren und richten sich in die Falllinie.
-    const DIRECTED = { funpark_s: 7, funpark: 10, funpark_l: 14, kicker: 8, halfpipe: 20, racecourse: 54 };
+    const DIRECTED = { funpark_s: 7, funpark: 10, funpark_l: 14, kicker: 8, halfpipe: 20, racecourse: 84 };
     const isFunType = (t) => typeof t === 'string' && (t.startsWith('funpark') || RIDE_THROUGH.includes(t));
     // Verfügbare Gäste-Avatare (Dateien public/icons/guest_<key>.png).
     // Alle gerenderten Portraits — gemischt aus Gästen und Personal.
@@ -5146,13 +5147,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         return g;
     };
     const breakSay = (tone, text) => { const L = breakdown && breakdown.L, wp = L ? worldPosSmooth(L.bottom.gx, L.bottom.gy) : null; if (onRadio) onRadio({ id: 'break', tone, text, who: 'tech', at: wp ? { x: wp.x, z: wp.z } : null }); radio.wait = Math.max(radio.wait, 12); };
-    const startBreakdown = (L) => {
+    const startBreakdown = (L, cause = '') => {
         const bp = worldPosSmooth(L.bottom.gx, L.bottom.gy);
         const smoke = makeSmoke(); smoke.position.set(bp.x, bp.y + 2.2, bp.z); scene.add(smoke);
         L.broken = true;
         breakdown = { L, smoke, t: 0, phase: 'wait', from: null, veh: null, fixT: 0 };
         sim.breakdowns = (sim.breakdowns || 0) + 1;
-        if (built.workshop > 0) breakSay('warn', `Die ${L.name || 'Bahn'} steht, an der Talstation raucht der Antrieb! Ich bin mit dem Skidoo unterwegs.`);
+        if (cause === 'avalanche') breakSay('warn', built.workshop > 0 ? `Die Lawine hat die ${L.name || 'Bahn'} erwischt, sie steht! Ich fahre mit dem Skidoo hin.` : `Die Lawine hat die ${L.name || 'Bahn'} erwischt, sie steht! Ohne eigene Werkstatt dauert die Reparatur – und kostet ${BREAK.extCost.toLocaleString('de-DE')} €.`);
+        else if (built.workshop > 0) breakSay('warn', `Die ${L.name || 'Bahn'} steht, an der Talstation raucht der Antrieb! Ich bin mit dem Skidoo unterwegs.`);
         else breakSay('warn', `Die ${L.name || 'Bahn'} steht, an der Talstation raucht der Antrieb! Ohne eigene Werkstatt muss der Kundendienst aus dem Tal kommen – das dauert und kostet ${BREAK.extCost.toLocaleString('de-DE')} €.`);
     };
     const endBreakdown = (cost, text) => {
@@ -5228,6 +5230,135 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             }
         }
     }
+    // =====================================================================
+    //  LAWINE
+    //  Geht von Zeit zu Zeit als Ereignis ab: sie löst sich oberhalb einer Piste, rauscht die Falllinie hinunter und
+    //  hinterlässt einen Lawinenkegel. Getroffene Pistenabschnitte sind verschüttet (Zustand 0, die Raupen müssen
+    //  räumen), eine getroffene Bahn steht (Pannen-Ablauf), wer gerade dort fährt, kann verschüttet werden.
+    // =====================================================================
+    let avalanche = null;              // { pts, t, cloud, debris, hit }
+    let avaPlan = null;
+    const AVA = { dur: 8, width: 5 };
+    const planAvalanche = () => {
+        const cand = guestRoutes.filter(r => r.kind === 'piste' && r.path && r.path.length >= 2);
+        for (let tries = 0; tries < 8 && cand.length; tries++) {
+            const rt = cand[Math.floor(Math.random() * cand.length)];
+            const k = Math.min(rt.path.length - 1, Math.max(0, Math.round((0.25 + Math.random() * 0.5) * (rt.path.length - 1))));
+            const grad = (gx, gy) => ({ x: yAtSmooth(gx + 1, gy) - yAtSmooth(gx - 1, gy), y: yAtSmooth(gx, gy + 1) - yAtSmooth(gx, gy - 1) });
+            const walk = (gx, gy, n, sign) => {
+                const out = [{ gx, gy }];
+                for (let i = 0; i < n; i++) {
+                    const g = grad(gx, gy), l = Math.hypot(g.x, g.y);
+                    if (l < 0.04) break;
+                    gx += sign * g.x / l * 1.5; gy += sign * g.y / l * 1.5;
+                    if (gx < 6 || gy < 6 || gx > gridSize - 7 || gy > gridSize - 7) break;
+                    if (world.landcover[Math.round(gy) * gridSize + Math.round(gx)] === 2 || occAt(Math.round(gx), Math.round(gy)) === OCC_BUILD) break;
+                    out.push({ gx, gy });
+                }
+                return out;
+            };
+            const up = walk(rt.path[k].gx, rt.path[k].gy, 22, 1), top = up[up.length - 1];
+            const pts = walk(top.gx, top.gy, 60, -1);
+            if (up.length < 8 || pts.length < 22) continue;
+            if (yAtSmooth(pts[0].gx, pts[0].gy) - yAtSmooth(pts[pts.length - 1].gx, pts[pts.length - 1].gy) < 6) continue;
+            return pts;
+        }
+        return null;
+    };
+    const nearPath = (pts, gx, gy, r) => { const r2 = r * r; for (const q of pts) { const dx = q.gx - gx, dy = q.gy - gy; if (dx * dx + dy * dy < r2) return true; } return false; };
+    const startAvalanche = (pts) => {
+        const cloud = new THREE.Group(), puffs = [];
+        const geo = new THREE.SphereGeometry(1, 8, 6);
+        for (let i = 0; i < 16; i++) {
+            const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xcfd8e2, transparent: true, opacity: 0.7, depthWrite: false }));
+            cloud.add(m); puffs.push({ m, lag: Math.random() * 9, side: (Math.random() - 0.5) * 2, up: 0.6 + Math.random() * 2.2, s: 1.6 + Math.random() * 2.6, ph: Math.random() * 6 });
+        }
+        scene.add(cloud);
+        avalanche = { pts, t: 0, cloud, puffs, geo, debris: null, hit: false };
+    };
+    const avalancheDamage = (A) => {
+        const pts = A.pts; let beds = 0, liftHit = null, buried = 0;
+        for (const bed of pisteBeds) {
+            if (!bed.groom || !bed.grid) continue;
+            const grid = bed.grid, gi = bed.gIdx, last = bed.groom.length - 1; let any = false;
+            for (let v = 0, k = 0; v < gi.length; v++, k += 2) if (nearPath(pts, grid[k], grid[k + 1], AVA.width)) { bed.groom[Math.min(last, gi[v])] = 0; any = true; }
+            if (any) beds++;
+        }
+        for (const L of guestRoutes) {
+            if (L.kind !== 'lift' || !L.ready || L.broken || liftHit) continue;
+            const n = Math.max(4, Math.round(Math.hypot(L.top.gx - L.bottom.gx, L.top.gy - L.bottom.gy) / 3));
+            for (let i = 0; i <= n; i++) { const f = i / n; if (nearPath(pts, L.bottom.gx + (L.top.gx - L.bottom.gx) * f, L.bottom.gy + (L.top.gy - L.bottom.gy) * f, AVA.width + 1.5)) { liftHit = L; break; } }
+        }
+        for (const g of guestPool) {
+            if (buried >= 2 || g.state !== 'piste' || g.hurt || !g.mesh || !g.mesh.visible) continue;
+            const gg = worldToGrid(g.mesh.position.x, g.mesh.position.z);
+            if (nearPath(pts, gg.gx, gg.gy, AVA.width)) { startFall(g, gg); buried++; }
+        }
+        if (liftHit && !breakdown) startBreakdown(liftHit, 'avalanche');
+        sim.satisfaction = Math.max(10, sim.satisfaction - 3);
+        A.result = { beds, lift: liftHit ? (liftHit.name || 'Bahn') : '', buried };
+        // Lawinenkegel: buckliges Schneeband über die Bahn der Lawine
+        const pos = [], idx = [];
+        for (let i = 0; i < pts.length; i++) {
+            const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+            let tx = b.gx - a.gx, ty = b.gy - a.gy; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+            const w = AVA.width * (0.45 + 0.55 * Math.min(1, i / (pts.length * 0.6))) * (i > pts.length - 4 ? 0.7 : 1);
+            for (let c = 0; c < 5; c++) {
+                const f = c / 4 * 2 - 1, wp = worldPosSmooth(pts[i].gx - ty * w * f, pts[i].gy + tx * w * f);
+                const bump = (c === 0 || c === 4) ? 0.05 : 0.35 + ((i * 7 + c * 13) % 10) / 10 * 0.9;
+                pos.push(wp.x, wp.y + bump, wp.z);
+            }
+            if (i > 0) for (let c = 0; c < 4; c++) { const p0 = (i - 1) * 5 + c, p1 = i * 5 + c; idx.push(p0, p0 + 1, p1, p0 + 1, p1 + 1, p1); }
+        }
+        const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); dg.setIndex(idx); dg.computeVertexNormals();
+        const dm = new THREE.MeshStandardMaterial({ color: 0xdde4ec, roughness: 1, flatShading: true, side: THREE.DoubleSide });
+        A.debris = new THREE.Mesh(dg, dm); A.debris.receiveShadow = true; A.debris.frustumCulled = false; scene.add(A.debris);
+    };
+    const clearAvalanche = () => {
+        const A = avalanche; if (!A) return;
+        if (A.cloud) { scene.remove(A.cloud); A.geo.dispose(); for (const q of A.puffs) q.m.material.dispose(); }
+        if (A.debris) { scene.remove(A.debris); A.debris.geometry.dispose(); A.debris.material.dispose(); }
+        avalanche = null;
+    };
+    function updateAvalanche(t, dt) {
+        const A = avalanche; if (!A || dt <= 0) return;
+        A.t += dt;
+        const n = A.pts.length - 1, front = Math.min(1, A.t / AVA.dur) * n;
+        if (A.cloud) {
+            const fade = A.t > AVA.dur ? Math.max(0, 1 - (A.t - AVA.dur) / 5) : 1;
+            for (const q of A.puffs) {
+                const fi = Math.max(0, Math.min(n, front - q.lag)), i0 = Math.floor(fi), i1 = Math.min(n, i0 + 1), f = fi - i0;
+                const a = A.pts[i0], b = A.pts[i1];
+                const tx = b.gx - a.gx, ty = b.gy - a.gy, tl = Math.hypot(tx, ty) || 1;
+                const wp = worldPosSmooth(a.gx + (b.gx - a.gx) * f - ty / tl * q.side * AVA.width * 0.7, a.gy + (b.gy - a.gy) * f + tx / tl * q.side * AVA.width * 0.7);
+                q.m.position.set(wp.x, wp.y + q.up + Math.sin(t * 3 + q.ph) * 0.5, wp.z);
+                q.m.scale.setScalar(q.s * (1 + Math.min(2.2, A.t * 0.25)) * (0.9 + 0.2 * Math.sin(t * 2.2 + q.ph)));
+                q.m.material.opacity = 0.5 * fade * (front - q.lag > 0 ? 1 : 0) * (0.35 + 0.65 * dayNow);
+            }
+            if (fade <= 0) { scene.remove(A.cloud); A.geo.dispose(); for (const q of A.puffs) q.m.material.dispose(); A.cloud = null; }
+        }
+        if (!A.hit && A.t >= AVA.dur * 0.7) {
+            A.hit = true; avalancheDamage(A);
+            const r = A.result, parts = [];
+            if (r.beds) parts.push(r.beds === 1 ? 'eine Piste ist verschüttet' : `${r.beds} Pisten sind verschüttet`);
+            if (r.lift) parts.push(`die ${r.lift} steht`);
+            if (r.buried) parts.push(r.buried === 1 ? 'ein Gast liegt im Schnee' : `${r.buried} Gäste liegen im Schnee`);
+            evSay('warn', parts.length ? `Die Lawine ist durch: ${parts.join(', ')}. Raupen raus und räumen!` : 'Die Lawine ist durch – zum Glück ohne Schaden an Pisten und Bahnen.', r.buried ? 'rescue' : 'piste');
+        }
+    }
+    // Luftverkehr: Werbeflugzeug (solange eine Kampagne läuft) und Gäste am Gleitschirm
+    const airTraffic = createAirTraffic({ scene, half, heightAt: (x, z) => surfaceAt(x, z), topY: () => yAtSmooth(RSX, RSY) });
+    const airState = { adText: '', launches: [], land: { x: 0, z: 0 }, day: true, guests: 0, storm: false, onLanded: null };
+    function updateAir(t, dt) {
+        if (replaying) return;
+        const v = villages.find(q => q.main) || villages[0];
+        airState.adText = eco.ad && eco.ad.daysLeft > 0 ? `SKI ${(v && v.name) || 'ALPIN'} – JETZT!`.toUpperCase() : '';
+        airState.launches = placedBuildings.filter(b => b.type === 'paraglide').map(b => ({ x: b.rec.x, z: b.rec.z }));
+        if (v) { const wp = worldPosSmooth(v.gx, v.gy); airState.land.x = wp.x; airState.land.z = wp.z; }
+        airState.day = dayNow > 0.45; airState.guests = sim.active; airState.storm = (weather.fall || 0) > 0.6;
+        airState.onLanded = () => { money += 45; sim.revenue += 45; sim.dayRevenue += 45; if (onMoney) onMoney(money); };
+        airTraffic.update(t, dt, airState);
+    }
     /** Wo spielt das Thema eines Funkspruchs? Weltpunkt für den Sprung der Kamera – oder null, wenn es keinen Ort hat. */
     function radioSpot(id) {
         const P = (v) => (v ? { x: v.x, z: v.z } : null);
@@ -5250,6 +5381,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (id === 'medic') return bld(['medical', 'hospital']);
         if (id === 'gastro2') return bld(['huette', 'restaurant', 'bergrest', 'imbiss', 'apres', 'panorama', 'sterne']);
         if (id === 'race') return bld(['racecourse']);
+        if (id === 'avalanche' && avalanche) { const q = avalanche.pts[avalanche.pts.length >> 1]; return G(q.gx, q.gy); }
         if (id === 'mood') { const g = guestPool.find(q => q.gripe && q.mesh && q.mesh.visible); return g ? P(g.mesh.position) : null; }
         return null;
     }
@@ -5299,7 +5431,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // Presse. Jedes Ereignis hat eine Frist und ein Ziel; wer es schafft, bekommt eine Prämie. Der Funk kündigt
     // es an und meldet den Ausgang, das HUD zeigt Ziel und Restzeit.
     let ev = null, evWait = 140;
-    const evSay = (tone, text, who = 'boss') => { if (onRadio) onRadio({ id: 'event', tone, text, who, at: radioSpot(ev && ev.def === EVENTS.accident ? 'hurtWait' : ev && ev.def === EVENTS.race ? 'race' : ev && ev.def === EVENTS.storm ? 'groom' : '') }); radio.wait = 25; };
+    const evSay = (tone, text, who = 'boss') => { if (onRadio) onRadio({ id: 'event', tone, text, who, at: radioSpot(avalanche ? 'avalanche' : ev && ev.def === EVENTS.accident ? 'hurtWait' : ev && ev.def === EVENTS.race ? 'race' : ev && ev.def === EVENTS.storm ? 'groom' : '') }); radio.wait = 25; };
     const evPay = (sum) => { money += sum; sim.revenue += sum; sim.dayRevenue += sum; if (onMoney) onMoney(money); };
     const EVENTS = {
         rush: {
@@ -5329,6 +5461,15 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 if (ok) evPay(5000);
                 evSay(ok ? 'good' : 'warn', ok ? 'Alle versorgt, niemand ernsthaft verletzt. Saubere Arbeit – 5.000 € von der Versicherung.' : 'Die Zeit ist um und es liegen noch Leute draußen. Das spricht sich herum.', 'rescue');
                 if (!ok) sim.satisfaction = Math.max(10, sim.satisfaction - 6); }
+        },
+        avalanche: {
+            name: 'Lawine', secs: 170, goal: 'Räumen: Pistenzustand wieder mindestens 55 % und alle Bahnen laufen',
+            ok() { avaPlan = planAvalanche(); return !!avaPlan; },
+            start() { startAvalanche(avaPlan); evSay('warn', 'Lawine! Oberhalb der Piste hat sich ein Schneebrett gelöst – Achtung im Hang!', 'piste'); },
+            end() { const ok = sim.groom >= 55 && !breakdown;
+                clearAvalanche();
+                if (ok) evPay(7000);
+                evSay(ok ? 'good' : 'tip', ok ? 'Lawinenkegel geräumt, alles läuft wieder. Die Gemeinde zahlt 7.000 € für den schnellen Einsatz.' : 'Der Lawinenkegel ist weg, aber Pisten oder Bahn sind noch nicht wieder in Schuss. Mehr Raupen und eine Werkstatt hätten geholfen.', 'piste'); }
         },
         race: {
             name: 'Vereinsrennen', secs: 150, goal: 'Selbst auf der Rennstrecke eine Medaillenzeit fahren',
@@ -6509,10 +6650,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                         // ~3.3 Kacheln im Wechsel), tief in der Hocke, schnell
                         // Tore stehen (siehe makeRunDressing) bei z = −hl+2.5 + (i+0.5)/gates·(len−5.5),
                         // Seite (−1)^i, Versatz 1.7 — die Linie führt exakt durch jedes Tor.
-                        const len = rn.s1 - rn.s0, gates = Math.max(4, Math.round(len / 11));
+                        const len = rn.s1 - rn.s0, gates = Math.max(4, Math.round(len / 14));
                         const uu = Math.max(0, Math.min(1, (u * len - 2.5) / (len - 5.5)));
                         const ph = Math.PI * uu * gates - Math.PI / 2;
-                        sway = -3.4 * Math.cos(ph);                          // außen um die ÄUSSERE Torstange (bei 2.15) herum
+                        sway = -2.6 * Math.cos(ph);                          // außen um die ÄUSSERE Torstange (bei 2.15) herum
                         g._run.turn = -Math.sin(ph);
                     } else {
                         // Funpark/Kicker: die Schanzen sind im Gelände — hier nur
@@ -7003,7 +7144,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
             guests: () => guestPool, villagesNow: () => villages, noRender: (v) => { skipRender = !!v; },
-            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt), getSave: () => getSave(), loadSave: (d) => loadSave(d), roads: () => ({ discs: roadDiscs, lines: roadLines, lots: parkingLots }), breakLift: () => { const L = guestRoutes.find(r => r.kind === 'lift' && !r.broken); if (L && !breakdown) startBreakdown(L); return breakdown && { name: breakdown.L.name, phase: breakdown.phase }; }, runAt: (x, z) => skiRunAt(x, z), breakStep: (t, dt) => updateBreakdowns(t, dt), breakState: () => breakdown && { phase: breakdown.phase, t: breakdown.t, broken: breakdown.L.broken },
+            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt), getSave: () => getSave(), loadSave: (d) => loadSave(d), roads: () => ({ discs: roadDiscs, lines: roadLines, lots: parkingLots }), breakLift: () => { const L = guestRoutes.find(r => r.kind === 'lift' && !r.broken); if (L && !breakdown) startBreakdown(L); return breakdown && { name: breakdown.L.name, phase: breakdown.phase }; }, runAt: (x, z) => skiRunAt(x, z), air: () => airTraffic, airStep: (t, dt) => updateAir(t, dt), avaStep: (t, dt) => updateAvalanche(t, dt), avalanche: () => { const pts = planAvalanche(); if (pts) startAvalanche(pts); return pts && pts.length; }, avaState: () => avalanche && { t: avalanche.t, hit: avalanche.hit, result: avalanche.result }, removePiste: (i) => removePiste(guestRoutes.filter(r => r.kind === 'piste')[i]), eco: () => eco, breakStep: (t, dt) => updateBreakdowns(t, dt), breakState: () => breakdown && { phase: breakdown.phase, t: breakdown.t, broken: breakdown.L.broken },
             // Prüfhilfe: einen Gast an dieser Stelle verletzt hinlegen (braucht Gäste im Vorrat)
             hurt: (gx, gy) => { const g = guestPool.find(q => !q.hurt && q.mesh); if (!g) return false; const w = worldPosSmooth(gx, gy); g.mesh.position.copy(w); g._prevPos?.copy?.(w); g.mesh.visible = true; startFall(g, { gx, gy }); return true; },
             buildPiste: (pts, width) => { if (width) pisteWidth = width; return buildPistePath(pts); }, loipen: () => loipen,
@@ -7040,6 +7181,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         updateGuests(t, dt);
         updateRescues(t, dt);
         updateBreakdowns(t, dt);
+        updateAvalanche(t, dt);
+        updateAir(t, dt);
         if (!(skiRun && skiRun.active())) orbit.step();     // laufender Kameraflug
         updateFog();           // Dunst an Kartengröße und Zoom anpassen
         updateConstructions(dt);
@@ -7155,7 +7298,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         reservoir_l:  { cost: 420000, r: 11.5, make: () => makeBigReservoir() },
         kicker:       { cost: 18500,  r: 3.4,  make: () => makeRunDressing('kicker', 8) },
         halfpipe:     { cost: 186000, r: 6.5,  make: () => makeRunDressing('halfpipe', 20) },
-        racecourse:   { cost: 340000, r: 10.0, make: () => makeRunDressing('racecourse', 54) },
+        racecourse:   { cost: 340000, r: 10.0, make: () => makeRunDressing('racecourse', 84) },
         cannon_s:     { cost: 9800,   r: 1.0, make: () => makeSnowCannon('small') },
         cannon_l:     { cost: 55200,  r: 1.6, make: () => makeSnowCannon('large') },
         sauna:        { cost: 195000, r: 2.6, make: () => makeSauna() },
@@ -7209,6 +7352,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         pending = p;
         // Abriss vormerken: zeigen, WELCHES Gebäude gemeint ist
         if (demolishMark) { scene.remove(demolishMark); demolishMark.geometry.dispose(); demolishMark.material.dispose(); demolishMark = null; }
+        if (p && p.kind === 'demolish' && p.piste) {
+            // zum Abriss vorgemerkte Piste: rote Linie über ihre ganze Länge
+            const pts3 = p.piste.path.map(q => { const w = worldPosSmooth(q.gx, q.gy); return new THREE.Vector3(w.x, w.y + 0.7, w.z); });
+            demolishMark = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts3),
+                new THREE.LineBasicMaterial({ color: 0xff3b3b, depthTest: false, fog: false }));
+            demolishMark.renderOrder = 999; demolishMark.frustumCulled = false;
+            scene.add(demolishMark);
+        }
         if (p && p.kind === 'demolish' && p.building) {
             const r = (p.building.rec?.r || 2) + 0.9;
             demolishMark = new THREE.Mesh(
@@ -7219,7 +7370,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             demolishMark.renderOrder = 999;
             scene.add(demolishMark);
         }
-        if (onPending) onPending(p ? { kind: p.kind, cost: p.cost || 0, ok: !!p.ok, why: p.why || '', count: p.count || 0 } : null);
+        if (onPending) onPending(p ? { kind: p.kind, cost: p.cost || 0, ok: !!p.ok, why: p.why || '', count: p.count || 0, label: p.label || '' } : null);
     };
 
     // Straßen-Werkzeug (zwei Klicks: Start, Ende) — Gamer baut Straßen wie im 2D
@@ -8711,6 +8862,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         for (const q of rawPts) { const last = pts[pts.length-1]; if (!last || Math.hypot(last.gx-q.gx, last.gy-q.gy) > 1.5) pts.push(q); }
         if (pts.length < 2) return null;
         if (pisteWidth === 'loipe' && !pisteLit) return buildLoipePath(pts);
+        const sceneMark = scene.children.length;      // alles, was ab hier in die Szene kommt, gehört zu dieser Piste (für den Abriss)
         // so orientieren, dass Punkt 0 oben (höchster) ist
         if (yAtSmooth(pts[0].gx, pts[0].gy) < yAtSmooth(pts[pts.length-1].gx, pts[pts.length-1].gy)) pts.reverse();
         // Zusammenlaufende Pisten intelligent verbinden: Start/Ende nahe einer
@@ -8844,6 +8996,47 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const bw = worldPosSmooth(bot.gx, bot.gy);
         addSelectable({ type: 'piste', cost: 0, x: bw.x, z: bw.z, r: 3.2,
             piste: { no: pisteNo, km: +totalKm.toFixed(1), diff: domDiff, width: pisteLit ? 'medium' : pisteWidth } });
+        rt.no = pisteNo; rt.km = totalKm; rt.parts = scene.children.slice(sceneMark);
+        return true;
+    };
+    /** Piste, die an dieser Stelle (Rasterkoordinaten) liegt – die nächstgelegene Achse innerhalb ihrer Breite. */
+    const pisteRouteAt = (gx, gy) => {
+        let best = null, bd = Infinity;
+        for (const rt of guestRoutes) {
+            if (rt.kind !== 'piste' || !rt.path || !rt.parts) continue;
+            for (let i = 0; i < rt.path.length - 1; i++) {
+                const a = rt.path[i], b = rt.path[i + 1], ex = b.gx - a.gx, ey = b.gy - a.gy, l2 = ex * ex + ey * ey || 1;
+                const f = Math.max(0, Math.min(1, ((gx - a.gx) * ex + (gy - a.gy) * ey) / l2));
+                const d = Math.hypot(gx - (a.gx + ex * f), gy - (a.gy + ey * f));
+                if (d < (rt.snowW || 3) + 0.6 && d < bd) { bd = d; best = rt; }
+            }
+        }
+        return best;
+    };
+    const pisteRefund = (rt) => Math.round(pisteCostForPts(rt.path) * 0.3);
+    /**
+     * Piste abreißen: Band, Stangen, Flutlicht und Schild verschwinden, Anlagen darauf (Funpark, Rennstrecke …) gehen
+     * mit, Gäste auf der Piste planen neu. Der gerodete Wald und der Schnee am Boden bleiben, wie sie sind.
+     */
+    const removePiste = (rt, refund = true) => {
+        const ri = guestRoutes.indexOf(rt);
+        if (ri < 0 || rt.kind !== 'piste') return false;
+        for (const rn of (rt.runs || []).slice()) { const bi = placedBuildings.findIndex(b => b.mesh === rn.mesh); if (bi >= 0) demolishIndex(bi, true); }
+        for (const m of rt.parts || []) {
+            scene.remove(m);
+            const fi = floodlights.indexOf(m.userData); if (fi >= 0) floodlights.splice(fi, 1);
+            m.traverse?.(o => { o.geometry?.dispose?.(); });
+        }
+        const bi = pisteBeds.indexOf(rt.bed); if (bi >= 0) pisteBeds.splice(bi, 1);
+        guestRoutes.splice(ri, 1);
+        piste[rt.diff] = Math.max(0, piste[rt.diff] - (rt.km || 0)); piste.total = Math.max(0, piste.total - (rt.km || 0));
+        const si = selectables.findIndex(q => q.type === 'piste' && q.piste && q.piste.no === rt.no); if (si >= 0) selectables.splice(si, 1);
+        if (selectedSel && selectedSel.type === 'piste' && selectedSel.piste?.no === rt.no) { selectedSel = null; if (onSelect) onSelect(null); }
+        for (const g of guestPool) if (g.route === rt) { g.route = null; g.state = null; g._run = null; }
+        refreshPisteJoins();
+        logAction({ a: 'dp', x: +rt.path[0].gx.toFixed(2), y: +rt.path[0].gy.toFixed(2) });
+        if (refund && !replaying) { money += pisteRefund(rt); if (onMoney) onMoney(money); }
+        emitStats();
         return true;
     };
     const clearPisteDraft = () => {
@@ -9691,7 +9884,14 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             const d = Math.hypot(b.rec.x - pt.x, b.rec.z - pt.z);
             if (d < b.rec.r + 1 && d < bestD) { bestD = d; best = i; }
         });
-        if (best < 0) { if (isTouchEvent(e)) setPending(null); return; }
+        if (best < 0) {
+            // kein Gebäude getroffen: liegt hier eine Piste? Die wird immer erst nach Rückfrage abgerissen –
+            // ein Fehlklick soll keine ganze Abfahrt kosten.
+            const gq = worldToGrid(pt.x, pt.z), prt = pisteRouteAt(gq.gx, gq.gy);
+            if (prt) setPending({ kind: 'demolish', piste: prt, cost: -pisteRefund(prt), ok: true, label: 'Piste ' + prt.no });
+            else if (isTouchEvent(e) || pending) setPending(null);
+            return;
+        }
         // Finger: ein Fehltipper soll kein Hotel kosten – erst nachfragen
         if (isTouchEvent(e)) {
             const b = placedBuildings[best];
@@ -9895,7 +10095,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (!p || !p.ok) return;
         setPending(null);
         if (p.kind === 'piste') { finishPiste(); return; }
-        if (p.kind === 'demolish') { const i = placedBuildings.indexOf(p.building); if (i >= 0) demolishIndex(i); return; }
+        if (p.kind === 'demolish') { if (p.piste) { removePiste(p.piste); return; } const i = placedBuildings.indexOf(p.building); if (i >= 0) demolishIndex(i); return; }
         onUp({ __confirmed: true, __pt: p.pt, pointerType: 'touch', clientX: 0, clientY: 0 });
     };
     /** Vorgemerkte Aktion verwerfen; das Werkzeug bleibt aktiv, man kann neu antippen. */
@@ -9957,11 +10157,11 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
      * und die Richtzeit `par` = Goldzeit. Sie hängt vom Gefälle ab: steile Strecken sind schneller.
      */
     const raceSetup = (rn) => {
-        const len = rn.hl * 2, n = Math.max(4, Math.round(len / 11)), gates = [], v3 = new THREE.Vector3();
+        const len = rn.hl * 2, n = Math.max(4, Math.round(len / 14)), gates = [], v3 = new THREE.Vector3();
         rn.mesh.updateWorldMatrix(true, false);
         for (let i = 0; i < n; i++) {
             const z = -rn.hl + 2.5 + (i + 0.5) / n * (len - 5.5), side = i % 2 === 0 ? 1 : -1;
-            v3.set(side * 2.2, 0, z).applyMatrix4(rn.mesh.matrixWorld);
+            v3.set(side * 1.5, 0, z).applyMatrix4(rn.mesh.matrixWorld);
             const ox = (v3.x + half) / tile - rn.gx, oy = (v3.z + half) / tile - rn.gy;
             gates.push({ along: (ox * rn.dx + oy * rn.dy) * tile, across: (-ox * rn.dy + oy * rn.dx) * tile });
         }
@@ -9971,7 +10171,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         rn.gates = gates;
         rn.par = (len * tile) / (RACE_V0 + RACE_V1 * grade) + n * 0.12;
     };
-    const RACE_V0 = 4.6, RACE_V1 = 12;      // Tempo der Richtzeit: Grundwert + Anteil je Gefälle (an Probefahrten abgeglichen)
+    const RACE_V0 = 5.6, RACE_V1 = 13.3;      // Tempo der Richtzeit: Grundwert + Anteil je Gefälle (an Probefahrten abgeglichen)
     const skiRunAt = (wx, wz) => {
         const gx = (wx + half) / tile, gy = (wz + half) / tile;
         for (const rt of guestRoutes) {
@@ -10170,6 +10370,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                     ok = !!buildPistePath((a.pts || []).map(q => ({ gx: +q[0], gy: +q[1] })));
                 } else if (a.a === 'r') {
                     addRoad(+a.x0, +a.y0, +a.x1, +a.y1, 3.6); ok = true;
+                } else if (a.a === 'dp') {
+                    const prt = guestRoutes.find(r => r.kind === 'piste' && r.parts && Math.hypot(r.path[0].gx - a.x, r.path[0].gy - a.y) < 1.5);
+                    if (prt) ok = !!removePiste(prt, false);
                 } else if (a.a === 'd') {
                     const i = placedBuildings.findIndex(b => b.type === a.t && Math.abs(b.rec.x - a.x) < 0.8 && Math.abs(b.rec.z - a.z) < 0.8);
                     if (i >= 0) ok = !!demolishIndex(i);
