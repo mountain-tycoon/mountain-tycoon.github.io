@@ -249,8 +249,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 
 - Wer spricht: jede Meldung trägt `who` (`boss` Betriebsleitung, `rescue` Bergrettung, `piste` Pistenchef, `tech`
   Werkstatt; Zuordnung je Thema in `WHO`). `World3D.jsx` zeigt die Karte OBEN unter der Kopfleiste mit Bild und Namen.
-  Jedes Gebiet hat eine eigene Mannschaft (`RADIO_TEAMS` je Level-Id: Name aus der Gegend + Bild aus `public/icons`;
-  ein neues Level braucht dort einen Eintrag, sonst spricht die erste Mannschaft). Solange ein Ereignis läuft, schweigt
+  Jedes Gebiet hat eine eigene Mannschaft (`RADIO_TEAMS` je Level-Id: Namen aus der Gegend; Bilder
+  `public/icons/radio_<level>_<rolle>.png`). Die Bilder entstehen mit `tools/make-radio-faces.py` aus den gemalten
+  Gästeporträts (Kleidung je Rolle und Gebiet umgefärbt, teils gespiegelt) – ein neues Level dort und in `RADIO_TEAMS`
+  eintragen, sonst spricht die erste Mannschaft. Solange ein Ereignis läuft, schweigt
   der übrige Funk.
 - Ort eines Spruchs: die Szene gibt `at: { x, z }` mit (`radioSpot(id)`: längste Schlange, ältester Verletzter,
   schlechteste Piste, vollster Parkplatz, defekte Talstation …). Antippen der Karte fliegt dorthin (`focusAt`); zur Seite

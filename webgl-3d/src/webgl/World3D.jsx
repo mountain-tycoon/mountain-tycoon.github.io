@@ -663,23 +663,24 @@ const SteerPad = ({ side, onHold }) => {
 // Wer am Funk spricht: Betriebsleitung, Bergrettung, Pistenchef, Werkstatt – in jedem Gebiet eine eigene Mannschaft
 // mit Namen aus der Gegend (Bilder aus public/icons). Ohne Eintrag (Sandbox) gilt die erste Mannschaft.
 const RADIO_ROLES = { boss: 'Betriebsleitung', rescue: 'Bergrettung', piste: 'Pistenchef', tech: 'Werkstatt' };
-const T = (boss, rescue, piste, tech) => ({ boss, rescue, piste, tech });
+// Bilder: public/icons/radio_<level>_<rolle>.png – aus den gemalten Gästeporträts abgeleitet (Kleidung je Rolle und
+// Gebiet umgefärbt, teils gespiegelt; erzeugt mit tools/make-radio-faces.py).
 const RADIO_TEAMS = {
-    mittelgebirge: T(['Toni', 'guest_m_schnauzer'], ['Vroni', 'guest_f_lehrerin'], ['Sepp', 'guest_mittel'], ['Lois', 'guest_m_brille']),
-    vorland:       T(['Resi', 'guest_f_alt'], ['Flori', 'guest_retter'], ['Hias', 'guest_m_board'], ['Wastl', 'guest_sparfuchs']),
-    schweiz:       T(['Urs', 'guest_opa'], ['Reto', 'guest_skilehrer'], ['Beat', 'guest_vater'], ['Heidi', 'guest_f_brille']),
-    frankreich:    T(['Élodie', 'guest_f_luxus'], ['Luc', 'guest_retter2'], ['Mathieu', 'guest_teen_m'], ['Gaston', 'guest_rentner']),
-    alpen:         T(['Franz', 'guest_premium'], ['Anna', 'guest_f_jung'], ['Luis', 'guest_snowboarder'], ['Burgl', 'guest_f_braun']),
-    italien:       T(['Giulia', 'guest_f_locken'], ['Marco', 'guest_skilehrer2'], ['Luca', 'guest_premium2'], ['Enzo', 'guest_opa']),
-    norwegen:      T(['Ingrid', 'guest_f_mittel'], ['Lars', 'guest_retter'], ['Ole', 'guest_m_board'], ['Sven', 'guest_m_brille']),
-    rockies:       T(['Jack', 'guest_luxus'], ['Kate', 'guest_f_lehrerin'], ['Tyler', 'guest_snowboarder2'], ['Hank', 'guest_rentner']),
-    kanada:        T(['Claire', 'guest_f_normal'], ['Ben', 'guest_skilehrer'], ['Maya', 'guest_snowboarderin'], ['Doug', 'guest_sparfuchs']),
-    anden:         T(['Diego', 'guest_vater'], ['Camila', 'guest_mutter'], ['Mateo', 'guest_premium2'], ['Pablo', 'guest_opa']),
-    japan:         T(['Kenji', 'guest_mittel'], ['Yuki', 'guest_f_jung'], ['Haru', 'guest_teen_m'], ['Sato', 'guest_m_brille'])
+    mittelgebirge: { boss: 'Toni', rescue: 'Vroni', piste: 'Sepp', tech: 'Lois' },
+    vorland:       { boss: 'Resi', rescue: 'Flori', piste: 'Hias', tech: 'Wastl' },
+    schweiz:       { boss: 'Urs', rescue: 'Reto', piste: 'Beat', tech: 'Heidi' },
+    frankreich:    { boss: 'Élodie', rescue: 'Luc', piste: 'Mathieu', tech: 'Gaston' },
+    alpen:         { boss: 'Franz', rescue: 'Anna', piste: 'Luis', tech: 'Burgl' },
+    italien:       { boss: 'Giulia', rescue: 'Marco', piste: 'Luca', tech: 'Enzo' },
+    norwegen:      { boss: 'Ingrid', rescue: 'Lars', piste: 'Liv', tech: 'Sven' },
+    rockies:       { boss: 'Jack', rescue: 'Kate', piste: 'Tyler', tech: 'Hank' },
+    kanada:        { boss: 'Claire', rescue: 'Ben', piste: 'Maya', tech: 'Doug' },
+    anden:         { boss: 'Diego', rescue: 'Camila', piste: 'Mateo', tech: 'Pablo' },
+    japan:         { boss: 'Kenji', rescue: 'Yuki', piste: 'Haru', tech: 'Aiko' }
 };
 const radioPerson = (level, who) => {
-    const team = RADIO_TEAMS[level?.id] || RADIO_TEAMS.mittelgebirge, role = team[who] ? who : 'boss';
-    return { name: team[role][0], icon: team[role][1], role: RADIO_ROLES[role] };
+    const id = RADIO_TEAMS[level?.id] ? level.id : 'mittelgebirge', team = RADIO_TEAMS[id], role = team[who] ? who : 'boss';
+    return { name: team[role], icon: `radio_${id}_${role}`, role: RADIO_ROLES[role] };
 };
 
 /**
