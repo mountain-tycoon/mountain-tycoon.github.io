@@ -682,6 +682,50 @@ const radioPerson = (level, who) => {
     return { name: team[role][0], icon: team[role][1], role: RADIO_ROLES[role] };
 };
 
+/**
+ * Funkspruch als Karte: zur Seite wischen (oder das Kreuz) schließt sie, Antippen springt zum Ort des Themas.
+ * Eigene Komponente außerhalb von World3D, damit sie beim Neuzeichnen des HUD nicht neu angelegt wird.
+ */
+const RadioCard = ({ msg, person: P, canJump, compact, onJump, onClose }) => {
+    const [dx, setDx] = useState(0);
+    const [gone, setGone] = useState(0);            // -1 / 1: fliegt gerade nach links / rechts hinaus
+    const drag = useRef(null);
+    const down = (e) => { if (e.target.closest('button')) return; drag.current = { x: e.clientX, id: e.pointerId, moved: false }; try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ältere Browser */ } };
+    const move = (e) => { const d = drag.current; if (!d || d.id !== e.pointerId) return; const v = e.clientX - d.x; if (Math.abs(v) > 6) d.moved = true; if (d.moved) setDx(v); };
+    const up = (e) => {
+        const d = drag.current; if (!d || d.id !== e.pointerId) return;
+        drag.current = null;
+        const v = e.clientX - d.x;
+        if (d.moved && Math.abs(v) > 70) { setGone(Math.sign(v)); setTimeout(onClose, 170); }
+        else { setDx(0); if (!d.moved && canJump) onJump(); }
+    };
+    const shift = gone ? gone * 520 : dx;
+    return (
+        <div onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={() => { drag.current = null; setDx(0); }}
+             title={canJump ? 'Antippen: dorthin springen · wischen: schließen' : 'Wischen: schließen'}
+             style={{ ...chip, pointerEvents: 'auto', cursor: canJump ? 'pointer' : 'grab', maxWidth: 'min(620px, 100%)', boxSizing: 'border-box', textAlign: 'left',
+                      display: 'flex', alignItems: 'center', gap: 11, padding: 8, touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none',
+                      transform: `translateX(${shift}px)`, opacity: Math.max(0, 1 - Math.abs(shift) / 260),
+                      transition: drag.current && !gone ? 'none' : 'transform 0.17s ease-out, opacity 0.17s ease-out',
+                      borderLeft: `3px solid ${msg.tone === 'warn' ? '#fcd34d' : msg.tone === 'good' ? '#86efac' : 'rgba(232,238,246,0.6)'}` }}>
+            <img src={`${import.meta.env.BASE_URL || '/'}icons/${P.icon}.png`} alt="" width={44} height={44} draggable={false}
+                 style={{ flex: '0 0 auto', borderRadius: '50%', objectFit: 'cover', background: 'rgba(232,238,246,0.12)', border: '1px solid rgba(232,238,246,0.25)' }}
+                 onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: '1 1 auto' }}>
+                <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9aa0a8' }}>
+                    Funk · {P.name} · {P.role}{canJump && <span style={{ color: '#e8eef6' }}> · antippen: hinspringen</span>}
+                </span>
+                <span style={{ fontSize: 13, lineHeight: 1.4, color: '#e8eef6' }}>{msg.text}</span>
+            </div>
+            {!compact && (
+                <button onClick={onClose} title="Schließen" aria-label="Funkspruch schließen"
+                        style={{ flex: 'none', width: 28, height: 28, borderRadius: 9, padding: 0, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                 background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed' }}><Ico name="close" size={12} /></button>
+            )}
+        </div>
+    );
+};
+
 /** Anzeige und Steuerung beim Selbstfahren. */
 const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, onShoot, onFire, onGlide, onCat }) => {
     // Zwei Lenktasten: eine = lenken, beide zugleich = bremsen
@@ -1537,30 +1581,11 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                             {!compact && <span style={{ fontSize: 11.5, color: '#c8ccd2' }}>{gameEvent.goal}</span>}
                         </div>
                     )}
-                    {radioMsg && (() => {
-                        const P = radioPerson(level, radioMsg.who), canJump = !!radioMsg.at && !skiing;
-                        return (
-                            <div onClick={() => { if (canJump) apiRef.current?.focusAt?.(radioMsg.at.x, radioMsg.at.z); }}
-                                 title={canJump ? 'Dorthin springen' : undefined}
-                                 style={{ ...chip, pointerEvents: 'auto', cursor: canJump ? 'pointer' : 'default', maxWidth: 'min(620px, 100%)', boxSizing: 'border-box', textAlign: 'left',
-                                          display: 'flex', alignItems: 'center', gap: 11, padding: '8px 8px 8px 8px',
-                                          borderLeft: `3px solid ${radioMsg.tone === 'warn' ? '#fcd34d' : radioMsg.tone === 'good' ? '#86efac' : 'rgba(232,238,246,0.6)'}` }}>
-                                <img src={`${import.meta.env.BASE_URL || '/'}icons/${P.icon}.png`} alt="" width={44} height={44}
-                                     style={{ flex: '0 0 auto', borderRadius: '50%', objectFit: 'cover', background: 'rgba(232,238,246,0.12)', border: '1px solid rgba(232,238,246,0.25)' }}
-                                     onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: '1 1 auto' }}>
-                                    <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9aa0a8' }}>
-                                        Funk · {P.name} · {P.role}{canJump && <span style={{ color: '#e8eef6' }}> · antippen: hinspringen</span>}
-                                    </span>
-                                    <span style={{ fontSize: 13, lineHeight: 1.4, color: '#e8eef6' }}>{radioMsg.text}</span>
-                                </div>
-                                <button onClick={(e) => { e.stopPropagation(); clearTimeout(window.__radioT); setRadioMsg(null); }} title="Schließen" aria-label="Funkspruch schließen"
-                                        style={{ flex: 'none', width: compact ? 34 : 28, height: compact ? 34 : 28, borderRadius: 9, padding: 0, cursor: 'pointer',
-                                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                                 background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed' }}><Ico name="close" size={compact ? 15 : 12} /></button>
-                            </div>
-                        );
-                    })()}
+                    {radioMsg && (
+                        <RadioCard key={radioMsg.text} msg={radioMsg} person={radioPerson(level, radioMsg.who)} canJump={!!radioMsg.at && !skiing} compact={compact}
+                                   onJump={() => apiRef.current?.focusAt?.(radioMsg.at.x, radioMsg.at.z)}
+                                   onClose={() => { clearTimeout(window.__radioT); setRadioMsg(null); }} />
+                    )}
                 </div>
             )}
             <div style={{ position: 'fixed', left: 0, right: 0, bottom: skiing ? `calc(96px + ${SAFE_B})` : compact ? aboveBar : 20, zIndex: 13, boxSizing: 'border-box',

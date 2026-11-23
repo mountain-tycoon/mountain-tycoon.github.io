@@ -253,8 +253,10 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   ein neues Level braucht dort einen Eintrag, sonst spricht die erste Mannschaft). Solange ein Ereignis läuft, schweigt
   der übrige Funk.
 - Ort eines Spruchs: die Szene gibt `at: { x, z }` mit (`radioSpot(id)`: längste Schlange, ältester Verletzter,
-  schlechteste Piste, vollster Parkplatz, defekte Talstation …). Antippen der Karte fliegt dorthin (`focusAt`), das
-  Kreuz schließt sie. Sprüche über eine Bahn nennen ihren Namen – bei neuen Meldungen ebenso halten.
+  schlechteste Piste, vollster Parkplatz, defekte Talstation …). Antippen der Karte fliegt dorthin (`focusAt`); zur Seite
+  wischen schließt sie (`RadioCard`, am Rechner zusätzlich ein Kreuz). Sprüche über eine Bahn nennen ihren Namen – bei neuen Meldungen ebenso halten.
+- Pistenzustand: gefunkt wird erst unter 32 % (ohne Raupe 42 %) und höchstens alle sieben Minuten, mit der Zahl im
+  Text – der Wert schwankt ständig, die frühere Schwelle von 50 % ergab Dauerfunk. Der Verschleiß (`bedWear`) ist dazu halbiert.
 
 ## Ereignisse, eigene Einsätze, Belohnungen
 - **Ereignisse** (`EVENTS`, `eventTick` in `Scene3D.js`): Ferienansturm, Sturm, Unfall, Presse – kommen von Zeit zu

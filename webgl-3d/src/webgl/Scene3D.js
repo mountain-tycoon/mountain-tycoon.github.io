@@ -2104,7 +2104,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         // Verschleiß bewusst TRÄGE: eine frisch gewalzte Piste soll lange gut
         // aussehen und erst gegen Nachmittag zerfahren wirken. Die Testwerte
         // von vorher waren rund viermal so schnell.
-        const bedWear = dt * (0.0026 + Math.min(0.016, sim.active * 0.0003));
+        const bedWear = dt * (0.0013 + Math.min(0.010, sim.active * 0.0002));    // Nov. 2026 nochmals halbiert: der Zustand fiel schneller, als die Raupen walzen konnten
         let bedSum = 0, bedN = 0;
         for (const bed of pisteBeds) {
             if (!bed.groom || bed.noWear) continue;      // Loipen verspuren nicht (keine Raupe fährt sie ab)
@@ -5272,7 +5272,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             ['hurtWait', longWait, 'warn', medic ? 'Ein Verletzter wartet schon viel zu lange! Schnapp dir Skidoo oder Heli und hol ihn.' : 'Ein Verletzter liegt auf der Piste und niemand kommt – wir brauchen dringend eine Sanitätsstation.'],
             ['hurtMany', hurt >= 3, 'warn', medic ? `${hurt} Verletzte warten auf Hilfe. Eine zweite Station oder die Klinik mit Heli würde helfen.` : `${hurt} Verletzte und keine Bergrettung. Bau eine Sanitätsstation!`],
             ['medic',   medic === 0 && guests > 45, 'tip', 'Bei so viel Betrieb passiert bald etwas. Eine Sanitätsstation wäre jetzt klug.'],
-            ['groom',   sim.groom < 50 && pistes.length > 0, 'warn', cats ? 'Die Pisten sind völlig zerfahren, die Raupen kommen nicht nach. Noch eine Garage – oder fahr selbst eine Runde.' : 'Die Pisten sind zerfahren und wir haben keine Pistenraupe. Bau eine Garage.'],
+            ['groom',   sim.groom < (cats ? 32 : 42) && pistes.length > 0, 'warn', cats ? `Pistenzustand nur noch ${Math.round(sim.groom)} %, die Raupen kommen nicht nach. Noch eine Garage – oder fahr selbst eine Runde.` : 'Die Pisten sind zerfahren und wir haben keine Pistenraupe. Bau eine Garage.'],
             ['queue',   queue >= 14, 'warn', `An der Talstation der ${(queueL && queueL.name) || 'Bahn'} stehen ${queue} Leute an. Eine zweite Bahn oder eine größere entlastet.`],
             ['toilet',  built.toilet === 0 && guests > 35, 'warn', 'Die Gäste suchen verzweifelt ein WC. Toiletten kosten wenig und heben die Laune.'],
             ['gastro',  totalGastro() === 0 && guests > 25, 'warn', 'Hunger am Berg! Keine einzige Hütte – ein Imbiss oder eine Hütte bringt Geld und gute Laune.'],
@@ -5287,7 +5287,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         const WHO = { hurtWait: 'rescue', hurtMany: 'rescue', medic: 'rescue', groom: 'piste', powder: 'piste' };
         if (ev) { radio.wait = 6; return; }                        // während eines Ereignisses spricht nur das Ereignis
         for (const [id, cond, tone, text] of msgs) {
-            if (!cond || radio.t - (radio.last[id] ?? -1e9) < (tone === 'good' ? 420 : 170)) continue;
+            if (!cond || radio.t - (radio.last[id] ?? -1e9) < (tone === 'good' || id === 'groom' ? 420 : 170)) continue;      // der Pistenzustand schwankt ständig – nicht dauernd darüber funken
             radio.last[id] = radio.t; radio.wait = 28;
             onRadio({ id, tone, text, who: WHO[id] || 'boss', at: radioSpot(id) });
             return;
