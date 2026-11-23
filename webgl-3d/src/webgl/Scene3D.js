@@ -5145,15 +5145,15 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         g.userData.dispose = () => { geo.dispose(); for (const m of puffs) m.material.dispose(); };
         return g;
     };
-    const breakSay = (tone, text) => { if (onRadio) onRadio({ id: 'break', tone, text, who: 'tech' }); radio.wait = Math.max(radio.wait, 12); };
+    const breakSay = (tone, text) => { const L = breakdown && breakdown.L, wp = L ? worldPosSmooth(L.bottom.gx, L.bottom.gy) : null; if (onRadio) onRadio({ id: 'break', tone, text, who: 'tech', at: wp ? { x: wp.x, z: wp.z } : null }); radio.wait = Math.max(radio.wait, 12); };
     const startBreakdown = (L) => {
         const bp = worldPosSmooth(L.bottom.gx, L.bottom.gy);
         const smoke = makeSmoke(); smoke.position.set(bp.x, bp.y + 2.2, bp.z); scene.add(smoke);
         L.broken = true;
         breakdown = { L, smoke, t: 0, phase: 'wait', from: null, veh: null, fixT: 0 };
         sim.breakdowns = (sim.breakdowns || 0) + 1;
-        if (built.workshop > 0) breakSay('warn', `Die ${L.name || 'Bahn'} steht, der Antrieb raucht! Ich bin mit dem Skidoo unterwegs.`);
-        else breakSay('warn', `Die ${L.name || 'Bahn'} steht, der Antrieb raucht! Ohne eigene Werkstatt muss der Kundendienst aus dem Tal kommen – das dauert und kostet ${BREAK.extCost.toLocaleString('de-DE')} €.`);
+        if (built.workshop > 0) breakSay('warn', `Die ${L.name || 'Bahn'} steht, an der Talstation raucht der Antrieb! Ich bin mit dem Skidoo unterwegs.`);
+        else breakSay('warn', `Die ${L.name || 'Bahn'} steht, an der Talstation raucht der Antrieb! Ohne eigene Werkstatt muss der Kundendienst aus dem Tal kommen – das dauert und kostet ${BREAK.extCost.toLocaleString('de-DE')} €.`);
     };
     const endBreakdown = (cost, text) => {
         const B = breakdown; if (!B) return;
@@ -5228,13 +5228,39 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             }
         }
     }
+    /** Wo spielt das Thema eines Funkspruchs? Weltpunkt für den Sprung der Kamera – oder null, wenn es keinen Ort hat. */
+    function radioSpot(id) {
+        const P = (v) => (v ? { x: v.x, z: v.z } : null);
+        const G = (gx, gy) => P(worldPosSmooth(gx, gy));
+        const lifts = guestRoutes.filter(r => r.kind === 'lift');
+        const bld = (types) => { const b = placedBuildings.find(q => types.includes(q.type)); return b ? { x: b.rec.x, z: b.rec.z } : null; };
+        const town = () => { const v = villages.find(q => q.main) || villages[0]; return v ? G(v.gx, v.gy) : null; };
+        if (id === 'queue') { let m = null; for (const r of lifts) if (!m || (r.queue || []).length > (m.queue || []).length) m = r; return m ? G(m.bottom.gx, m.bottom.gy) : null; }
+        if (id === 'hurtWait' || id === 'hurtMany') { const g = injured.slice().sort((a, b) => (b.hurtT || 0) - (a.hurtT || 0))[0]; return g && g.mesh ? P(g.mesh.position) : null; }
+        if (id === 'groom') {
+            let worst = null, wv = 2;
+            for (const bed of pisteBeds) { if (!bed.groom || bed.noWear || !bed.grid) continue; let sum = 0; for (let k = 0; k < bed.groom.length; k++) sum += bed.groom[k]; const m = sum / Math.max(1, bed.groom.length); if (m < wv) { wv = m; worst = bed; } }
+            if (!worst) return null;
+            const k = (worst.grid.length >> 2) * 2; return G(worst.grid[k], worst.grid[k + 1]);
+        }
+        if (id === 'parking') { let full = null, fr = -1; for (const l of parkingLots) { if (!l.spots?.length) continue; const r = (l.taken ? l.taken.size : 0) / l.spots.length; if (r > fr) { fr = r; full = l; } } return full ? G(full.gx, full.gy) : null; }
+        if (id === 'piste') return lifts[0] ? G(lifts[0].top.gx, lifts[0].top.gy) : null;
+        if (id === 'lift') return bld(['ticket']) || town();
+        if (id === 'ticket' || id === 'toilet' || id === 'beds') return town();
+        if (id === 'medic') return bld(['medical', 'hospital']);
+        if (id === 'gastro2') return bld(['huette', 'restaurant', 'bergrest', 'imbiss', 'apres', 'panorama', 'sterne']);
+        if (id === 'race') return bld(['racecourse']);
+        if (id === 'mood') { const g = guestPool.find(q => q.gripe && q.mesh && q.mesh.visible); return g ? P(g.mesh.position) : null; }
+        return null;
+    }
     function radioTick(dt) {
         radio.t += dt; radio.wait -= dt;
         if (!onRadio || replaying || radio.wait > 0) return;
         const lifts = guestRoutes.filter(r => r.kind === 'lift'), pistes = guestRoutes.filter(r => r.kind === 'piste');
         const guests = sim.active + sim.carActive, hurt = injured.length;
         const longWait = injured.some(g => (g.hurtT || 0) > 22);
-        const queue = lifts.reduce((m, r) => Math.max(m, (r.queue || []).length), 0);
+        const queueL = lifts.reduce((m, r) => (!m || (r.queue || []).length > (m.queue || []).length) ? r : m, null);
+        const queue = queueL ? (queueL.queue || []).length : 0;
         const fullLots = parkingLots.length > 0 && (sim.parkingRejects || 0) > 0 && (sim._tNow || 0) - (sim.parkingRejectT || 0) < 40
             && parkingLots.every(l => l.taken && l.taken.size >= l.spots.length);   // belegt = jeder Stellplatz hat ein Auto (occ zählt Autos, cap Gäste)
         const cats = catCapacity(), medic = built.medical + built.hospital;
@@ -5247,7 +5273,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             ['hurtMany', hurt >= 3, 'warn', medic ? `${hurt} Verletzte warten auf Hilfe. Eine zweite Station oder die Klinik mit Heli würde helfen.` : `${hurt} Verletzte und keine Bergrettung. Bau eine Sanitätsstation!`],
             ['medic',   medic === 0 && guests > 45, 'tip', 'Bei so viel Betrieb passiert bald etwas. Eine Sanitätsstation wäre jetzt klug.'],
             ['groom',   sim.groom < 50 && pistes.length > 0, 'warn', cats ? 'Die Pisten sind völlig zerfahren, die Raupen kommen nicht nach. Noch eine Garage – oder fahr selbst eine Runde.' : 'Die Pisten sind zerfahren und wir haben keine Pistenraupe. Bau eine Garage.'],
-            ['queue',   queue >= 14, 'warn', `An der Talstation stehen ${queue} Leute an. Eine zweite Bahn oder eine größere entlastet.`],
+            ['queue',   queue >= 14, 'warn', `An der Talstation der ${(queueL && queueL.name) || 'Bahn'} stehen ${queue} Leute an. Eine zweite Bahn oder eine größere entlastet.`],
             ['toilet',  built.toilet === 0 && guests > 35, 'warn', 'Die Gäste suchen verzweifelt ein WC. Toiletten kosten wenig und heben die Laune.'],
             ['gastro',  totalGastro() === 0 && guests > 25, 'warn', 'Hunger am Berg! Keine einzige Hütte – ein Imbiss oder eine Hütte bringt Geld und gute Laune.'],
             ['gastro2', totalGastro() > 0 && guests > 70 * totalGastro(), 'tip', 'Die Hütten sind überlaufen. Eine weitere Einkehr lohnt sich.'],
@@ -5263,7 +5289,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         for (const [id, cond, tone, text] of msgs) {
             if (!cond || radio.t - (radio.last[id] ?? -1e9) < (tone === 'good' ? 420 : 170)) continue;
             radio.last[id] = radio.t; radio.wait = 28;
-            onRadio({ id, tone, text, who: WHO[id] || 'boss' });
+            onRadio({ id, tone, text, who: WHO[id] || 'boss', at: radioSpot(id) });
             return;
         }
         radio.wait = 6;
@@ -5273,7 +5299,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // Presse. Jedes Ereignis hat eine Frist und ein Ziel; wer es schafft, bekommt eine Prämie. Der Funk kündigt
     // es an und meldet den Ausgang, das HUD zeigt Ziel und Restzeit.
     let ev = null, evWait = 140;
-    const evSay = (tone, text, who = 'boss') => { if (onRadio) onRadio({ id: 'event', tone, text, who }); radio.wait = 25; };
+    const evSay = (tone, text, who = 'boss') => { if (onRadio) onRadio({ id: 'event', tone, text, who, at: radioSpot(ev && ev.def === EVENTS.accident ? 'hurtWait' : ev && ev.def === EVENTS.race ? 'race' : ev && ev.def === EVENTS.storm ? 'groom' : '') }); radio.wait = 25; };
     const evPay = (sum) => { money += sum; sim.revenue += sum; sim.dayRevenue += sum; if (onMoney) onMoney(money); };
     const EVENTS = {
         rush: {
@@ -10237,6 +10263,12 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
          * Bei Gestrandeten wird die GRÖSSTE Ansammlung angeflogen, bei
          * Verletzten der erste Wartende — so sieht der Spieler sofort, wo es hakt.
          */
+        /** Kamera zu einem Weltpunkt führen (Funkspruch angeklickt). Beim Selbstfahren bleibt die Kamera bei der Figur. */
+        focusAt(x, z) {
+            if (skiRun && skiRun.active()) return false;
+            orbit.flyTo(new THREE.Vector3(x, surfaceAt(x, z), z), worldSpan * 0.11);
+            return true;
+        },
         focusProblem(kind) {
             // Parkplätze voll: Kamera zum vollsten Parkplatz, damit man sieht,
             // wo Platz fehlt — und ihn gleich im Infofeld hat.

@@ -247,9 +247,14 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   höchstens alle paar Minuten. `World3D.jsx` zeigt den Spruch (`radioMsg`) und ergänzt Erinnerungen an das nächste
   offene Ziel sowie „Ziel geschafft". Neue Probleme einfach in die Liste `msgs` einreihen (Reihenfolge = Dringlichkeit).
 
-- Wer spricht: jede Meldung trägt `who` (`boss` Betriebsleitung, `rescue` Bergrettung, `piste` Pistenchef; Zuordnung
-  je Thema in `WHO`). `World3D.jsx` zeigt die Karte OBEN unter der Kopfleiste mit Bild und Namen (`RADIO_PEOPLE`,
-  Bilder aus `public/icons`). Solange ein Ereignis läuft, schweigt der übrige Funk.
+- Wer spricht: jede Meldung trägt `who` (`boss` Betriebsleitung, `rescue` Bergrettung, `piste` Pistenchef, `tech`
+  Werkstatt; Zuordnung je Thema in `WHO`). `World3D.jsx` zeigt die Karte OBEN unter der Kopfleiste mit Bild und Namen.
+  Jedes Gebiet hat eine eigene Mannschaft (`RADIO_TEAMS` je Level-Id: Name aus der Gegend + Bild aus `public/icons`;
+  ein neues Level braucht dort einen Eintrag, sonst spricht die erste Mannschaft). Solange ein Ereignis läuft, schweigt
+  der übrige Funk.
+- Ort eines Spruchs: die Szene gibt `at: { x, z }` mit (`radioSpot(id)`: längste Schlange, ältester Verletzter,
+  schlechteste Piste, vollster Parkplatz, defekte Talstation …). Antippen der Karte fliegt dorthin (`focusAt`), das
+  Kreuz schließt sie. Sprüche über eine Bahn nennen ihren Namen – bei neuen Meldungen ebenso halten.
 
 ## Ereignisse, eigene Einsätze, Belohnungen
 - **Ereignisse** (`EVENTS`, `eventTick` in `Scene3D.js`): Ferienansturm, Sturm, Unfall, Presse – kommen von Zeit zu

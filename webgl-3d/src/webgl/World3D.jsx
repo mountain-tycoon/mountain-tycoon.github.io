@@ -660,12 +660,26 @@ const SteerPad = ({ side, onHold }) => {
     );
 };
 
-// Wer am Funk spricht: die Betriebsleitung, die Bergrettung, der Pistenchef (Bilder aus public/icons)
-const RADIO_PEOPLE = {
-    boss:   { name: 'Toni',  role: 'Betriebsleitung', icon: 'guest_m_schnauzer' },
-    rescue: { name: 'Vroni', role: 'Bergrettung',     icon: 'guest_retter' },
-    piste:  { name: 'Sepp',  role: 'Pistenchef',      icon: 'guest_skilehrer' },
-    tech:   { name: 'Lois',  role: 'Werkstatt',       icon: 'guest_m_brille' }
+// Wer am Funk spricht: Betriebsleitung, Bergrettung, Pistenchef, Werkstatt – in jedem Gebiet eine eigene Mannschaft
+// mit Namen aus der Gegend (Bilder aus public/icons). Ohne Eintrag (Sandbox) gilt die erste Mannschaft.
+const RADIO_ROLES = { boss: 'Betriebsleitung', rescue: 'Bergrettung', piste: 'Pistenchef', tech: 'Werkstatt' };
+const T = (boss, rescue, piste, tech) => ({ boss, rescue, piste, tech });
+const RADIO_TEAMS = {
+    mittelgebirge: T(['Toni', 'guest_m_schnauzer'], ['Vroni', 'guest_f_lehrerin'], ['Sepp', 'guest_mittel'], ['Lois', 'guest_m_brille']),
+    vorland:       T(['Resi', 'guest_f_alt'], ['Flori', 'guest_retter'], ['Hias', 'guest_m_board'], ['Wastl', 'guest_sparfuchs']),
+    schweiz:       T(['Urs', 'guest_opa'], ['Reto', 'guest_skilehrer'], ['Beat', 'guest_vater'], ['Heidi', 'guest_f_brille']),
+    frankreich:    T(['Élodie', 'guest_f_luxus'], ['Luc', 'guest_retter2'], ['Mathieu', 'guest_teen_m'], ['Gaston', 'guest_rentner']),
+    alpen:         T(['Franz', 'guest_premium'], ['Anna', 'guest_f_jung'], ['Luis', 'guest_snowboarder'], ['Burgl', 'guest_f_braun']),
+    italien:       T(['Giulia', 'guest_f_locken'], ['Marco', 'guest_skilehrer2'], ['Luca', 'guest_premium2'], ['Enzo', 'guest_opa']),
+    norwegen:      T(['Ingrid', 'guest_f_mittel'], ['Lars', 'guest_retter'], ['Ole', 'guest_m_board'], ['Sven', 'guest_m_brille']),
+    rockies:       T(['Jack', 'guest_luxus'], ['Kate', 'guest_f_lehrerin'], ['Tyler', 'guest_snowboarder2'], ['Hank', 'guest_rentner']),
+    kanada:        T(['Claire', 'guest_f_normal'], ['Ben', 'guest_skilehrer'], ['Maya', 'guest_snowboarderin'], ['Doug', 'guest_sparfuchs']),
+    anden:         T(['Diego', 'guest_vater'], ['Camila', 'guest_mutter'], ['Mateo', 'guest_premium2'], ['Pablo', 'guest_opa']),
+    japan:         T(['Kenji', 'guest_mittel'], ['Yuki', 'guest_f_jung'], ['Haru', 'guest_teen_m'], ['Sato', 'guest_m_brille'])
+};
+const radioPerson = (level, who) => {
+    const team = RADIO_TEAMS[level?.id] || RADIO_TEAMS.mittelgebirge, role = team[who] ? who : 'boss';
+    return { name: team[role][0], icon: team[role][1], role: RADIO_ROLES[role] };
 };
 
 /** Anzeige und Steuerung beim Selbstfahren. */
@@ -1524,19 +1538,26 @@ const World3D = ({ level, onExit, initialSave = null }) => {
                         </div>
                     )}
                     {radioMsg && (() => {
-                        const P = RADIO_PEOPLE[radioMsg.who] || RADIO_PEOPLE.boss;
+                        const P = radioPerson(level, radioMsg.who), canJump = !!radioMsg.at && !skiing;
                         return (
-                            <div onClick={() => setRadioMsg(null)}
-                                 style={{ ...chip, pointerEvents: 'auto', cursor: 'pointer', maxWidth: 'min(600px, 100%)', boxSizing: 'border-box', textAlign: 'left',
-                                          display: 'flex', alignItems: 'center', gap: 11, padding: '8px 14px 8px 8px',
+                            <div onClick={() => { if (canJump) apiRef.current?.focusAt?.(radioMsg.at.x, radioMsg.at.z); }}
+                                 title={canJump ? 'Dorthin springen' : undefined}
+                                 style={{ ...chip, pointerEvents: 'auto', cursor: canJump ? 'pointer' : 'default', maxWidth: 'min(620px, 100%)', boxSizing: 'border-box', textAlign: 'left',
+                                          display: 'flex', alignItems: 'center', gap: 11, padding: '8px 8px 8px 8px',
                                           borderLeft: `3px solid ${radioMsg.tone === 'warn' ? '#fcd34d' : radioMsg.tone === 'good' ? '#86efac' : 'rgba(232,238,246,0.6)'}` }}>
                                 <img src={`${import.meta.env.BASE_URL || '/'}icons/${P.icon}.png`} alt="" width={44} height={44}
                                      style={{ flex: '0 0 auto', borderRadius: '50%', objectFit: 'cover', background: 'rgba(232,238,246,0.12)', border: '1px solid rgba(232,238,246,0.25)' }}
                                      onError={(e) => { e.currentTarget.style.visibility = 'hidden'; }} />
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                                    <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9aa0a8' }}>Funk · {P.name} · {P.role}</span>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: '1 1 auto' }}>
+                                    <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#9aa0a8' }}>
+                                        Funk · {P.name} · {P.role}{canJump && <span style={{ color: '#e8eef6' }}> · antippen: hinspringen</span>}
+                                    </span>
                                     <span style={{ fontSize: 13, lineHeight: 1.4, color: '#e8eef6' }}>{radioMsg.text}</span>
                                 </div>
+                                <button onClick={(e) => { e.stopPropagation(); clearTimeout(window.__radioT); setRadioMsg(null); }} title="Schließen" aria-label="Funkspruch schließen"
+                                        style={{ flex: 'none', width: compact ? 34 : 28, height: compact ? 34 : 28, borderRadius: 9, padding: 0, cursor: 'pointer',
+                                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                 background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.16)', color: '#e8eaed' }}><Ico name="close" size={compact ? 15 : 12} /></button>
                             </div>
                         );
                     })()}
