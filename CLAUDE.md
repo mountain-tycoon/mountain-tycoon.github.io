@@ -267,6 +267,32 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   in der Garderobe. Beim Entwickeln und für Admins ist alles frei. Die Schirmfarbe liegt als `sport_canopy` im
   Outfit-Speicher (`getCanopyChoice`, `canopyColors`).
 
+## Rennstrecke als Spiel
+- Die Rennstrecke ist 54 Kacheln lang (`DIRECTED.racecourse`), Tore alle rund 11 Kacheln im Wechsel bei ±2,2 (enger
+  schafft man die Kurven bei Tempo nicht – ausprobiert). Dieselbe Formel steht an drei Stellen und muss zusammenpassen:
+  `makeRunDressing` (Stangen), die Gäste-Linie in `updateGuests` und `raceSetup` (Tore fürs Selbstfahren, aus dem
+  gebauten Modell gerechnet). Dazu Fangzäune und karierte Ziellinie.
+- `SkiRun.js`: jedes Tor muss auf seiner Seite AUSSEN umfahren werden, sonst `RACE_PEN` Strafzeit. Im Ziel gibt es
+  je nach Richtzeit der Strecke (`rn.par` = Gold, aus Länge und Gefälle: `RACE_V0`/`RACE_V1`) Gold, Silber oder Bronze
+  (`MEDALS`), Preisgeld nur für eine neue Stufe (`deps.raceDone`), Punkte, und die eigene Bestfahrt fährt als blasser
+  Geisterfahrer mit (`bestRuns`, `stepGhost`; nur für die Sitzung). Das HUD zeigt Tor-Zähler, Strafe und Medaillenzeiten.
+  Die beste Stufe steht in `sim.aRace` (Zieltyp `race_medal`: 1 Bronze, 2 Silber, 3 Gold).
+- Ereignis „Vereinsrennen" (`EVENTS.race`, nur mit Rennstrecke): mehr Andrang; holt der Spieler in der Zeit selbst eine
+  Medaille, steigt die Prämie.
+- Prüfen: `__mtCam.runAt(x, z)` liefert Tore und Richtzeit; eine Fahrt lässt sich mit `ski().start/setInput/step` vorspulen
+  (zwischen zwei Fahrten `ski().stop()`).
+
+## Liftpannen und Werkstatt
+- `updateBreakdowns` in `Scene3D.js`: alle paar Minuten (`BREAK`) bleibt eine fertige Anlage stehen (`route.broken`),
+  an der Talstation steigt Rauch auf (`makeSmoke`). Es ist immer nur eine Anlage defekt. Die Anlage läuft auf einer
+  eigenen Uhr (`liftClock` in `constructLift`): bei einer Panne bleibt sie stehen, Fahrzeuge und Mitfahrer halten an,
+  niemand steigt ein.
+- Mit Werkstatt rückt der Mechaniker auf dem gelben Skidoo aus (`mechFleet`, eines je Werkstatt; Fahrmodell wie das
+  Rettungs-Skidoo), repariert (`fixSecs`) und fährt zurück. Ohne Werkstatt kommt der Kundendienst: `extSecs` Wartezeit
+  und `extCost`. Wird währenddessen eine Werkstatt gebaut, übernimmt sie. Funk spricht „Lois · Werkstatt" (`who: 'tech'`).
+  Die Werkstatt ist deshalb ab dem ersten Level baubar.
+- Prüfen: `__mtCam.breakLift()` löst eine Panne aus, `breakStep(t, dt)` spult sie vor, `breakState()` zeigt die Phase.
+
 ## Tiefschnee
 - `weather.powder` (0…1 ≙ bis rund 60 cm): wächst bei Schneefall, setzt sich danach über Minuten (tagsüber
   schneller). Abseits von Piste und Loipe (`deepS` in `SkiRun.js`) bremst er, die Ski drehen träger, die Figur sinkt

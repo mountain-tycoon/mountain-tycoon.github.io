@@ -62,7 +62,7 @@ const UNLOCK = {
     garage2: 1, garage5_1: 1, medical: 1, snowcannon: 1, sauna: 1, funpark_s: 1, kicker: 1, loipe: 1, biathlon: 1, paraglide: 1,
     // ab dem 3. Level
     lift8: 2, tram: 2, panorama: 2, partyzelt: 2, hotel_mid: 2, parkgarage: 2, garage4: 2, garage5_2: 2,
-    workshop: 2, garage6_1: 2, cannon_l: 2, reservoir_l: 2, eisbahn: 2, funpark: 2, halfpipe: 2, racecourse: 2,
+    garage6_1: 2, cannon_l: 2, reservoir_l: 2, eisbahn: 2, funpark: 2, halfpipe: 2, racecourse: 2,
     // ab dem 4. Level
     liftmega: 3, lifttramxl: 3, sterne: 3, disco: 3, hotel_resort: 3, hotel_lux: 3, chalet_lux: 3,
     garage5_4: 3, garage6_2: 3, garage6_4: 3, hospital: 3, therme: 3, funpark_l: 3
@@ -664,7 +664,8 @@ const SteerPad = ({ side, onHold }) => {
 const RADIO_PEOPLE = {
     boss:   { name: 'Toni',  role: 'Betriebsleitung', icon: 'guest_m_schnauzer' },
     rescue: { name: 'Vroni', role: 'Bergrettung',     icon: 'guest_retter' },
-    piste:  { name: 'Sepp',  role: 'Pistenchef',      icon: 'guest_skilehrer' }
+    piste:  { name: 'Sepp',  role: 'Pistenchef',      icon: 'guest_skilehrer' },
+    tech:   { name: 'Lois',  role: 'Werkstatt',       icon: 'guest_m_brille' }
 };
 
 /** Anzeige und Steuerung beim Selbstfahren. */
@@ -752,6 +753,13 @@ const SkiHud = ({ ski, touch, compact, onStop, onLift, onHut, onSound, onInput, 
                         )}
                         {ski.score > 0 && <span style={{ fontSize: 12, fontWeight: 700, marginLeft: 10, color: '#c8ccd2', fontVariantNumeric: 'tabular-nums' }}>{ski.score.toLocaleString('de-DE')} P</span>}
                         {ski.timer && <span style={{ fontSize: 15, fontWeight: 700, marginLeft: 10, color: '#fcd34d', fontVariantNumeric: 'tabular-nums' }}>{ski.timer}</span>}
+                        {ski.race && ski.race.gates > 0 && (
+                            <span style={{ fontSize: 11.5, fontWeight: 700, marginLeft: 8, color: '#e8eef6', fontVariantNumeric: 'tabular-nums' }}>
+                                Tor {ski.race.gate}/{ski.race.gates}
+                                {ski.race.pen > 0 && <span style={{ color: '#fca5a5' }}> · +{ski.race.pen.toFixed(1).replace('.', ',')} s</span>}
+                                {ski.race.gold != null && <span style={{ color: '#9aa0a8', fontWeight: 600 }}> · Gold {ski.race.gold.toFixed(1).replace('.', ',')} · Silber {ski.race.silver.toFixed(1).replace('.', ',')} · Bronze {ski.race.bronze.toFixed(1).replace('.', ',')}</span>}
+                            </span>
+                        )}
                     </div>
                 </div>
             )}

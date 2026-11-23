@@ -304,6 +304,50 @@ export function createSkiRun(deps) {
     let hCos = 1;               // Anteil des Tempos, der waagerecht wirkt (am Steilhang weniger)
     let race = null;            // Zeitnahme auf der Rennstrecke
     const bestTimes = new Map();
+    // Rennen: Strafzeit je verpasstem Tor, Medaillen nach der Richtzeit der Strecke (`par` aus der Szene),
+    // Geisterfahrer = die eigene Bestfahrt als blasse Figur.
+    const RACE_PEN = 1.5;
+    const MEDALS = [['Gold', 1.0, 1500], ['Silber', 1.18, 800], ['Bronze', 1.4, 400]];
+    const bestRuns = new Map();        // Strecke → { t, rec: [x, y, z, th, …] alle 0,1 s }
+    const medalBest = new Map();       // Strecke → beste Stufe bisher (3 Gold … 1 Bronze)
+    let ghostMesh = null;
+    const makeGhost = () => {
+        const g = new THREE.Group();
+        const mat = new THREE.MeshBasicMaterial({ color: 0x9fd0ff, transparent: true, opacity: 0.38, depthWrite: false });
+        const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.55, 3, 8), mat); body.position.y = 0.75; body.rotation.x = 0.35; g.add(body);
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), mat); head.position.set(0, 1.22, 0.16); g.add(head);
+        for (const sx of [-1, 1]) { const ski = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 1.5), mat); ski.position.set(sx * 0.14, 0.03, 0.1); g.add(ski); }
+        return g;
+    };
+    const stepGhost = () => {
+        const best = race && bestRuns.get(race.key);
+        if (!best || best.rec.length < 8) { if (ghostMesh) ghostMesh.visible = false; return; }
+        if (!ghostMesh) { ghostMesh = makeGhost(); scene.add(ghostMesh); }
+        const n = best.rec.length / 4, f = race.t / 0.1, i = Math.min(n - 2, Math.floor(f)), k = Math.min(1, f - i), a = i * 4, b = a + 4, r = best.rec;
+        if (f >= n - 1) { ghostMesh.visible = false; return; }
+        ghostMesh.visible = true;
+        ghostMesh.position.set(r[a] + (r[b] - r[a]) * k, r[a + 1] + (r[b + 1] - r[a + 1]) * k, r[a + 2] + (r[b + 2] - r[a + 2]) * k);
+        ghostMesh.rotation.y = r[a + 3];
+    };
+    const finishRace = () => {
+        const R = race, total = R.t + R.pen;
+        const best = bestTimes.get(R.key);
+        const isBest = best === undefined || total < best;
+        if (isBest) { bestTimes.set(R.key, total); bestRuns.set(R.key, { t: total, rec: R.rec }); }
+        let rank = 0, name = '';
+        if (R.par > 0) for (let i = 0; i < MEDALS.length; i++) if (total <= R.par * MEDALS[i][1]) { rank = 3 - i; name = MEDALS[i][0]; break; }
+        const had = medalBest.get(R.key) || 0;
+        let prize = 0;
+        if (rank > had) { medalBest.set(R.key, rank); prize = MEDALS[3 - rank][2] - (had ? MEDALS[3 - had][2] : 0); }
+        const pts = Math.round((rank * 150 + R.hit * 20) * (R.pen ? 0.6 : 1));
+        score += pts;
+        if (rank) achieve('aRace', rank, true);
+        if (deps.raceDone) deps.raceDone({ t: total, rank, prize, clean: R.pen === 0 });
+        say(`Im Ziel: ${fmtS(total)}` + (R.pen ? ` (inkl. ${fmtS(R.pen)} Strafe)` : '') + (name ? ` · ${name}` : '') + (prize ? ` · +${prize.toLocaleString('de-DE')} €` : '')
+            + (best === undefined ? '' : isBest ? ' · neue Bestzeit!' : ` · Bestzeit ${fmtS(best)}`), 5.5);
+        sound.thump(rank ? 0.3 : 0.5);
+        race = null; if (ghostMesh) ghostMesh.visible = false;
+    };
     const sound = createSkiSound();
     const runAt = deps.runAt || (() => null);
     const fmtS = (t) => t.toFixed(1).replace('.', ',') + ' s';
@@ -442,7 +486,10 @@ export function createSkiRun(deps) {
             rescue: drive && drive.kind !== 'cat' ? { waiting: (drive.list || []).length, carry: !!drive.carry, saved: drive.saved, guide: drive.guide } : null,
             range: !ride && !rest && !shoot && !!rangeOffer,
             shooting: shoot ? { left: shoot.shots, hits: shoot.hits, done: shoot.done > 0, ring: shoot.ring / (camera.fov * Math.PI / 180), marks: shoot.sh.targets.map(m => !!m.userData.hit) } : null,
-            timer: race ? fmtS(race.t) : null,
+            timer: race ? fmtS(race.t + race.pen) : null,
+            race: race ? { gate: Math.min(race.next + 1, race.gates.length), gates: race.gates.length, pen: race.pen, best: bestTimes.get(race.key) ?? null,
+                gold: race.par ? race.par * MEDALS[0][1] : null, silver: race.par ? race.par * MEDALS[1][1] : null, bronze: race.par ? race.par * MEDALS[2][1] : null,
+                side: race.next < race.gates.length ? Math.sign(race.gates[race.next].across - (curRun ? curRun.across : 0)) : 0 } : null,
             score,
             sound: sound.wanted(),
             hint: hintT > 0 ? hint : ''
@@ -737,15 +784,29 @@ export function createSkiRun(deps) {
         const q = runAt(pos.x, pos.z);
         curRun = q;
         if (q && q.type === 'racecourse') {
-            if (!race && q.along < -q.hl + 3 && v > 2) { race = { key: q.key, t: 0 }; say('Riesentorlauf – die Zeit läuft'); }
-            else if (race && q.along > q.hl - 1.5) {
-                const best = bestTimes.get(race.key);
-                if (best === undefined || race.t < best) bestTimes.set(race.key, race.t);
-                say(`Im Ziel: ${fmtS(race.t)}` + (best === undefined ? '' : race.t < best ? ' – neue Bestzeit!' : ` · Bestzeit ${fmtS(best)}`), 4.5);
-                race = null;
+            if (!race && q.along < -q.hl + 3 && v > 2) {
+                race = { key: q.key, t: 0, pen: 0, next: 0, hit: 0, gates: q.gates || [], prev: q.along, rec: [], recT: 0, par: q.par || 0 };
+                say(race.gates.length ? `Riesentorlauf – ${race.gates.length} Tore, außen herum · die Zeit läuft` : 'Riesentorlauf – die Zeit läuft', 3);
+                sound.thump(0.25);
+            } else if (race) {
+                // Tore: jedes muss auf seiner Seite AUSSEN umfahren werden; wer innen durchsticht, bekommt Strafzeit
+                while (race.next < race.gates.length && q.along >= race.gates[race.next].along) {
+                    const gt = race.gates[race.next], sg = Math.sign(gt.across) || 1;
+                    if (race.prev < gt.along + 2 && sg * q.across >= Math.abs(gt.across) - 0.5) { race.hit++; sound.thump(0.12); }
+                    else { race.pen += RACE_PEN; say(`Tor ${race.next + 1} verpasst · +${fmtS(RACE_PEN)}`, 1.6); sound.thump(0.6); }
+                    race.next++;
+                }
+                race.prev = q.along;
+                if (q.along > q.hl - 1.5) finishRace();
             }
-        } else if (race) race = null;                    // Strecke verlassen
+        } else if (race) { race = null; if (ghostMesh) ghostMesh.visible = false; }      // Strecke verlassen
+        if (race) {
+            race.recT -= dt;
+            if (race.recT <= 0) { race.recT = 0.1; race.rec.push(pos.x, pos.y, pos.z, th); }
+            stepGhost();
+        }
         if (race) { race.t += dt; emitT = Math.min(emitT, 0.05); }
+        else if (ghostMesh && ghostMesh.visible) ghostMesh.visible = false;
         // Einkehr möglich? Langsam und nah an einer Hütte
         hutOffer = null;
         if (v < 3 && deps.huts) {
@@ -1310,7 +1371,7 @@ export function createSkiRun(deps) {
             scene.remove(catTrail); ctPts.length = 0; ctPos.fill(-1e5); ctLast = null; ctGap = true;
             if (canopy) scene.remove(canopy);
             glide = null; mesh.userData.setPoles(true);
-            on = false; ride = null; offer = null; rest = null; race = null;
+            on = false; ride = null; offer = null; rest = null; race = null; if (ghostMesh) ghostMesh.visible = false;
             sound.stop();
             ac?.abort(); ac = null; keys.clear();
             resetPose();

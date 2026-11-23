@@ -4612,10 +4612,10 @@ export function makeRunDressing(type, len) {
         // Start-Tor oben, Zielbogen unten, Tore im Wechsel, Tribüne am Ziel
         g.add(groundEl(runBanner('START', 5.4, 0.9, 3.2, 0x0f172a, 0xffffff), 0, -hl + 0.6));
         g.add(groundEl(runBanner('ZIEL', 6.2, 1.1, 3.6, 0xdc2626, 0xffffff), 0, hl - 0.8));
-        const gates = Math.max(4, Math.round(len / 4.2));
+        const gates = Math.max(4, Math.round(len / 11));
         for (let i = 0; i < gates; i++) {
             const t = (i + 0.5) / gates, z = -hl + 2.5 + t * (len - 5.5);
-            const side = i % 2 === 0 ? 1 : -1, x = side * 1.7;
+            const side = i % 2 === 0 ? 1 : -1, x = side * 2.2;
             const mat = i % 2 === 0 ? RUN_RED : RUN_BLUE;
             g.add(groundEl(runPole(1.7, mat), x - side * 0.45, z));
             g.add(groundEl(runPole(1.7, mat), x + side * 0.45, z));
@@ -4625,6 +4625,23 @@ export function makeRunDressing(type, len) {
             g.add(groundEl(flag, x, z, 1.35));
         }
         g.add(groundEl(runStand(), 5.2, hl - 4.5));
+        // Fangzäune an beiden Rändern (kurze Felder, die dem Hang folgen) und eine karierte Ziellinie im Schnee
+        {
+            const netMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.8, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+            const nf = Math.round((len - 6) / 2.5);
+            for (let i = 0; i < nf; i++) {
+                const z = -hl + 3 + (i + 0.5) * (len - 6) / nf;
+                for (const sx of [-1, 1]) {
+                    if (sx > 0 && z > hl - 8) continue;                       // vor der Tribüne bleibt frei
+                    const net = new THREE.Mesh(new THREE.PlaneGeometry(2.3, 0.9), netMat); net.rotation.y = Math.PI / 2;
+                    g.add(groundEl(net, sx * 4.9, z, 0.5));
+                    g.add(groundEl(runPole(1.0, RUN_POLE), sx * 4.9, z - 1.15));
+                }
+            }
+            const lineMat = new THREE.MeshStandardMaterial({ map: makeSymbolFlagTexture('checker'), roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+            const fin = new THREE.Mesh(new THREE.PlaneGeometry(7.6, 0.8), lineMat); fin.rotation.x = -Math.PI / 2;
+            g.add(groundEl(fin, 0, hl - 1.5, 0.08));
+        }
         // Zeitanzeige
         const board = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.7, 0.12), new THREE.MeshStandardMaterial({ map: makeLabelTexture('00:00.00', 0x22c55e, 0x0b1120), emissive: 0x0a2a14, emissiveIntensity: 0.5 }));
         g.add(groundEl(board, -4.2, hl - 1.6, 2.2));

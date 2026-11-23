@@ -147,7 +147,8 @@ export const OBJECTIVE_TYPES = {
     hockey_goals:   { label: (t) => `${t} Tore auf der Eisbahn schießen`, unit: '', self: true },
     glider_flights: { label: (t) => (t === 1 ? 'Einen Gleitschirmflug landen' : `${t} Gleitschirmflüge landen`), unit: '', self: true },
     glider_loops:   { label: (t) => (t === 1 ? 'Einen Looping am Gleitschirm fliegen' : `${t} Loopings am Gleitschirm fliegen`), unit: '', self: true },
-    trick_points:   { label: (t) => `${t.toLocaleString()} Trickpunkte sammeln`, unit: '', self: true }
+    trick_points:   { label: (t) => `${t.toLocaleString()} Trickpunkte sammeln`, unit: '', self: true },
+    race_medal:     { label: (t) => `${['', 'Bronze', 'Silber', 'Gold'][t] || 'Medaille'} auf der Rennstrecke holen`, unit: '', self: true }
 };
 
 /**
@@ -187,6 +188,7 @@ export function evaluateObjective(obj, stats) {
         case 'glider_flights': current = stats.gliderFlights || 0; break;
         case 'glider_loops':   current = stats.gliderLoops || 0; break;
         case 'trick_points':   current = stats.trickPoints || 0; break;
+        case 'race_medal':     current = stats.raceMedal || 0; break;
         default: current = 0;
     }
     const target = obj.target;
@@ -207,6 +209,7 @@ export function objectiveLabel(obj) {
 export function formatObjectiveValue(obj, value) {
     if (obj.type.startsWith('piste_km') || obj.type.endsWith('_km')) return `${value.toFixed(1)} km`;
     if (obj.type === 'self_groom_m') return `${Math.round(value)} m`;
+    if (obj.type === 'race_medal') return ['–', 'Bronze', 'Silber', 'Gold'][Math.round(value)] || '–';
     if (obj.type === 'satisfaction') return `${Math.round(value)}%`;
     if (OBJECTIVE_TYPES[obj.type]?.unit === '€') return `€${Math.round(value).toLocaleString()}`;
     return `${Math.round(value).toLocaleString()}`;
@@ -511,7 +514,8 @@ export const CAMPAIGN_LEVELS = [
             { type: 'revenue_total', target: 320000 },
             // eigener Einsatz: das schafft nur, wer selbst fährt
             { type: 'glider_loops', target: 1 },
-            { type: 'hockey_goals', target: 3 }
+            { type: 'hockey_goals', target: 3 },
+            { type: 'race_medal', target: 1 }
         ]
     },
     {
@@ -662,7 +666,8 @@ export const CAMPAIGN_LEVELS = [
             { type: 'profit_day', target: 5000 },
             // eigener Einsatz: das schafft nur, wer selbst fährt
             { type: 'glider_flights', target: 3 },
-            { type: 'hockey_goals', target: 5 }
+            { type: 'hockey_goals', target: 5 },
+            { type: 'race_medal', target: 2 }
         ]
     },
     {

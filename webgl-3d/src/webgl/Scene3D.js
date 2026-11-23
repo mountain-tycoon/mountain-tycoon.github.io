@@ -1577,7 +1577,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const RIDE_THROUGH = ['kicker', 'halfpipe', 'racecourse'];
     // Laenge der Durchfahrt je Anlage (in Kacheln). Diese Anlagen werden
     // von oben nach unten durchfahren und richten sich in die Falllinie.
-    const DIRECTED = { funpark_s: 7, funpark: 10, funpark_l: 14, kicker: 8, halfpipe: 20, racecourse: 30 };
+    const DIRECTED = { funpark_s: 7, funpark: 10, funpark_l: 14, kicker: 8, halfpipe: 20, racecourse: 54 };
     const isFunType = (t) => typeof t === 'string' && (t.startsWith('funpark') || RIDE_THROUGH.includes(t));
     // Verfügbare Gäste-Avatare (Dateien public/icons/guest_<key>.png).
     // Alle gerenderten Portraits — gemischt aus Gästen und Personal.
@@ -1668,7 +1668,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             // Bediente Gäste verteilen sich auf die Aussichtspunkte (POI-Besucher)
             selfSkiM: sim.aSki || 0, selfLoipeM: sim.aLoipe || 0, selfGroomM: sim.aGroom || 0, selfRescues: sim.aRescue || 0,
             biathlonBest: sim.aBiath || 0, hockeyGoals: sim.aGoals || 0, gliderFlights: sim.aFlights || 0, gliderLoops: sim.aLoops || 0,
-            trickPoints: sim.aTricks || 0,
+            trickPoints: sim.aTricks || 0, raceMedal: sim.aRace || 0, liftBroken: breakdown ? (breakdown.L.name || 'Bahn') : '',
             poiSummit: Math.floor(sim.served * 0.35),
             poiValley: Math.floor(sim.served * 0.3),
             poiLake:   Math.floor(sim.served * 0.3),
@@ -5105,6 +5105,129 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // Die Betriebsleitung meldet sich per Funk, wenn im Gebiet etwas fehlt oder schiefläuft – immer nur das
     // Dringendste, jedes Thema höchstens alle paar Minuten. Die Liste ist nach Dringlichkeit geordnet.
     const radio = { wait: 22, last: {}, t: 0 };
+    // =====================================================================
+    //  LIFTPANNEN UND WERKSTATT
+    //  Von Zeit zu Zeit bleibt eine Anlage stehen, der Antrieb an der Talstation raucht. Steht eine Werkstatt,
+    //  rückt von dort der Mechaniker auf dem Skidoo aus, repariert und fährt zurück. Ohne Werkstatt kommt der
+    //  Kundendienst von auswärts: das dauert lange und kostet. Es ist immer nur eine Anlage zugleich defekt.
+    // =====================================================================
+    const BREAK = { first: 240, every: 300, spread: 240, fixSecs: 11, extSecs: 85, extCost: 4000, ownCost: 600 };
+    let breakWait = BREAK.first + Math.random() * 120;
+    let breakdown = null;              // { L, smoke, t, phase: 'wait'|'out'|'fix'|'back'|'ext', from, veh, fixT }
+    const mechFleet = [];              // je Werkstatt ein Skidoo (gelb)
+    const makeMechSled = () => {
+        const m = makeRescueSled();
+        m.traverse(o => {
+            if (!o.isMesh || !o.material || !o.material.color) return;
+            const hex = o.material.color.getHex();
+            if (hex === 0xdc2626) { o.material = o.material.clone(); o.material.color.setHex(0xf2b705); }        // Rumpf gelb statt rot
+            else if (hex === 0xf97316) { o.material = o.material.clone(); o.material.color.setHex(0x1d4ed8); }   // Fahrer im Blaumann
+            else if (hex === 0x60a5fa) { o.material = o.material.clone(); o.material.color.setHex(0xfbbf24); o.material.emissive.setHex(0xf59e0b); }
+        });
+        if (m.userData.patient) m.userData.patient.visible = false;
+        return m;
+    };
+    const makeSmoke = () => {
+        const g = new THREE.Group(), puffs = [];
+        const geo = new THREE.SphereGeometry(0.5, 8, 6);
+        for (let i = 0; i < 7; i++) {
+            const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0x2b2d31, transparent: true, opacity: 0.5, depthWrite: false }));
+            g.add(m); puffs.push(m);
+        }
+        g.userData.update = (t) => {
+            for (let i = 0; i < puffs.length; i++) {
+                const f = ((t * 0.32 + i / puffs.length) % 1 + 1) % 1, m = puffs[i];
+                m.position.set(Math.sin(i * 2.4 + t * 0.7) * 0.5 * f + f * 1.2, 0.4 + f * 6.5, Math.cos(i * 1.7) * 0.4 * f);
+                m.scale.setScalar(0.5 + f * 2.4);
+                m.material.opacity = 0.55 * (1 - f) * Math.min(1, f * 6);
+            }
+        };
+        g.userData.dispose = () => { geo.dispose(); for (const m of puffs) m.material.dispose(); };
+        return g;
+    };
+    const breakSay = (tone, text) => { if (onRadio) onRadio({ id: 'break', tone, text, who: 'tech' }); radio.wait = Math.max(radio.wait, 12); };
+    const startBreakdown = (L) => {
+        const bp = worldPosSmooth(L.bottom.gx, L.bottom.gy);
+        const smoke = makeSmoke(); smoke.position.set(bp.x, bp.y + 2.2, bp.z); scene.add(smoke);
+        L.broken = true;
+        breakdown = { L, smoke, t: 0, phase: 'wait', from: null, veh: null, fixT: 0 };
+        sim.breakdowns = (sim.breakdowns || 0) + 1;
+        if (built.workshop > 0) breakSay('warn', `Die ${L.name || 'Bahn'} steht, der Antrieb raucht! Ich bin mit dem Skidoo unterwegs.`);
+        else breakSay('warn', `Die ${L.name || 'Bahn'} steht, der Antrieb raucht! Ohne eigene Werkstatt muss der Kundendienst aus dem Tal kommen – das dauert und kostet ${BREAK.extCost.toLocaleString('de-DE')} €.`);
+    };
+    const endBreakdown = (cost, text) => {
+        const B = breakdown; if (!B) return;
+        B.L.broken = false;
+        scene.remove(B.smoke); B.smoke.userData.dispose();
+        B.smoke = null;
+        money -= cost; sim.dayCost += cost; if (onMoney) onMoney(money);
+        breakSay('good', text);
+    };
+    function updateBreakdowns(t, dt) {
+        if (replaying || dt <= 0) return;
+        // Skidoos stehen an ihrer Werkstatt bereit
+        syncFleet(mechFleet, 'workshop', makeMechSled);
+        for (const sd of mechFleet) {
+            if (!sd.station || sd.busy) continue;
+            const wp = worldPosSmooth(sd.station.gx + 2.6, sd.station.gy + 1.2);
+            sd.mesh.visible = true; sd.mesh.position.set(wp.x, wp.y, wp.z); sd.mesh.rotation.set(0, Math.PI * 0.5, 0);
+        }
+        if (!breakdown) {
+            breakWait -= dt;
+            if (breakWait > 0) return;
+            const cand = guestRoutes.filter(r => r.kind === 'lift' && r.ready && !r.broken);
+            if (!cand.length || sim.active < 10) { breakWait = 40; return; }
+            breakWait = BREAK.every + Math.random() * BREAK.spread;
+            startBreakdown(cand[Math.floor(Math.random() * cand.length)]);
+            return;
+        }
+        const B = breakdown, L = B.L;
+        B.t += dt;
+        if (B.smoke) B.smoke.userData.update(t);
+        // Anlage inzwischen abgerissen?
+        if (!guestRoutes.includes(L)) { if (B.smoke) { scene.remove(B.smoke); B.smoke.userData.dispose(); } if (B.veh) B.veh.busy = false; breakdown = null; return; }
+        if (B.phase === 'wait') {
+            const free = mechFleet.filter(x => x.station && !x.busy);
+            if (free.length) {
+                let best = free[0], bd = Infinity;
+                for (const f of free) { const d = Math.hypot(f.station.gx - L.bottom.gx, f.station.gy - L.bottom.gy); if (d < bd) { bd = d; best = f; } }
+                best.busy = true; B.veh = best; B.from = { gx: best.station.gx + 2.6, gy: best.station.gy + 1.2 };
+                B.drive = { mesh: best.mesh, _target: null, _hdg: null };
+                if (!best.mesh.userData.foot) best.mesh.userData.foot = { w: 0.3, l: 0.55 };
+                B.to = { gx: L.bottom.gx + 2.2, gy: L.bottom.gy + 1.4 };
+                B.limit = Math.max(14, bd * 1.1); B.t = 0; B.phase = 'out';
+                if (B.said !== 'own') { B.said = 'own'; if (B.ext) breakSay('tip', 'Werkstatt steht – ich übernehme das und fahre gleich los.'); }
+            } else if (!B.ext) { B.ext = true; B.t = 0; }
+            else if (B.t > BREAK.extSecs) {
+                endBreakdown(BREAK.extCost, `Der Kundendienst war da, die ${L.name || 'Bahn'} läuft wieder. Rechnung: ${BREAK.extCost.toLocaleString('de-DE')} €. Mit einer eigenen Werkstatt ginge das in einem Bruchteil der Zeit.`);
+                breakdown = null;
+            }
+            return;
+        }
+        const sm = B.veh.mesh;
+        if (B.phase === 'out' || B.phase === 'back') {
+            B.drive._target = B.phase === 'out' ? B.to : B.from;
+            let arrived = typeof sledDrive === 'function' ? sledDrive(B.drive, dt) : true;
+            settleCat(sm, B.drive._dir, 0.55 / tile, 0.3 / tile);
+            if (sm.userData.update) sm.userData.update(t);
+            if (!arrived && B.t > B.limit * 2.5) {           // Notbremse: kommt er nicht durch, steht er dann eben dort
+                const wp = worldPosSmooth(B.drive._target.gx, B.drive._target.gy); sm.position.set(wp.x, wp.y, wp.z); arrived = true;
+            }
+            if (arrived) {
+                if (B.phase === 'out') { B.phase = 'fix'; B.fixT = 0; }
+                else { B.veh.busy = false; breakdown = null; }
+            }
+            return;
+        }
+        if (B.phase === 'fix') {
+            B.fixT += dt;
+            if (sm.userData.update) sm.userData.update(t);
+            if (B.fixT >= BREAK.fixSecs) {
+                endBreakdown(BREAK.ownCost, `Erledigt – die ${L.name || 'Bahn'} läuft wieder. War nur ein Lager am Antrieb.`);
+                B.phase = 'back'; B.t = 0; B.drive._hdg = null;
+            }
+        }
+    }
     function radioTick(dt) {
         radio.t += dt; radio.wait -= dt;
         if (!onRadio || replaying || radio.wait > 0) return;
@@ -5181,6 +5304,15 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 evSay(ok ? 'good' : 'warn', ok ? 'Alle versorgt, niemand ernsthaft verletzt. Saubere Arbeit – 5.000 € von der Versicherung.' : 'Die Zeit ist um und es liegen noch Leute draußen. Das spricht sich herum.', 'rescue');
                 if (!ok) sim.satisfaction = Math.max(10, sim.satisfaction - 6); }
         },
+        race: {
+            name: 'Vereinsrennen', secs: 150, goal: 'Selbst auf der Rennstrecke eine Medaillenzeit fahren',
+            ok() { return built.racecourse > 0; },
+            start() { eventBoost = 1.25; evSay('tip', 'Heute ist Vereinsrennen auf unserer Strecke! Zuschauer kommen – und wenn du selbst eine Medaille holst, legt der Skiclub ordentlich was drauf.'); },
+            tick() { if (ev.rank >= 3) ev.left = Math.min(ev.left, 0.5); },
+            end() { eventBoost = 1; const rk = ev0rank; const sum = [1500, 3000, 5000, 8000][rk] || 1500;
+                evPay(sum);
+                evSay(rk ? 'good' : 'tip', rk ? `${['', 'Bronze', 'Silber', 'Gold'][rk]} beim Vereinsrennen – das Publikum tobt! ${sum.toLocaleString('de-DE')} € für die Kasse.` : `Das Rennen ist gelaufen, die Zuschauer haben ${sum.toLocaleString('de-DE')} € dagelassen. Nächstes Mal fährst du selbst mit, dann gibt es mehr.`); }
+        },
         press: {
             name: 'Presse im Gebiet', secs: 80, goal: 'Zufriedenheit am Ende mindestens 78 %',
             start() { evSay('tip', 'Ein Reiseblatt testet heute unser Gebiet. Wenn die Stimmung stimmt, gibt das Werbung, die kein Geld kaufen kann.'); },
@@ -5194,7 +5326,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (ev) {
             ev.left -= dt;
             if (ev.def.tick) ev.def.tick(dt);
-            if (ev.left <= 0) { const d = ev.def; ev = null; d.end(); evWait = 210 + Math.random() * 120; if (onEvent) onEvent(null); return; }
+            if (ev.left <= 0) { const d = ev.def; ev0rank = ev.rank || 0; ev = null; d.end(); evWait = 210 + Math.random() * 120; if (onEvent) onEvent(null); return; }
             // nur melden, wenn die Sekunde umspringt – sonst zeichnet das HUD in jedem Bild neu und verschluckt Klicks
             const sec = Math.ceil(ev.left);
             if (sec !== ev.shown) { ev.shown = sec; if (onEvent) onEvent({ name: ev.def.name, goal: ev.def.goal, left: sec }); }
@@ -5212,7 +5344,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         ev.def.start();
         if (onEvent) onEvent({ name: ev.def.name, goal: ev.def.goal, left: ev.secs });
     }
-    let lastEvent = '';
+    let lastEvent = '', ev0rank = 0;
     /** Alle Pisten- und Loipenbänder im Umkreis (Rasterkoordinaten) frisch walzen; liefert die Zahl der Abschnitte. */
     function groomAround(gx, gy, rad) {
         let n = 0;
@@ -5633,6 +5765,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         tickScheduledFalls(dt);
         // ===== LIFT-TAKT: alle `gap` Sekunden fährt ein Fahrzeug ein =====
         for (const L of lifts) {
+            if (L.broken) continue;                       // Panne: niemand steigt ein
             L.timer -= dt;
             if (L.timer <= 0) {
                 L.timer = L.gap;
@@ -6064,7 +6197,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 g.gripe = gripe;
             }
             g.uphill = false;                        // wird unten ggf. neu gesetzt
-            let spd = g.state === 'lift' ? g.vLift * (r.rideSpeed || 1) : g.vPiste;
+            let spd = g.state === 'lift' ? (r.broken ? 0 : g.vLift * (r.rideSpeed || 1)) : g.vPiste;
             if (g._run && g._run.rn.type === 'racecourse') spd *= 1.45;    // Rennstrecke: Vollgas
             if (g.state === 'piste' && r.path && r.path.length >= 2) {
                 const fi0 = Math.min(r.path.length - 2, Math.floor(g.prog * (r.path.length - 1)));
@@ -6350,10 +6483,10 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                         // ~3.3 Kacheln im Wechsel), tief in der Hocke, schnell
                         // Tore stehen (siehe makeRunDressing) bei z = −hl+2.5 + (i+0.5)/gates·(len−5.5),
                         // Seite (−1)^i, Versatz 1.7 — die Linie führt exakt durch jedes Tor.
-                        const len = rn.s1 - rn.s0, gates = Math.max(4, Math.round(len / 4.2));
+                        const len = rn.s1 - rn.s0, gates = Math.max(4, Math.round(len / 11));
                         const uu = Math.max(0, Math.min(1, (u * len - 2.5) / (len - 5.5)));
                         const ph = Math.PI * uu * gates - Math.PI / 2;
-                        sway = -3.1 * Math.cos(ph);                          // außen um die ÄUSSERE Torstange (bei 2.15) herum
+                        sway = -3.4 * Math.cos(ph);                          // außen um die ÄUSSERE Torstange (bei 2.15) herum
                         g._run.turn = -Math.sin(ph);
                     } else {
                         // Funpark/Kicker: die Schanzen sind im Gelände — hier nur
@@ -6844,7 +6977,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         Object.assign(window.__mtCam, { clock, CYCLE, villages, guestRoutes, roadEntries, base: { gx: BASE_GX, gy: BASE_GY }, edge: { gx: EDGE_GX, gy: EDGE_GY }, summit: { gx: RSX, gy: RSY }, raycastTerrain: (x, y) => raycastTerrain(x, y),
             ski: () => skiRun,
             guests: () => guestPool, villagesNow: () => villages, noRender: (v) => { skipRender = !!v; },
-            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt), getSave: () => getSave(), loadSave: (d) => loadSave(d), roads: () => ({ discs: roadDiscs, lines: roadLines, lots: parkingLots }),
+            walkers: () => _dbgWalkers, radio: () => { radio.wait = 0; radioTick(0); }, sim: () => sim, event: (k) => { evWait = 0; if (k) { lastEvent = ''; ev = { def: EVENTS[k], left: EVENTS[k].secs, secs: EVENTS[k].secs }; ev.def.start(); } else eventTick(0.01); return ev && ev.def.name; }, eventStep: (dt) => eventTick(dt), getSave: () => getSave(), loadSave: (d) => loadSave(d), roads: () => ({ discs: roadDiscs, lines: roadLines, lots: parkingLots }), breakLift: () => { const L = guestRoutes.find(r => r.kind === 'lift' && !r.broken); if (L && !breakdown) startBreakdown(L); return breakdown && { name: breakdown.L.name, phase: breakdown.phase }; }, runAt: (x, z) => skiRunAt(x, z), breakStep: (t, dt) => updateBreakdowns(t, dt), breakState: () => breakdown && { phase: breakdown.phase, t: breakdown.t, broken: breakdown.L.broken },
             // Prüfhilfe: einen Gast an dieser Stelle verletzt hinlegen (braucht Gäste im Vorrat)
             hurt: (gx, gy) => { const g = guestPool.find(q => !q.hurt && q.mesh); if (!g) return false; const w = worldPosSmooth(gx, gy); g.mesh.position.copy(w); g._prevPos?.copy?.(w); g.mesh.visible = true; startFall(g, { gx, gy }); return true; },
             buildPiste: (pts, width) => { if (width) pisteWidth = width; return buildPistePath(pts); }, loipen: () => loipen,
@@ -6880,6 +7013,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         if (sim.timeAcc >= 1) { eventTick(sim.timeAcc); radioTick(sim.timeAcc); simTick(sim.timeAcc); sim.timeAcc = 0; emitStats(); if (selectedSel && onSelect) onSelect(infoFor(selectedSel)); }
         updateGuests(t, dt);
         updateRescues(t, dt);
+        updateBreakdowns(t, dt);
         if (!(skiRun && skiRun.active())) orbit.step();     // laufender Kameraflug
         updateFog();           // Dunst an Kartengröße und Zoom anpassen
         updateConstructions(dt);
@@ -6995,7 +7129,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         reservoir_l:  { cost: 420000, r: 11.5, make: () => makeBigReservoir() },
         kicker:       { cost: 18500,  r: 3.4,  make: () => makeRunDressing('kicker', 8) },
         halfpipe:     { cost: 186000, r: 6.5,  make: () => makeRunDressing('halfpipe', 20) },
-        racecourse:   { cost: 340000, r: 10.0, make: () => makeRunDressing('racecourse', 30) },
+        racecourse:   { cost: 340000, r: 10.0, make: () => makeRunDressing('racecourse', 54) },
         cannon_s:     { cost: 9800,   r: 1.0, make: () => makeSnowCannon('small') },
         cannon_l:     { cost: 55200,  r: 1.6, make: () => makeSnowCannon('large') },
         sauna:        { cost: 195000, r: 2.6, make: () => makeSauna() },
@@ -9024,7 +9158,17 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         scene.add(lift.group); applyGlassEnv(lift.group); registerFlags(lift.group);
         if (lift.group.userData.setNight) nightLit.push(lift.group);
         // Bauphase: Gerüst/Kran an der Talstation, danach fährt der Lift an
-        startConstruction(lift.group, 14, () => { updaters.push(lift.update); if (lift.setOccupancy) liftHandles.push(lift); },
+        // Die Anlage läuft auf einer eigenen Uhr: steht sie wegen einer Panne, bleibt die Uhr stehen – Sessel und
+        // Kabinen halten an und fahren nach der Reparatur an derselben Stelle weiter.
+        const liftClock = { route: null, off: 0, last: null };
+        const liftUpdate = (tt) => {
+            const rr = liftClock.route;
+            if (rr) rr.ready = true;
+            if (liftClock.last != null && rr && rr.broken) liftClock.off += tt - liftClock.last;
+            liftClock.last = tt;
+            lift.update(tt - liftClock.off);
+        };
+        startConstruction(lift.group, 14, () => { updaters.push(liftUpdate); if (lift.setOccupancy) liftHandles.push(lift); },
             a.clone(), { a: a.clone(), b: b.clone() });
         // Felsen entlang der Trasse räumen — sonst verschwinden
         // Stützen und Stationen zwischen den Blöcken.
@@ -9058,6 +9202,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         }
         route.name = (pendingLift && pendingLift.name) || nextLiftName(liftKind);
         route.model = lift;      // Fahrzeuge für die echte Sitzplatzvergabe
+        liftClock.route = route;
         guestRoutes.push(route);
         logAction({ a: 'l', k: liftKind, n: route.name, c: (pendingLift && pendingLift.color != null) ? pendingLift.color : null,
             ax: +start.pt.x.toFixed(2), az: +start.pt.z.toFixed(2), bx: +pt.x.toFixed(2), bz: +pt.z.toFixed(2) });
@@ -9781,6 +9926,26 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     // ===== SELBST FAHREN =====
     let onSki = null;
     /** Anlage auf einer Piste an diesem Weltpunkt: Lage längs (bergab positiv) und quer zur Achse. */
+    /**
+     * Rennstrecke fürs Selbstfahren: Lage der Tore (aus dem gebauten Modell, damit Seite und Abstand sicher stimmen)
+     * und die Richtzeit `par` = Goldzeit. Sie hängt vom Gefälle ab: steile Strecken sind schneller.
+     */
+    const raceSetup = (rn) => {
+        const len = rn.hl * 2, n = Math.max(4, Math.round(len / 11)), gates = [], v3 = new THREE.Vector3();
+        rn.mesh.updateWorldMatrix(true, false);
+        for (let i = 0; i < n; i++) {
+            const z = -rn.hl + 2.5 + (i + 0.5) / n * (len - 5.5), side = i % 2 === 0 ? 1 : -1;
+            v3.set(side * 2.2, 0, z).applyMatrix4(rn.mesh.matrixWorld);
+            const ox = (v3.x + half) / tile - rn.gx, oy = (v3.z + half) / tile - rn.gy;
+            gates.push({ along: (ox * rn.dx + oy * rn.dy) * tile, across: (-ox * rn.dy + oy * rn.dx) * tile });
+        }
+        gates.sort((a, b) => a.along - b.along);
+        const drop = yAtSmooth(rn.gx - rn.dx * rn.hl, rn.gy - rn.dy * rn.hl) - yAtSmooth(rn.gx + rn.dx * rn.hl, rn.gy + rn.dy * rn.hl);
+        const grade = Math.max(0.05, Math.min(0.8, drop / (len * tile)));
+        rn.gates = gates;
+        rn.par = (len * tile) / (RACE_V0 + RACE_V1 * grade) + n * 0.12;
+    };
+    const RACE_V0 = 4.6, RACE_V1 = 12;      // Tempo der Richtzeit: Grundwert + Anteil je Gefälle (an Probefahrten abgeglichen)
     const skiRunAt = (wx, wz) => {
         const gx = (wx + half) / tile, gy = (wz + half) / tile;
         for (const rt of guestRoutes) {
@@ -9789,7 +9954,9 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 const ox = gx - rn.gx, oy = gy - rn.gy;
                 const along = ox * rn.dx + oy * rn.dy, across = -ox * rn.dy + oy * rn.dx;
                 if (Math.abs(along) > rn.hl || Math.abs(across) > (rn.type === 'halfpipe' ? 6.5 : rn.r + 1.5)) continue;
-                return { type: rn.type, along: along * tile, across: across * tile, hl: rn.hl * tile, axis: Math.atan2(rn.dx, rn.dy), px: -rn.dy, pz: rn.dx, key: rn, rn };
+                if (rn.type === 'racecourse' && !rn.gates) raceSetup(rn);
+                return { type: rn.type, along: along * tile, across: across * tile, hl: rn.hl * tile, axis: Math.atan2(rn.dx, rn.dy), px: -rn.dy, pz: rn.dx, key: rn, rn,
+                         gates: rn.gates || null, par: rn.par || 0 };
             }
         }
         return null;
@@ -9842,6 +10009,11 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         loipeTrack: (wx, wz) => { const q = loipen.trackAt((wx + half) / tile, (wz + half) / tile); return q ? { ang: q.ang, x: q.cx * tile - half, z: q.cy * tile - half, end: q.end } : null; },
         // eigene Einsätze mitzählen (für die Levelziele): 'max' hält den Bestwert, sonst wird addiert
         achieve: (k, v, max) => { sim[k] = max ? Math.max(sim[k] || 0, v) : (sim[k] || 0) + v; },
+        // Rennen gefahren: Preisgeld für eine neue Medaille; läuft gerade das Vereinsrennen, zählt die beste Stufe
+        raceDone: (r) => {
+            if (r.prize > 0) { money += r.prize; sim.revenue += r.prize; sim.dayRevenue += r.prize; if (onMoney) onMoney(money); }
+            if (ev && ev.def === EVENTS.race) ev.rank = Math.max(ev.rank || 0, r.rank);
+        },
         wind: () => wind,
         powder: () => weather.powder ?? 0.45,
         // Pistenraupe zum Selbstfahren: die größte Klasse, für die eine Garage steht
@@ -9917,7 +10089,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
     const SIM_KEYS = ['served', 'revenue', 'satisfaction', 'dayProfit', 'bestDayProfit', 'dayAcc', 'dayRevenue',
                       'dayCost', 'groom', 'reput', 'attract', 'mood', 'carGuestsToday',
                       // eigene Einsätze des Spielers (Levelziele)
-                      'aSki', 'aLoipe', 'aGroom', 'aRescue', 'aBiath', 'aGoals', 'aFlights', 'aLoops', 'aTricks'];
+                      'aSki', 'aLoipe', 'aGroom', 'aRescue', 'aBiath', 'aGoals', 'aFlights', 'aLoops', 'aTricks', 'aRace'];
     /** Aktueller Spielstand als schlichtes Objekt (JSON-tauglich). */
     const getSave = () => {
         const simOut = {};
