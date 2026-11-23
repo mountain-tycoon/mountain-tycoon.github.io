@@ -742,7 +742,8 @@ const HeliPad = ({ onInput }) => {
 };
 
 // ===== HÜTTENSPIELE (Einkehr) =====
-// Zwei kleine Spiele am Stammtisch: „17 und 4" gegen den Wirt und Nageln (den Hammer im richtigen Augenblick schlagen).
+// Drei kleine Spiele am Stammtisch: „17 und 4" gegen den Wirt, Nageln (den Hammer im richtigen Augenblick schlagen)
+// und Darts (werfen, wenn das wandernde Fadenkreuz gut steht).
 // Gespielt wird um Punkte – wer verliert, zahlt die Runde nur in der Vorstellung.
 const CARD_SUITS = ['♠', '♥', '♦', '♣'];
 const CARD_NAMES = { 11: 'A', 2: 'B', 3: 'D', 4: 'K' };          // Ass 11, Bube 2, Dame 3, König 4 – wie beim 17 und 4 mit dem 32er-Blatt
@@ -839,12 +840,50 @@ const HutScene = React.memo(() => {
     );
 });
 
+// Dartscheibe: Felder im Uhrzeigersinn ab oben, Radien in Einheiten der Zeichnung (Scheibe = 100)
+const DART_ORDER = [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5];
+const DART_R = { bull: 4.5, outer: 11, t0: 57, t1: 64, d0: 93, d1: 100 };
+const dartScore = (x, y) => {
+    const r = Math.hypot(x, y);
+    if (r <= DART_R.bull) return { pts: 50, name: 'Bullseye' };
+    if (r <= DART_R.outer) return { pts: 25, name: 'Bull' };
+    if (r > DART_R.d1) return { pts: 0, name: 'Daneben' };
+    let a = Math.atan2(x, -y) + Math.PI / 20; if (a < 0) a += Math.PI * 2;
+    const n = DART_ORDER[Math.floor(a / (Math.PI / 10)) % 20];
+    if (r >= DART_R.d0) return { pts: n * 2, name: `Doppel ${n}` };
+    if (r >= DART_R.t0 && r <= DART_R.t1) return { pts: n * 3, name: `Triple ${n}` };
+    return { pts: n, name: String(n) };
+};
+const DartBoard = React.memo(() => {
+    const wedge = (i, r0, r1) => {
+        const a0 = (i - 0.5) * Math.PI / 10, a1 = (i + 0.5) * Math.PI / 10, P = (r, a) => `${(Math.sin(a) * r).toFixed(2)} ${(-Math.cos(a) * r).toFixed(2)}`;
+        return `M${P(r0, a0)} L${P(r1, a0)} A${r1} ${r1} 0 0 1 ${P(r1, a1)} L${P(r0, a1)} A${r0} ${r0} 0 0 0 ${P(r0, a0)}Z`;
+    };
+    const R = DART_R;
+    return (
+        <g>
+            <circle r="110" fill="#14100c" />
+            {DART_ORDER.map((n, i) => {
+                const single = i % 2 ? '#efe6d0' : '#1b1b1b', ring = i % 2 ? '#1f7a3d' : '#b3261e';
+                return (<g key={n}>
+                    <path d={wedge(i, R.outer, R.t0)} fill={single} /><path d={wedge(i, R.t0, R.t1)} fill={ring} />
+                    <path d={wedge(i, R.t1, R.d0)} fill={single} /><path d={wedge(i, R.d0, R.d1)} fill={ring} />
+                    <text x={Math.sin(i * Math.PI / 10) * 105.5} y={-Math.cos(i * Math.PI / 10) * 105.5 + 3} textAnchor="middle" fontSize="8.5" fontWeight="700" fill="#e8eef6">{n}</text>
+                </g>);
+            })}
+            <circle r={R.outer} fill="#1f7a3d" /><circle r={R.bull} fill="#b3261e" />
+        </g>
+    );
+});
+
 const HutGames = ({ onScore, compact }) => {
     const [game, setGame] = useState(null);                 // null | 'cards' | 'nail'
     const [cards, setCards] = useState(null);               // { me, host, done, text }
     const [nail, setNail] = useState(null);                 // { depth, hits, pos, text, done }
     const raf = useRef(0);
     const posRef = useRef(0);
+    const [darts, setDarts] = useState(null);               // { hits: [{x, y, pts, name}], aim: {x, y}, done, text }
+    const aimRef = useRef({ x: 0, y: 0 });
     // --- 17 und 4 ---
     const deal = () => setCards({ me: [drawCard(), drawCard()], host: [drawCard()], done: false, text: 'Noch eine Karte – oder bleiben?' });
     const finish = (me, host0) => {
@@ -873,6 +912,26 @@ const HutGames = ({ onScore, compact }) => {
         raf.current = requestAnimationFrame(tick);
         return () => cancelAnimationFrame(raf.current);
     }, [game, nail?.hits, nail?.done]);                                // eslint-disable-line react-hooks/exhaustive-deps
+    // --- Darts: das Fadenkreuz wandert über die Scheibe, „Wurf!" setzt den Pfeil dorthin (mit etwas Streuung) ---
+    useEffect(() => {
+        if (game !== 'darts' || !darts || darts.done) return undefined;
+        const t0 = performance.now(), ph = Math.random() * 6, sp = 1 + darts.hits.length * 0.18;
+        const tick = () => {
+            const t = (performance.now() - t0) / 1000 * sp;
+            aimRef.current = { x: Math.sin(t * 1.7 + ph) * 62 + Math.sin(t * 4.1) * 16, y: Math.sin(t * 2.3 + ph * 0.7) * 62 + Math.cos(t * 3.3) * 16 };
+            setDarts(d => (d && !d.done ? { ...d, aim: aimRef.current } : d));
+            raf.current = requestAnimationFrame(tick);
+        };
+        raf.current = requestAnimationFrame(tick);
+        return () => cancelAnimationFrame(raf.current);
+    }, [game, darts?.hits.length, darts?.done]);                      // eslint-disable-line react-hooks/exhaustive-deps
+    const startDarts = () => setDarts({ hits: [], aim: { x: 0, y: 0 }, done: false, text: 'Drei Pfeile – wirf, wenn das Fadenkreuz gut steht.' });
+    const throwDart = () => {
+        const x = aimRef.current.x + (Math.random() - 0.5) * 7, y = aimRef.current.y + (Math.random() - 0.5) * 7;
+        const sc = dartScore(x, y), hits = [...darts.hits, { x, y, ...sc }], total = hits.reduce((a, h) => a + h.pts, 0);
+        if (hits.length >= 3) { if (total) onScore(total); setDarts({ hits, aim: aimRef.current, done: true, text: `${sc.name} – zusammen ${total}. ${total >= 100 ? 'Stark geworfen!' : total >= 50 ? 'Ordentlich.' : 'Da geht mehr.'}${total ? ` +${total} Punkte` : ''}` }); }
+        else setDarts({ ...darts, hits, text: `${sc.name} – bisher ${total}` });
+    };
     const startNail = () => setNail({ depth: 0, hits: 0, pos: 0, done: false, text: 'Schlag zu, wenn der Zeiger in der Mitte steht – drei Schläge.' });
     const strike = () => {
         const acc = 1 - Math.min(1, Math.abs(posRef.current) / 0.85);       // 1 = genau Mitte
@@ -890,6 +949,7 @@ const HutGames = ({ onScore, compact }) => {
         <div style={{ display: 'flex', gap: 8, pointerEvents: 'auto' }}>
             <button style={small} onClick={() => { setGame('cards'); deal(); }}>17 und 4</button>
             <button style={small} onClick={() => { setGame('nail'); startNail(); }}>Nageln</button>
+            <button style={small} onClick={() => { setGame('darts'); startDarts(); }}>Darts</button>
         </div>
     );
     const stage = { position: 'fixed', inset: 0, zIndex: 20, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: '5vh', boxSizing: 'border-box', pointerEvents: 'none' };   // unten am Tisch – das Fenster bleibt frei
@@ -921,6 +981,23 @@ const HutGames = ({ onScore, compact }) => {
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 8 }}>
                 {!nail.done ? <button style={{ ...small, padding: '12px 26px', border: '1px solid rgba(252,211,77,0.75)' }} onPointerDown={strike}>Schlag!</button>
                             : <button style={small} onClick={startNail}>Noch einmal</button>}
+                <button style={{ ...small, opacity: 0.8 }} onClick={() => setGame(null)}>Aufhören</button>
+            </div>
+        </div></div></>
+    );
+    if (game === 'darts' && darts) return (
+        <><HutScene /><div style={stage}><div style={panel}>
+            <div style={label}>Stammtisch · Darts</div>
+            <svg viewBox="-112 -112 224 224" style={{ width: compact ? 'min(64vw, 230px)' : 230, height: 'auto', margin: '8px auto 4px', display: 'block' }}>
+                <DartBoard />
+                {darts.hits.map((h, i) => (<g key={i}><circle cx={h.x} cy={h.y} r="3.2" fill="#fcd34d" stroke="#1b1b1b" strokeWidth="1" /><line x1={h.x} y1={h.y} x2={h.x + 7} y2={h.y - 9} stroke="#fcd34d" strokeWidth="1.6" /></g>))}
+                {!darts.done && (<g stroke="#ffffff" strokeWidth="1.4" fill="none" opacity="0.95"><circle cx={darts.aim.x} cy={darts.aim.y} r="6" /><line x1={darts.aim.x - 10} y1={darts.aim.y} x2={darts.aim.x + 10} y2={darts.aim.y} /><line x1={darts.aim.x} y1={darts.aim.y - 10} x2={darts.aim.x} y2={darts.aim.y + 10} /></g>)}
+            </svg>
+            <div style={{ ...label, marginBottom: 6 }}>Pfeil {Math.min(3, darts.hits.length + (darts.done ? 0 : 1))} von 3 · {darts.hits.reduce((a, h) => a + h.pts, 0)} Punkte</div>
+            <div style={{ fontSize: 12.5, lineHeight: 1.4, minHeight: 20 }}>{darts.text}</div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 8 }}>
+                {!darts.done ? <button style={{ ...small, padding: '12px 26px', border: '1px solid rgba(252,211,77,0.75)' }} onPointerDown={throwDart}>Wurf!</button>
+                             : <button style={small} onClick={startDarts}>Noch einmal</button>}
                 <button style={{ ...small, opacity: 0.8 }} onClick={() => setGame(null)}>Aufhören</button>
             </div>
         </div></div></>

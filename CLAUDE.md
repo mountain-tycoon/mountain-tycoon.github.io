@@ -158,7 +158,8 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   ausgedreht ist – dann gibt es Namen und Punkte (Pipe ×1,5), sonst einen Sturz (`crashT`).
 - Einkehr: nahe einem Gastro-Gebäude (`HUT_NAMES`) bietet das HUD „Einkehren" an (`toggleHut`): Ski geschultert,
   die Kamera kreist langsam um die Stelle, Blick durch Ziehen drehbar. Dazu zwei Stammtisch-Spiele im HUD (`HutGames`
-  in `World3D.jsx`): „17 und 4" gegen den Wirt und Nageln (Zeiger pendelt, in der Mitte zuschlagen, drei Schläge).
+  in `World3D.jsx`): „17 und 4" gegen den Wirt, Nageln (Zeiger pendelt, in der Mitte zuschlagen, drei Schläge)
+  und Darts (Fadenkreuz wandert über die Scheibe, drei Pfeile; `dartScore` wertet nach echter Scheibe).
   Gespielt wird um Punkte (`skiAddScore`). Solange ein Spiel läuft, liegt die gezeichnete Stube dahinter (`HutScene`: SVG mit
   CSS-Bewegung – Feuer im Ofen, Schneefall und Sessel vor dem Fenster, pendelnde Lampe, Uhr, dampfende Krüge).
 - Ton: `SkiSound.js` erzeugt alles aus Rauschen und Summern (Fahrtwind, Kanten, Liftsurren, Landung), keine
