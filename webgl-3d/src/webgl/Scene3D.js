@@ -1044,6 +1044,40 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
         lg.setAttribute('position', new THREE.Float32BufferAttribute(lpos, 3)); lg.setIndex(lidx); lg.computeVertexNormals();
         const lm = new THREE.Mesh(lg, roadLineMat); lm.frustumCulled = false; scene.add(lm);
     };
+    /**
+     * Tunnelportal am Kartenrand: die Zufahrt kommt aus dem Berg, statt am Rand aus dem Nichts aufzutauchen. Portal
+     * aus Beton mit dunkler Röhre, darüber und dahinter ein verschneiter Hügel, der bis ins Umland reicht.
+     * `edge` = letzter Punkt der Straße (am Rand), `before` = ein Punkt kurz davor – daraus die Richtung.
+     */
+    const addTunnelPortal = (edge, before, width) => {
+        let dx = edge.gx - before.gx, dy = edge.gy - before.gy; const dl = Math.hypot(dx, dy);
+        if (dl < 1e-3) return;
+        dx /= dl; dy /= dl;                                  // zeigt hinaus (in den Berg)
+        const IN = 5;                                        // so weit liegt der Portalmund vor dem Straßenende
+        const mgx = edge.gx - dx * IN, mgy = edge.gy - dy * IN, mp = worldPosSmooth(mgx, mgy);
+        const g = new THREE.Group();
+        g.position.set(mp.x, mp.y, mp.z); g.rotation.y = Math.atan2(dx, dy);       // lokal +z = in den Berg
+        const conc = new THREE.MeshStandardMaterial({ color: 0xc3c8cf, roughness: 0.9, emissive: 0x4a4f57, emissiveIntensity: 0.5 });   // hell und leicht selbstleuchtend: im Schatten wirkte der Beton sonst schwarz
+        const dark = new THREE.MeshBasicMaterial({ color: 0x06080b, fog: false });
+        const W = width + 2.2, H = 4.2, D = 7.5;
+        // Röhre: innen schwarz, außen vom Hügel verdeckt
+        const tube = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), dark); tube.position.set(0, H / 2 - 0.2, D / 2 + 0.05); g.add(tube);
+        // Portal: zwei Wangen, ein Sturz mit Gesims, Flügelmauern
+        for (const sx of [-1, 1]) {
+            const cheek = new THREE.Mesh(new THREE.BoxGeometry(1.1, H + 1.4, 3.8), conc); cheek.position.set(sx * (W / 2 + 0.55), (H + 1.4) / 2 - 0.4, 1.5); cheek.castShadow = true; g.add(cheek);
+            const wing = new THREE.Mesh(new THREE.BoxGeometry(5.5, 3.2, 0.7), conc); wing.position.set(sx * (W / 2 + 3.4), 1.2, 1.2); wing.rotation.y = sx * 0.5; wing.rotation.z = sx * -0.16; g.add(wing);
+        }
+        const lintel = new THREE.Mesh(new THREE.BoxGeometry(W + 2.2, 1.5, 3.8), conc); lintel.position.set(0, H + 0.55, 1.5); lintel.castShadow = true; g.add(lintel);
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(W + 2.8, 0.3, 4.2), conc); cap.position.set(0, H + 1.45, 1.5); g.add(cap);
+        const lamp = new THREE.Mesh(new THREE.BoxGeometry(W * 0.5, 0.1, 0.25), new THREE.MeshStandardMaterial({ color: 0xffe9b0, emissive: 0xffd27a, emissiveIntensity: 1.4 })); lamp.position.set(0, H - 0.35, 0.9); g.add(lamp);
+        // Hügel über dem Tunnel: halbe, flachgedrückte Kugel im Ton der Schneedecke
+        const hillMat = new THREE.MeshStandardMaterial({ color: 0xeef2f7, roughness: 0.95 });
+        try { matchSnowLook(hillMat, snowU, 'snow-look-tunnel'); } catch { /* ohne Abgleich schlicht weiß */ }
+        const hill = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2), hillMat);
+        hill.scale.set(W * 3.3, H + 4.2, 10); hill.position.set(0, -0.8, 10.4);        // breit auslaufend, aber hoch genug, dass die Röhre ganz darunter verschwindet hill.receiveShadow = true; g.add(hill);
+        scene.add(g);
+        roadDiscs.push({ mesh: g, gx: mgx, gy: mgy, off: 0 });        // setzt sich mit dem Gelände neu auf
+    };
     /** Runde Asphaltplatte (Wendeplatz am Ende einer Zufahrt). */
     const addRoadDisc = (gx, gy, radius) => {
         const p = worldPosSmooth(gx, gy);
@@ -3092,6 +3126,54 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
             }
             return best;
         };
+        // ===== FAHRMODELL DER AUTOS UND BUSSE =====
+        // Gefahren wird mit echtem Tempo statt in fester Zeit über die Strecke: anfahren und bremsen, vor Kurven und
+        // vor dem Ziel langsamer, Abstand zum Vordermann, rechts auf der eigenen Spur. Der Wagen folgt dem Gefälle
+        // (Nase hoch/runter) und neigt sich leicht in die Kurve. `dir` −1 = hinein (p sinkt), +1 = hinaus.
+        const CAR_LANE = 0.85;
+        const pathLen = (rp) => { if (rp._L == null) { let L = 0; for (let i = 1; i < rp.length; i++) L += Math.hypot(rp[i].gx - rp[i - 1].gx, rp[i].gy - rp[i - 1].gy); rp._L = Math.max(1, L * tile); } return rp._L; };
+        const pathHead = (rp, p, dir) => {
+            const a = roadAt(rp, Math.max(0, Math.min(1, p - dir * 0.012))), b = roadAt(rp, Math.max(0, Math.min(1, p + dir * 0.012)));
+            return Math.atan2(b.gx - a.gx, b.gy - a.gy);
+        };
+        const carDrive = (c, rp, dir, dt, pEnd, vmax) => {
+            const L = pathLen(rp), key = dir + ':' + pEnd;
+            if (c._drv !== key || c._rp !== rp) { c._drv = key; c._rp = rp; c.v = dir < 0 ? vmax * 0.85 : 0; c._yaw = null; }
+            c._dir = dir;
+            const hd = pathHead(rp, c.p, dir);
+            // Kurve voraus (rund sieben Einheiten): je enger, desto langsamer
+            const ahead = Math.max(0, Math.min(1, c.p + dir * 7 / L));
+            let bend = pathHead(rp, ahead, dir) - hd; bend = Math.abs(Math.atan2(Math.sin(bend), Math.cos(bend)));
+            let want = vmax / (1 + bend * 2.4);
+            // rechtzeitig vor dem Ziel abbremsen
+            const dEnd = Math.abs(c.p - pEnd) * L;
+            want = Math.min(want, Math.sqrt(2 * 3.5 * dEnd) + 1.0);
+            // Abstand zum Vordermann auf derselben Strecke und in derselben Richtung
+            for (const o of arrCars) {
+                if (o === c || o._rp !== rp || o._dir !== dir || !o.mesh.visible || (o.phase !== 'in' && o.phase !== 'out' && o.phase !== 'stop')) continue;      // auch hinter einem haltenden Bus anstellen
+                const gap = (o.p - c.p) * dir * L;
+                if (gap > 0 && gap < 9) want = Math.min(want, Math.max(0, (gap - (o.isBus ? 4.4 : 3.2)) * 1.4));
+            }
+            const dv = want - c.v;
+            c.braking = dv < -0.4;
+            c.v += Math.max(-7 * dt, Math.min(2.6 * dt, dv));
+            if (c.v < 0) c.v = 0;
+            c.p += dir * c.v * dt / L;
+            if ((dir < 0 && c.p < pEnd) || (dir > 0 && c.p > pEnd)) c.p = pEnd;
+            // Lage: rechts der Mittellinie, Nase am Gefälle, leichte Neigung in der Kurve
+            const g = roadAt(rp, c.p), h2 = pathHead(rp, c.p, dir), hx = Math.sin(h2), hz = Math.cos(h2);
+            const cx = g.gx * tile - half - hz * CAR_LANE, cz = g.gy * tile - half + hx * CAR_LANE;
+            const wp = xzToPos(cx, cz), wf = xzToPos(cx + hx * 0.9, cz + hz * 0.9), wb = xzToPos(cx - hx * 0.9, cz - hz * 0.9);
+            if (c._yaw == null) c._yaw = h2;
+            let dy = h2 - c._yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+            const turn = Math.max(-3.2 * dt, Math.min(3.2 * dt, dy));
+            c._yaw += turn;
+            c.mesh.rotation.order = 'YXZ';
+            c.mesh.rotation.set(-Math.atan2(wf.y - wb.y, 1.8), c._yaw, Math.max(-0.07, Math.min(0.07, -(turn / Math.max(1e-4, dt)) * c.v * 0.012)));
+            c.mesh.position.set(wp.x, (wf.y + wb.y) / 2 + 0.05, wp.z); c.mesh.visible = true;
+            if (c.mesh.userData.setBrake) c.mesh.userData.setBrake(c.braking);
+            return Math.abs(c.p - pEnd) < 1e-4;
+        };
         let _lastT2 = 0, _lastBuildN = -1;
         updaters.push((t) => {
             sim._tNow = t;
@@ -3176,12 +3258,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                     }
                     const stopP = (bstop && c._stopP != null && c._stopP >= 0) ? c._stopP : -1;
                     if (c.phase === 'in') {                       // Anfahrt über die Straße
-                        c.p = Math.max(0, c.p - dt2 / 9);
-                        const g = roadAt(rp, c.p), wp = xzToPos(g.gx * tile - half, g.gy * tile - half);
-                        c.mesh.position.set(wp.x, wp.y + 0.05, wp.z); c.mesh.visible = true;
-                        const ga = roadAt(rp, Math.max(0, c.p - 0.03));
-                        const wa = xzToPos(ga.gx * tile - half, ga.gy * tile - half);
-                        faceTo(c.mesh, wa.x, wa.z);
+                        carDrive(c, rp, -1, dt2, stopP >= 0 ? stopP : 0, 6.5);
                         // Haltestelle erreicht -> anhalten
                         if (stopP >= 0 && c.p <= stopP) {
                             c.p = stopP; c.phase = 'stop'; c.timer = BUS_DWELL; c._dropped = false;
@@ -3204,14 +3281,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                         continue;
                     }
                     // 'out' — wieder hinaus und Runde neu beginnen
-                    c.p = Math.min(1, (c.p || 0) + dt2 / 9);
-                    {
-                        const g = roadAt(rp, c.p), wp = xzToPos(g.gx * tile - half, g.gy * tile - half);
-                        c.mesh.position.set(wp.x, wp.y + 0.05, wp.z); c.mesh.visible = true;
-                        const ga = roadAt(rp, Math.min(1, c.p + 0.03));
-                        const wa = xzToPos(ga.gx * tile - half, ga.gy * tile - half);
-                        faceTo(c.mesh, wa.x, wa.z);
-                    }
+                    carDrive(c, rp, 1, dt2, 1, 6.5);
                     if (c.p >= 1) {
                         if (c._dropped) sim.carActive = Math.max(0, sim.carActive - c.nppl);
                         c.phase = 'wait'; c.timer = 20 + Math.random() * 30; c.mesh.visible = false;
@@ -3277,13 +3347,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 const spot = lot.spots[c._spotIdx % lot.spots.length];
                 c._spot = spot; c._padY = lpadY; c._tpos = lot.ticketPos || ticketPos;
                 if (c.phase === 'in') {
-                    c.p = Math.max(0, c.p - dt2 / 10);
-                    const g = roadAt(rp, c.p), wp = xzToPos(g.gx * tile - half, g.gy * tile - half);
-                    c.mesh.position.set(wp.x, wp.y + 0.05, wp.z); c.mesh.visible = true;
-                    const ga = roadAt(rp, Math.max(0, c.p - 0.03));
-                    const wa = xzToPos(ga.gx * tile - half, ga.gy * tile - half);
-                    faceTo(c.mesh, wa.x, wa.z);
-                    if (c.p <= 0.001) { c.phase = 'park'; c.timer = 1.4; }
+                    carDrive(c, rp, -1, dt2, 0, 8.5);
+                    if (c.p <= 0.001) { c.phase = 'park'; c.timer = 1.4; c.mesh.rotation.x = 0; c.mesh.rotation.z = 0; if (c.mesh.userData.setBrake) c.mesh.userData.setBrake(false); }
                     continue;
                 }
                 if (c.phase === 'park') {                        // Einparken
@@ -3358,14 +3423,7 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                     continue;
                 }
                 // 'out' — Heimfahrt
-                c.p = Math.min(1, (c.p || 0) + dt2 / 10);
-                {
-                    const g = roadAt(rp, c.p), wp = xzToPos(g.gx * tile - half, g.gy * tile - half);
-                    c.mesh.position.set(wp.x, wp.y + 0.05, wp.z); c.mesh.visible = true;
-                    const ga = roadAt(rp, Math.min(1, c.p + 0.03));
-                    const wa = xzToPos(ga.gx * tile - half, ga.gy * tile - half);
-                    faceTo(c.mesh, wa.x, wa.z);
-                }
+                carDrive(c, rp, 1, dt2, 1, 8.5);
                 if (c.p >= 1) { c.phase = 'wait'; c.timer = 10 + Math.random() * 25; c.mesh.visible = false; }
                 if (c.phase === 'in' || c.phase === 'out') c._spot = null;
             }
@@ -8622,8 +8680,8 @@ export function createScene3D(canvas, world, gridSize, theme = {}, level = {}, o
                 const e0 = mainRoad[Math.max(0, k0)];
                 if (e0) addRoadDisc(e0.gx, e0.gy, 3.1);
             }
-            // … und am Kartenrand läuft sie ins Umland weiter.
-            if (mainRoad.length > 2) addRoadBeyond(mainRoad[mainRoad.length - 1], mainRoad[mainRoad.length - 3], 4.2);
+            // … und am Kartenrand kommt sie aus einem Tunnel.
+            if (mainRoad.length > 2) addTunnelPortal(mainRoad[mainRoad.length - 1], mainRoad[mainRoad.length - 3], 4.2);
             const entryKeyV = roadKey(bx, by);
             roadEntries.push({ key: entryKeyV, gx: bx, gy: by });
             if (!carEntryKey) carEntryKey = entryKeyV;

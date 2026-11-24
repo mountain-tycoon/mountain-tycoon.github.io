@@ -265,6 +265,8 @@ export function createSkiRun(deps) {
     const ctGeo = new THREE.BufferGeometry();
     ctGeo.setAttribute('position', new THREE.BufferAttribute(ctPos, 3));
     ctGeo.setAttribute('uv', new THREE.BufferAttribute(ctUv, 2));
+    // Normalen nach oben: ohne sie rechnet das Material kein Licht – das Band war dann schwarz
+    { const nrm = new Float32Array(CT_N * 2 * 3); for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1; ctGeo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3)); }
     { const idx = []; for (let i = 0; i < CT_N - 1; i++) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); } ctGeo.setIndex(idx); }
     const ctTex = (() => {                      // Rillen der Walze: feine Streifen längs der Fahrt
         const c = document.createElement('canvas'); c.width = 64; c.height = 8;
@@ -273,7 +275,7 @@ export function createSkiRun(deps) {
         const t2 = new THREE.CanvasTexture(c); t2.wrapS = t2.wrapT = THREE.RepeatWrapping;
         return t2;
     })();
-    const catTrail = new THREE.Mesh(ctGeo, new THREE.MeshStandardMaterial({ map: ctTex, roughness: 0.8, side: THREE.DoubleSide,
+    const catTrail = new THREE.Mesh(ctGeo, new THREE.MeshStandardMaterial({ map: ctTex, color: 0xdde7f5, roughness: 0.9, side: THREE.DoubleSide, emissive: 0x39414d, emissiveIntensity: 0.35,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
     catTrail.frustumCulled = false; catTrail.receiveShadow = true;
     const ctPts = [];                           // Mittelpunkte der Spur (für „hier ist gewalzt")

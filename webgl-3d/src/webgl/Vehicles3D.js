@@ -28,36 +28,50 @@ function wheels(g, w, l, y) {
 }
 
 export function makeCar(colorIdx = 0) {
+    // Drei Bauformen (Kombi, Geländewagen, Limousine), dazu je nach Wagen Dachbox, Skiträger oder Schnee auf dem Dach.
+    // `userData.setBrake(an)` lässt die Rücklichter beim Bremsen aufleuchten.
     const g = new THREE.Group();
-    const w = 0.9, l = 2.0;
+    const kind = colorIdx % 3, suv = kind === 1, sedan = kind === 2;
+    const w = suv ? 0.98 : 0.9, l = suv ? 2.1 : 2.0, lift = suv ? 0.07 : 0, top = suv ? 0.34 : 0.26;
     const col = CAR_COLORS[colorIdx % CAR_COLORS.length];
     const bodyMat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.34, metalness: 0.35, envMapIntensity: 0.4 });  // Autolack
-    // untere Karosserie
-    const lower = new THREE.Mesh(new THREE.BoxGeometry(w, 0.32, l), bodyMat);
-    lower.position.y = 0.28; lower.castShadow = true; g.add(lower);
-    // Motorhaube/Heck (flacher Aufbau)
-    const mid = new THREE.Mesh(new THREE.BoxGeometry(w * 0.98, 0.16, l * 0.62), bodyMat);
-    mid.position.set(0, 0.46, -0.03); g.add(mid);
-    // Dach (Greenhouse)
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(w * 0.8, 0.26, l * 0.42), bodyMat);
-    roof.position.set(0, 0.66, -0.05); roof.castShadow = true; g.add(roof);
+    const trim = new THREE.MeshStandardMaterial({ color: 0x1b1f25, roughness: 0.8 });
+    const add = (geo, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.x = rx; g.add(m); return m; };
+    // untere Karosserie mit abgesetzten Stoßfängern
+    add(new THREE.BoxGeometry(w, 0.32, l * 0.94), bodyMat, 0, 0.28 + lift, 0).castShadow = true;
+    add(new THREE.BoxGeometry(w * 0.96, 0.14, 0.1), trim, 0, 0.2 + lift, l * 0.48);
+    add(new THREE.BoxGeometry(w * 0.96, 0.14, 0.1), trim, 0, 0.2 + lift, -l * 0.48);
+    add(new THREE.BoxGeometry(w * 1.02, 0.06, l * 0.7), trim, 0, 0.14 + lift, 0);
+    // Motorhaube (leicht abfallend) und Schulterlinie
+    add(new THREE.BoxGeometry(w * 0.96, 0.12, l * 0.3), bodyMat, 0, 0.45 + lift, l * 0.3, 0.07);
+    add(new THREE.BoxGeometry(w * 0.98, 0.14, l * (sedan ? 0.5 : 0.64)), bodyMat, 0, 0.46 + lift, sedan ? -0.06 : -0.16);
+    // Dach (Greenhouse): Kombi und Geländewagen reichen bis ans Heck, die Limousine hat einen Kofferraum
+    const roofL = sedan ? l * 0.36 : l * 0.5, roofZ = sedan ? -0.02 : -0.16, roofY = 0.53 + lift + top / 2;
+    add(new THREE.BoxGeometry(w * 0.82, top, roofL), bodyMat, 0, roofY, roofZ).castShadow = true;
     // getönte Scheiben: Front, Heck, zwei Seiten
     const glass = new THREE.MeshStandardMaterial({ color: 0x203040, roughness: 0.08, metalness: 0.5, transparent: true, opacity: 0.85 });
-    const front = new THREE.Mesh(new THREE.BoxGeometry(w * 0.76, 0.24, 0.05), glass);
-    front.position.set(0, 0.65, l * 0.16); front.rotation.x = -0.28; g.add(front);
-    const rear = new THREE.Mesh(new THREE.BoxGeometry(w * 0.76, 0.22, 0.05), glass);
-    rear.position.set(0, 0.65, -l * 0.26); rear.rotation.x = 0.28; g.add(rear);
-    for (const sx of [-1, 1]) {
-        const side = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.2, l * 0.34), glass);
-        side.position.set(sx * w * 0.4, 0.65, -0.05); g.add(side);
-    }
-    // Scheinwerfer
+    add(new THREE.BoxGeometry(w * 0.76, top * 0.92, 0.05), glass, 0, roofY - 0.01, roofZ + roofL / 2 + 0.03, -0.32);
+    add(new THREE.BoxGeometry(w * 0.76, top * 0.85, 0.05), glass, 0, roofY - 0.01, roofZ - roofL / 2 - 0.02, sedan ? 0.4 : 0.14);
+    for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.04, top * 0.72, roofL * 0.86), glass, sx * w * 0.41, roofY, roofZ);
+    for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.06, 0.05, 0.1), trim, sx * w * 0.53, 0.52 + lift, roofZ + roofL / 2 + 0.02);   // Spiegel
+    // Scheinwerfer, Kennzeichen, Rücklichter
     const hl = new THREE.MeshStandardMaterial({ color: 0xfff6c8, emissive: 0xffe07a, emissiveIntensity: 0.6 });
-    for (const sx of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.04), hl); m.position.set(sx * w * 0.3, 0.3, l * 0.5); g.add(m); }
-    // Rücklichter
-    const tl = new THREE.MeshStandardMaterial({ color: 0xcc2222, emissive: 0x771111, emissiveIntensity: 0.5 });
-    for (const sx of [-1, 1]) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.04), tl); m.position.set(sx * w * 0.3, 0.3, -l * 0.5); g.add(m); }
-    wheels(g, w, l, 0.19);
+    for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.18, 0.09, 0.04), hl, sx * w * 0.32, 0.36 + lift, l * 0.475);
+    const plate = new THREE.MeshStandardMaterial({ color: 0xeef1f5, roughness: 0.6 });
+    add(new THREE.BoxGeometry(0.26, 0.07, 0.02), plate, 0, 0.22 + lift, l * 0.535);
+    add(new THREE.BoxGeometry(0.26, 0.07, 0.02), plate, 0, 0.3 + lift, -l * 0.535);
+    const tl = new THREE.MeshStandardMaterial({ color: 0xcc2222, emissive: 0xaa1111, emissiveIntensity: 0.45 });
+    for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.16, 0.09, 0.04), tl, sx * w * 0.32, 0.36 + lift, -l * 0.475);
+    g.userData.setBrake = (on) => { tl.emissiveIntensity = on ? 2.4 : 0.45; };
+    // Wintergepäck: Dachbox, Ski auf dem Träger oder einfach Schnee auf dem Dach
+    const extra = (colorIdx >> 1) % 4, roofTop = roofY + top / 2;
+    if (extra === 0) add(new THREE.CapsuleGeometry(0.13, roofL * 0.62, 3, 8), trim, 0, roofTop + 0.12, roofZ, Math.PI / 2).scale.set(2.1, 1, 0.75);
+    else if (extra === 1) {
+        for (const z of [-0.2, 0.2]) add(new THREE.BoxGeometry(w * 0.8, 0.03, 0.04), trim, 0, roofTop + 0.05, roofZ + z * roofL);
+        const skiCols = [0xe11d48, 0x2563eb, 0xfacc15, 0x16a34a];
+        for (let k = 0; k < 3; k++) add(new THREE.BoxGeometry(0.07, 0.025, roofL * 1.15), new THREE.MeshStandardMaterial({ color: skiCols[(colorIdx + k) % 4], roughness: 0.5 }), (k - 1) * 0.13, roofTop + 0.08, roofZ);
+    } else if (extra === 2) add(new THREE.BoxGeometry(w * 0.78, 0.07, roofL * 0.92), new THREE.MeshStandardMaterial({ color: 0xf4f7fb, roughness: 0.95 }), 0, roofTop + 0.035, roofZ);
+    wheels(g, w, l, 0.19 + lift * 0.4);
     return g;
 }
 

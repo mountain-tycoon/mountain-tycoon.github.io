@@ -237,7 +237,7 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
   daraus ein Schneeband, bis der Vorrat leer ist. Das Band ist die Walzspur und vergeht mit ihr; für die Spielfigur
   zählt es als Schnee (`onCatTrack`).
 - Abseits der Pisten hinterlässt die eigene Raupe eine Walzspur (`stepCatTrail`: geripptes Band der letzten rund
-  300 m); darauf fährt es sich wie auf der Piste (`onCatTrack` zählt in `onPisteAt` mit).
+  300 m; das Band braucht sein Normalen-Attribut – ohne es war die Spur schwarz); darauf fährt es sich wie auf der Piste (`onCatTrack` zählt in `onPisteAt` mit).
 
 ## Rettung selbst fahren
 - Nahe einer Sanitätsstation steht das Skidoo bereit, nahe einer Klinik der Heli (`catOffer.kind`, dieselbe Taste P;
@@ -452,8 +452,14 @@ npm run build                            # muss fehlerfrei durchlaufen, bevor et
 - **Aussehen** (`roadRibbon`): mittelgrauer Asphalt (dunkler wirkt im Bild wie ein Loch), gestrichelte Mittellinie,
   Schneewall je Seite (`bankMat`, an den Schnee angeglichen). An Einmündungen nehmen sich die Bänder gegenseitig
   die Wallstücke heraus (`roadLines`, `openBanks`) – egal, welche Straße zuerst da war.
-- **Zufahrt:** am Ortseingang ein Wendeplatz (`addRoadDisc`), am Kartenrand läuft die Straße im Umland weiter
-  (`addRoadBeyond`, ohne Bett, nur Kulisse – Autos erscheinen weiterhin am Rand).
+- **Zufahrt:** am Ortseingang ein Wendeplatz (`addRoadDisc`), am Kartenrand kommt die Straße aus einem Tunnel
+  (`addTunnelPortal`: Betonportal mit dunkler Röhre, darüber ein verschneiter Buckel; der Portalmund liegt ein Stück
+  vor dem Straßenende, die Autos erscheinen also im Dunkeln). `addRoadBeyond` (Straße ins Umland) gibt es noch, wird
+  aber nicht mehr benutzt – eine Straße, die am Rand einfach weiterlief, wirkte wie aus dem Nichts.
+- **Fahrmodell der Autos und Busse** (`carDrive`): echtes Tempo statt fester Fahrzeit – anfahren, vor Kurven und vor dem
+  Ziel bremsen, Abstand zum Vordermann (auch hinter einem haltenden Bus), rechts auf der eigenen Spur (`CAR_LANE`),
+  Nase am Gefälle, leichte Neigung in der Kurve, Bremslicht (`userData.setBrake`). `makeCar` hat drei Bauformen und
+  Wintergepäck (Dachbox, Ski, Schnee auf dem Dach).
 - **Stellplätze** liegen genau auf den aufgemalten Buchten von `makeParking` (beide Reihen: 8 je gebautem Parkplatz,
   10 am Ortsparkplatz). `lot.occ` zählt Autos, `lot.cap` Gäste – „voll" heißt: jeder Stellplatz belegt
   (`lot.taken.size >= lot.spots.length`) und kürzlich wurde ein Auto abgewiesen (`sim.parkingRejects`).
